@@ -146,11 +146,12 @@ async fn gateway_fallback_model_survives_cache_recording_and_replay() {
 
 #[tokio::test]
 async fn invalid_json_and_refusals_keep_usage_and_error_classification() {
-    for refused in [false, true] {
+    for refusal_reason in [None, Some("refusal"), Some("content_filter")] {
+        let refused = refusal_reason.is_some();
         let gateway = gateway();
         let mut response = reply("invalid JSON").unwrap();
-        if refused {
-            response.finish_reason = Some("refusal".into());
+        if let Some(reason) = refusal_reason {
+            response.finish_reason = Some(reason.into());
         }
         let transport = GatewayTransport::new(gateway.clone(), Scripted::new(vec![Ok(response)]));
         let environment = Environment::new();

@@ -171,7 +171,7 @@ impl Anthropic {
         let response = self.post(&body).await?;
         let mut answer = ChatResponse::default();
         let mut usage = TokenUsage::default();
-        crate::sse::read_events(response, streaming.idle_timeout, |event| {
+        let stopped = crate::sse::read_events(response, streaming.idle_timeout, |event| {
             let Ok(data) = serde_json::from_str::<Value>(&event.data) else {
                 return Ok(false);
             };
@@ -209,6 +209,12 @@ impl Anthropic {
             Ok(false)
         })
         .await?;
+        if !stopped {
+            return Err(ModelError::transient(
+                None,
+                "Messages stream ended before message_stop",
+            ));
+        }
         usage.total_tokens = match (usage.prompt_tokens, usage.completion_tokens) {
             (Some(input), Some(output)) => Some(input + output),
             _ => None,
@@ -221,7 +227,7 @@ impl Anthropic {
 impl Provider for Anthropic {
     fn cache_namespace(&self) -> String {
         format!(
-            "anthropic|{}|{}|{:?}|{}|{}",
+            "anthropic-v2|{}|{}|{:?}|{}|{}",
             self.base_url, self.version, self.betas, self.sampling, self.default_max_tokens
         )
     }
@@ -382,6 +388,23 @@ mod tests {
         let invalid =
             stream_error(&json!({ "type": "error", "error": { "type": "invalid_request_error" } }));
         assert!(!invalid.is_transient());
+    }
+
+    #[tokio::test]
+    async fn a_stream_without_message_stop_is_transient() {
+        let chunks = vec![
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"ok\\\":true}\"}}\n\n".into(),
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}\n\n".into(),
+        ];
+        let (base, server) = crate::test_http::serve_once(200, true, chunks, Duration::ZERO).await;
+        let result = Anthropic::with_base_url(base, "key")
+            .complete(&request(), Some(Streaming::default()))
+            .await;
+        assert!(
+            matches!(result, Err(ModelError::Transient { .. })),
+            "{result:?}"
+        );
+        server.await.unwrap();
     }
 
     #[tokio::test]

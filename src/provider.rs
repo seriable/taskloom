@@ -67,7 +67,8 @@ pub struct EmbeddingResponse {
 pub struct ChatResponse {
     pub content: String,
     pub usage: Option<TokenUsage>,
-    /// `stop`, `length`, ...
+    /// `stop`, `length`, ...; providers normalize content refusals to
+    /// `refusal`, so the gateway can keep usage before rejecting the answer.
     pub finish_reason: Option<String>,
 }
 
@@ -290,7 +291,10 @@ impl<P: Provider> GatewayTransport<P> {
                     Ok(AttemptOutput::new((attempt.model, response), usage))
                 },
                 |(model, response)| {
-                    if response.finish_reason.as_deref() == Some("refusal") {
+                    if matches!(
+                        response.finish_reason.as_deref(),
+                        Some("refusal" | "content_filter")
+                    ) {
                         return Err(ModelError::ContentRejected {
                             detail: format!("{label}: the model refused to answer"),
                         });

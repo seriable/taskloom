@@ -19,6 +19,8 @@
 | 不同采样参数复用旧答案 | 请求键包含格式、temperature 精确位值和输出 Token 上限 | 缓存隔离、相同参数命中、各参数独立回放、未知参数离线失败 |
 | 无效响应漏计费用 | 网关先保留响应 usage，再验证结果；失败分类、重试规则保持生效 | 无效 JSON、拒答、结构化重试及文本回退、Embedding 数量错误 |
 | 网关降级后报告原模型 | `Response` 携带实际服务模型，缓存和录制文件保存 `served_model` | 普通降级、修复、hedging、引用和 Arc 包装、缓存及离线回放 |
+| OpenAI 拒答被当作 JSON 错误 | 普通与流式拒答信号统一分类为内容拒绝，保留已报告用量 | 拒答字段、内容过滤、无需协议重试/修复、拒绝录制或缓存 |
+| 连接关闭被当作流式成功 | OpenAI 要求 `[DONE]` 或非空结束原因，Anthropic 要求 `message_stop` | 有效 JSON 提前断流仍失败；正常结束保留后续用量，完整答案可缓存和回放 |
 
 新增 API 使用默认方法兼容已有 `Transport::send` 实现。
 有内部路由的自定义 Transport 应覆盖 `send_with_metadata`，明确返回服务模型。
@@ -60,13 +62,14 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 
 验证环境：Windows（Rust/Cargo 1.99 和真实 1.86）；WSL Debian Linux（Rust/Cargo 1.95）。
 
-- 全 feature：75 个单元测试、19 个集成测试，共 94 个（含多进程测试子入口）。
+- 当前未发布代码的全 feature：82 个单元测试、19 个集成测试，共 101 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
 - feature 组合：无默认 feature、openai、anthropic、schemars 分别运行测试。
 - 格式检查、全目标/全 feature Clippy（warnings 视为错误）。
 - 全 feature 和上述各单 feature 文档构建（warnings 视为错误）。
 - basic、record_replay、production、eval 四个离线示例。
 
 新增测试位于 `tests/gateway_regressions.rs`、`tests/reliability.rs` 和 `tests/step_cache.rs`。
+Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测试模块。
 GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
 当前托管 CI 尚未完成验证；发布验证通过的是本地 Windows、真实最低 Rust 版本，以及独立 Linux 环境。
 不能把本地通过的结果描述为 GitHub CI 已通过。

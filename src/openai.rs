@@ -166,7 +166,9 @@ impl OpenAiCompatible {
         body["stream_options"] = json!({ "include_usage": true });
         let response = self.post("chat/completions", &body).await?;
         let mut answer = ChatResponse::default();
-        crate::sse::read_events(response, streaming.idle_timeout, |event| {
+        let mut refused = false;
+        let mut saw_finish_reason = false;
+        let done = crate::sse::read_events(response, streaming.idle_timeout, |event| {
             if event.data.trim() == "[DONE]" {
                 return Ok(true);
             }
@@ -174,14 +176,21 @@ impl OpenAiCompatible {
                 return Ok(false);
             };
             if let Some(choice) = chunk.get("choices").and_then(|choices| choices.get(0)) {
+                refused |= choice.get("delta").is_some_and(has_refusal);
                 if let Some(delta) = choice.pointer("/delta/content").and_then(Value::as_str) {
                     answer.content.push_str(delta);
                     if let Some(on_delta) = streaming.on_delta {
                         on_delta(delta);
                     }
                 }
-                if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
-                    answer.finish_reason = Some(reason.to_string());
+                let reason = choice
+                    .get("finish_reason")
+                    .and_then(Value::as_str)
+                    .filter(|reason| !reason.trim().is_empty());
+                saw_finish_reason |= reason.is_some();
+                refused |= matches!(reason, Some("refusal" | "content_filter"));
+                if reason.is_some() || refused {
+                    answer.finish_reason = normalized_finish_reason(reason, refused);
                 }
             }
             if let Some(usage) = chunk.get("usage").filter(|usage| !usage.is_null()) {
@@ -190,6 +199,14 @@ impl OpenAiCompatible {
             Ok(false)
         })
         .await?;
+        // Some compatible endpoints omit [DONE] but provide finish_reason.
+        // Keep reading after finish_reason so a trailing usage chunk is kept.
+        if !done && !saw_finish_reason {
+            return Err(ModelError::transient(
+                None,
+                "chat completion stream ended before [DONE] or a finish_reason",
+            ));
+        }
         Ok(answer)
     }
 
@@ -242,7 +259,7 @@ fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
 impl Provider for OpenAiCompatible {
     fn cache_namespace(&self) -> String {
         format!(
-            "openai|{}|{}|{:?}",
+            "openai-v2|{}|{}|{:?}",
             self.base_url, self.json_mode, self.image_detail
         )
     }
@@ -264,6 +281,31 @@ impl Provider for OpenAiCompatible {
         request: &'a EmbeddingRequest,
     ) -> BoxFuture<'a, Result<EmbeddingResponse, ModelError>> {
         Box::pin(self.embeddings(request))
+    }
+}
+
+fn has_refusal(message: &Value) -> bool {
+    message
+        .get("refusal")
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.trim().is_empty())
+        || message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|parts| {
+                parts
+                    .iter()
+                    .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
+            })
+}
+
+// Keep refusals in the response until gateway validation, so its reported
+// usage is accounted for before ContentRejected is returned to the runner.
+fn normalized_finish_reason(reason: Option<&str>, refused: bool) -> Option<String> {
+    if refused || matches!(reason, Some("refusal" | "content_filter")) {
+        Some("refusal".into())
+    } else {
+        reason.map(str::to_string)
     }
 }
 
@@ -290,10 +332,10 @@ fn parse_response(text: &str) -> Result<ChatResponse, ModelError> {
         usage: value
             .get("usage")
             .and_then(|usage| serde_json::from_value::<TokenUsage>(usage.clone()).ok()),
-        finish_reason: choice
-            .get("finish_reason")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        finish_reason: normalized_finish_reason(
+            choice.get("finish_reason").and_then(Value::as_str),
+            choice.get("message").is_some_and(has_refusal),
+        ),
     })
 }
 
@@ -332,6 +374,39 @@ mod tests {
         assert_eq!(response.content, "{\"a\":1}");
         assert_eq!(response.finish_reason.as_deref(), Some("stop"));
         assert_eq!(response.usage.unwrap().total_tokens, Some(8));
+    }
+
+    #[test]
+    fn refusal_signals_are_normalized_without_losing_usage() {
+        for (message, reason) in [
+            (
+                json!({"content": null, "refusal": "I cannot answer"}),
+                "stop",
+            ),
+            (
+                json!({"content": [{"type": "refusal", "refusal": "I cannot answer"}]}),
+                "stop",
+            ),
+            (json!({"content": "filtered"}), "content_filter"),
+        ] {
+            let response = parse_response(
+                &json!({
+                    "choices": [{"message": message, "finish_reason": reason}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            assert_eq!(response.finish_reason.as_deref(), Some("refusal"));
+            assert_eq!(response.usage.unwrap().total_tokens, Some(8));
+        }
+        for refusal in [Value::Null, json!(""), json!("   ")] {
+            let response = parse_response(&json!({
+                "choices": [{"message": {"content": "ok", "refusal": refusal}, "finish_reason": "stop"}]
+            }).to_string()).unwrap();
+            assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+            assert_eq!(response.content, "ok");
+        }
     }
 
     #[test]
@@ -391,6 +466,244 @@ mod tests {
             schema: None,
             schema_name: "t".into(),
             seed: None,
+        }
+    }
+
+    fn event(value: Value) -> String {
+        format!("data: {value}\n\n")
+    }
+
+    #[tokio::test]
+    async fn eof_without_a_terminal_signal_is_transient_even_for_valid_json() {
+        for (content, reason) in [
+            ("partial text", Value::Null),
+            ("{\"ok\":true}", Value::Null),
+            ("{\"ok\":true}", json!("")),
+            ("{\"ok\":true}", json!("   ")),
+        ] {
+            let (base, server) = crate::test_http::serve_once(
+                200,
+                true,
+                vec![event(
+                    json!({"choices": [{"delta": {"content": content}, "finish_reason": reason}]}),
+                )],
+                Duration::ZERO,
+            )
+            .await;
+            let result = OpenAiCompatible::new(base, "key")
+                .complete(&chat("m"), Some(Streaming::default()))
+                .await;
+            assert!(
+                matches!(result, Err(ModelError::Transient { .. })),
+                "{result:?}"
+            );
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn either_terminal_signal_is_enough_and_trailing_usage_is_retained() {
+        for done_marker in [false, true] {
+            let mut choice = json!({"delta": {"content": "complete"}});
+            if !done_marker {
+                choice["finish_reason"] = json!("stop");
+            }
+            let mut chunks = vec![
+                event(json!({"choices": [choice]})),
+                event(
+                    json!({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 3}}),
+                ),
+            ];
+            if done_marker {
+                chunks.push("data: [DONE]\n\n".into());
+            }
+            let (base, server) =
+                crate::test_http::serve_once(200, true, chunks, Duration::ZERO).await;
+            let response = OpenAiCompatible::new(base, "key")
+                .complete(&chat("m"), Some(Streaming::default()))
+                .await
+                .unwrap();
+            assert_eq!(response.content, "complete");
+            assert_eq!(response.usage.unwrap().completion_tokens, Some(3));
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn streamed_refusal_survives_a_later_stop_reason_and_keeps_usage() {
+        let chunks = vec![
+            event(json!({"choices": [{"delta": {"refusal": "I cannot answer"}}]})),
+            event(json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})),
+            event(json!({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 3}})),
+            "data: [DONE]\n\n".into(),
+        ];
+        let (base, server) = crate::test_http::serve_once(200, true, chunks, Duration::ZERO).await;
+        let response = OpenAiCompatible::new(base, "key")
+            .complete(&chat("m"), Some(Streaming::default()))
+            .await
+            .unwrap();
+        assert_eq!(response.finish_reason.as_deref(), Some("refusal"));
+        assert_eq!(response.usage.unwrap().prompt_tokens, Some(5));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_refusals_stop_the_resilient_protocol_and_keep_accounting() {
+        use crate::gateway::{GatewayConfig, ModelPrice, ModelRegistry, PriceTable};
+        use crate::{
+            Agent, Environment, Gateway, GatewayTransport, PromptTask, Protocol, Recording,
+            TaskError, TaskSpec,
+        };
+        use std::sync::Arc;
+
+        for (streaming, filtered) in [(false, false), (true, false), (false, true), (true, true)] {
+            let usage = json!({"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8});
+            let reason = if filtered { "content_filter" } else { "stop" };
+            let chunks = if streaming {
+                let delta = if filtered {
+                    json!({"content": "{\"ok\":true}"})
+                } else {
+                    json!({"refusal": "I cannot answer"})
+                };
+                vec![
+                    event(json!({"choices": [{"delta": delta}]})),
+                    event(json!({"choices": [{"delta": {}, "finish_reason": reason}]})),
+                    event(json!({"choices": [], "usage": usage})),
+                    "data: [DONE]\n\n".into(),
+                ]
+            } else {
+                let message = if filtered {
+                    json!({"content": "{\"ok\":true}"})
+                } else {
+                    json!({"content": null, "refusal": "I cannot answer"})
+                };
+                vec![json!({"choices": [{"message": message, "finish_reason": reason}], "usage": usage}).to_string()]
+            };
+            let (base, server) =
+                crate::test_http::serve_once(200, streaming, chunks, Duration::ZERO).await;
+            let gateway = Arc::new(Gateway::new(GatewayConfig {
+                models: ModelRegistry::new().with_default_fallback_chain(vec!["backup".into()]),
+                prices: PriceTable::new([ModelPrice::new("m", 1.0, 2.0)]),
+                ..Default::default()
+            }));
+            let transport =
+                GatewayTransport::new(gateway.clone(), OpenAiCompatible::new(base, "key"))
+                    .with_transient_attempts(1);
+            let store = tempfile::tempdir().unwrap();
+            let cache = store.path().join("cache");
+            let record = store.path().join("record");
+            let env = Environment::new()
+                .with_step_cache_dir(cache.clone())
+                .with_recording(Recording::Record(record.clone()));
+            let task = PromptTask::new(
+                "refusal",
+                TaskSpec::new("m", Protocol::ResilientJson, 0.0, 100)
+                    .step_cache(true)
+                    .repair(2)
+                    .deadline(Duration::from_secs(2)),
+                "system",
+                "user",
+                crate::json_value,
+            );
+            let progress = |_: &str, _: &str, _: &str| {};
+            let agent = Agent::new(&transport, &env);
+            let agent = if streaming {
+                agent.with_progress(&progress)
+            } else {
+                agent
+            };
+            let ledger = crate::ledger::CallLedger::new();
+            let result = ledger.scope(agent.run(&task)).await;
+            assert!(
+                matches!(
+                    result,
+                    Err(TaskError::Provider(ModelError::ContentRejected { .. }))
+                ),
+                "{result:?}"
+            );
+            let stats = gateway.stats();
+            assert_eq!(
+                stats.sent_attempts, 1,
+                "no protocol retry, repair or gateway fallback"
+            );
+            assert_eq!(stats.outcomes.get("content_rejected"), Some(&1));
+            assert_eq!(stats.usage.cost_micros, 11);
+            assert_eq!(ledger.snapshot().total_usage().cost_micros, 11);
+            assert!(!cache.exists());
+            assert!(!record.exists());
+            server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn only_completed_streams_are_recorded_and_cached() {
+        use crate::{
+            Agent, Environment, Gateway, GatewayTransport, PromptTask, Protocol, Recording,
+            TaskError, TaskSpec,
+        };
+        use std::sync::Arc;
+
+        for completed in [false, true] {
+            let mut chunks = vec![event(
+                json!({"choices": [{"delta": {"content": "{\"ok\":true}"}}]}),
+            )];
+            if completed {
+                chunks.push("data: [DONE]\n\n".into());
+            }
+            let (base, server) =
+                crate::test_http::serve_once(200, true, chunks, Duration::ZERO).await;
+            let transport = GatewayTransport::new(
+                Arc::new(Gateway::default()),
+                OpenAiCompatible::new(base, "key"),
+            )
+            .with_transient_attempts(1);
+            let store = tempfile::tempdir().unwrap();
+            let cache = store.path().join("cache");
+            let record = store.path().join("record");
+            let env = Environment::new()
+                .with_step_cache_dir(cache.clone())
+                .with_recording(Recording::Record(record.clone()));
+            let task = PromptTask::new(
+                "stream",
+                TaskSpec::new("m", Protocol::Json, 0.0, 100)
+                    .step_cache(true)
+                    .deadline(Duration::from_secs(2)),
+                "system",
+                "user",
+                crate::json_value,
+            );
+            let progress = |_: &str, _: &str, _: &str| {};
+            let agent = Agent::new(&transport, &env).with_progress(&progress);
+            let result = agent.run_traced(&task).await;
+            if completed {
+                assert_eq!(result.unwrap().output, json!({"ok": true}));
+                assert!(agent.run_traced(&task).await.unwrap().reused);
+                let replay = Environment::new().with_recording(Recording::Replay(record));
+                assert!(
+                    Agent::new(&transport, &replay)
+                        .run_traced(&task)
+                        .await
+                        .unwrap()
+                        .reused
+                );
+            } else {
+                assert!(
+                    matches!(
+                        result,
+                        Err(TaskError::Provider(ModelError::Transient { .. }))
+                    ),
+                    "{result:?}"
+                );
+                assert!(
+                    !cache.exists(),
+                    "incomplete output must not populate the step cache"
+                );
+                assert!(
+                    !record.exists(),
+                    "incomplete output must not become a replayable answer"
+                );
+            }
+            server.await.unwrap();
         }
     }
 

@@ -165,6 +165,14 @@ For long-running tasks, increase the task entry's `timeout_seconds` explicitly.
 Both run behind `GatewayTransport`, so budgets, breakers, retries,
 fallback chains, costs and spans apply the same way.
 
+OpenAI `message.refusal`, streamed `delta.refusal` and `content_filter`
+responses are classified as content rejection while retaining reported usage.
+An OpenAI stream must contain `[DONE]` or a nonempty `finish_reason`;
+Anthropic requires `message_stop`. EOF before completion is transient and
+is never recorded or cached as an answer. Progress deltas remain provisional
+until the task succeeds. The stricter protocol checks version provider store
+namespaces, so OpenAI/Anthropic recordings made before this fix must be regenerated.
+
 Embeddings retry transient failures on the requested model only: automatic
 cross-model fallback is disabled because vector spaces are not interchangeable.
 The runner validates vector dimensions and finite values before caching them,

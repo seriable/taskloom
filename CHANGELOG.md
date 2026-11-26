@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Normalize OpenAI `message.refusal`, streamed `delta.refusal`, refusal
+  content parts and `content_filter` into typed content rejection, preserving
+  reported usage and avoiding resilient-JSON retries and repair turns.
+- Require `[DONE]` or a nonempty `finish_reason` for OpenAI streaming
+  completion; keep reading after `finish_reason` to collect trailing usage.
+  Anthropic streams require `message_stop`. Premature EOF is transient and
+  cannot populate recordings or step caches, even when the text is valid JSON.
+- Version the built-in provider namespaces to invalidate answers stored
+  before these protocol checks. Existing OpenAI/Anthropic recordings must be
+  regenerated; their old keys are never used as an offline fallback.
+
 ## 0.1.0 (2026-11-27)
 
 First release, extracted from a production video pipeline.

@@ -16,11 +16,13 @@ pub(crate) struct SseEvent {
 /// Reads `response` as server-sent events, calling `on_event` for each until
 /// it returns `Ok(true)` (done) or the stream ends. With `idle`, no bytes for
 /// that long fail as transient.
+/// Returns whether the callback confirmed completion. EOF alone does not
+/// confirm that a provider finished its response; the caller must check it.
 pub(crate) async fn read_events(
     response: reqwest::Response,
     idle: Option<Duration>,
     mut on_event: impl FnMut(SseEvent) -> Result<bool, ModelError>,
-) -> Result<(), ModelError> {
+) -> Result<bool, ModelError> {
     let mut stream = response.bytes_stream();
     let mut parser = Parser::default();
     loop {
@@ -49,14 +51,14 @@ pub(crate) async fn read_events(
         })?;
         for event in parser.push(&bytes) {
             if on_event(event)? {
-                return Ok(());
+                return Ok(true);
             }
         }
     }
     if let Some(event) = parser.finish() {
-        on_event(event)?;
+        return on_event(event);
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Splits bytes into events (`\n` or `\r\n` lines, a blank line ends one).
