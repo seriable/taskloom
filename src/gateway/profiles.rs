@@ -367,6 +367,7 @@ pub struct TaskProfile {
     pub label: String,
     pub input_budget_tokens: usize,
     pub output_tokens: usize,
+    /// Whole-task limit, including queueing, retries and model fallbacks.
     pub timeout: Duration,
     pub allow_fallback: bool,
     /// When false, an over-budget request is logged and counted but still

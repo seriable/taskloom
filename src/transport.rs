@@ -36,6 +36,14 @@ pub enum Phase {
     Repair { round: u32 },
 }
 
+/// An answer together with the model that actually served it. Transports
+/// that route requests to another model override [`Transport::send_with_metadata`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Response {
+    pub answer: Answer,
+    pub model: String,
+}
+
 /// One request to one model.
 #[derive(Clone, Copy)]
 pub struct Request<'a> {
@@ -83,6 +91,32 @@ impl std::fmt::Debug for Request<'_> {
 pub trait Transport: Send + Sync {
     fn send<'a>(&'a self, request: Request<'a>) -> BoxFuture<'a, Result<Answer, TaskError>>;
 
+    /// A stable identity for the endpoint, routing and answer-affecting
+    /// settings. Custom transports sharing a store should supply one.
+    fn cache_namespace(&self) -> Option<String> {
+        None
+    }
+
+    /// Whole-task time limit, including queueing, retries and model chains.
+    /// The runner uses the shorter of this and `TaskSpec::deadline`.
+    fn task_timeout(&self, _label: &str) -> Option<std::time::Duration> {
+        None
+    }
+
+    /// Sends a request while preserving the serving model. The default
+    /// assumes no routing, so existing transports only need `send`.
+    fn send_with_metadata<'a>(
+        &'a self,
+        request: Request<'a>,
+    ) -> BoxFuture<'a, Result<Response, TaskError>> {
+        Box::pin(async move {
+            self.send(request).await.map(|answer| Response {
+                answer,
+                model: request.model.to_string(),
+            })
+        })
+    }
+
     /// Embeds texts ([`Agent::embed`](crate::Agent::embed)). Unsupported
     /// unless implemented.
     fn embed<'a>(
@@ -113,8 +147,23 @@ pub struct Embedded {
 }
 
 impl<T: Transport + ?Sized> Transport for &T {
+    fn cache_namespace(&self) -> Option<String> {
+        (**self).cache_namespace()
+    }
+
+    fn task_timeout(&self, label: &str) -> Option<std::time::Duration> {
+        (**self).task_timeout(label)
+    }
+
     fn send<'a>(&'a self, request: Request<'a>) -> BoxFuture<'a, Result<Answer, TaskError>> {
         (**self).send(request)
+    }
+
+    fn send_with_metadata<'a>(
+        &'a self,
+        request: Request<'a>,
+    ) -> BoxFuture<'a, Result<Response, TaskError>> {
+        (**self).send_with_metadata(request)
     }
 
     fn embed<'a>(
@@ -126,8 +175,23 @@ impl<T: Transport + ?Sized> Transport for &T {
 }
 
 impl<T: Transport + ?Sized> Transport for std::sync::Arc<T> {
+    fn cache_namespace(&self) -> Option<String> {
+        (**self).cache_namespace()
+    }
+
+    fn task_timeout(&self, label: &str) -> Option<std::time::Duration> {
+        (**self).task_timeout(label)
+    }
+
     fn send<'a>(&'a self, request: Request<'a>) -> BoxFuture<'a, Result<Answer, TaskError>> {
         (**self).send(request)
+    }
+
+    fn send_with_metadata<'a>(
+        &'a self,
+        request: Request<'a>,
+    ) -> BoxFuture<'a, Result<Response, TaskError>> {
+        (**self).send_with_metadata(request)
     }
 
     fn embed<'a>(

@@ -53,6 +53,12 @@ pub enum TaskError {
     NotRecorded(String),
     /// The run was cancelled ([`crate::CancelToken`]).
     Cancelled,
+    /// A recording could not be persisted. The runner stops without
+    /// sending another model request; step-cache writes remain best effort.
+    Storage {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
     /// A transport failure of the caller's own error type.
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -71,6 +77,14 @@ impl TaskError {
             Self::Provider(error) => error,
             Self::Rejected(rejection) => ModelError::schema_mismatch(rejection.0),
             Self::Misconfigured(detail) => ModelError::misconfigured(detail),
+            Self::Deadline(limit) => ModelError::Deadline {
+                limit,
+                detail: format!("task exceeded its deadline of {limit:?}"),
+            },
+            Self::Storage { path, source } => ModelError::misconfigured(format!(
+                "cannot persist recording {}: {source}",
+                path.display()
+            )),
             other => ModelError::transient(None, other.to_string()),
         }
     }
@@ -85,15 +99,31 @@ impl std::fmt::Display for TaskError {
             Self::Deadline(limit) => write!(formatter, "no answer within {}s", limit.as_secs()),
             Self::NotRecorded(key) => write!(formatter, "no recorded answer for {key}"),
             Self::Cancelled => write!(formatter, "the task was cancelled"),
+            Self::Storage { path, source } => write!(
+                formatter,
+                "cannot persist recording {}: {source}",
+                path.display()
+            ),
             Self::Other(error) => write!(formatter, "{error}"),
         }
     }
 }
 
-impl std::error::Error for TaskError {}
+impl std::error::Error for TaskError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Storage { source, .. } => Some(source),
+            Self::Other(source) => Some(source.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 impl From<ModelError> for TaskError {
     fn from(error: ModelError) -> Self {
-        Self::Provider(error)
+        match error {
+            ModelError::Deadline { limit, .. } => Self::Deadline(limit),
+            other => Self::Provider(other),
+        }
     }
 }

@@ -142,9 +142,16 @@ pub struct Attachment {
 /// One transport option value: any type the caller's transport reads (a
 /// timeout policy, a provider flag). Its `Debug` form is part of the
 /// request's identity for recordings and the step cache.
-pub trait TransportOption: Any + fmt::Debug + Send + Sync {}
+pub trait TransportOption: Any + fmt::Debug + Send + Sync {
+    /// The concrete value, without requiring trait-object upcasting.
+    fn as_any(&self) -> &dyn Any;
+}
 
-impl<T: Any + fmt::Debug + Send + Sync> TransportOption for T {}
+impl<T: Any + fmt::Debug + Send + Sync> TransportOption for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Transport options by type, for transports with settings of their own.
 #[derive(Clone, Default)]
@@ -175,7 +182,7 @@ impl TransportOptions {
         self.entries
             .iter()
             .find(|(entry, _)| *entry == id)
-            .and_then(|(_, value)| (value.as_ref() as &dyn Any).downcast_ref::<T>())
+            .and_then(|(_, value)| value.as_ref().as_any().downcast_ref::<T>())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -251,8 +258,8 @@ pub struct TaskSpec {
     pub options: TransportOptions,
     pub temperature: f32,
     pub max_output_tokens: u32,
-    /// Limit for the whole task, every model included. The transport's own
-    /// per-request timeouts apply inside it.
+    /// Limit for the whole task, every model included. The shorter of this
+    /// and the transport's task timeout wins; attempt timeouts apply inside it.
     pub deadline: Option<Duration>,
     pub hedge: Option<HedgePolicy>,
     /// Whether the run is recorded in the call ledger under the label.

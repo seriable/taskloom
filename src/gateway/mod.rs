@@ -69,7 +69,7 @@ pub struct CallContext {
     pub transient_attempts: usize,
     /// Whether this call may walk the fallback model chain.
     pub allow_fallback: bool,
-    /// Wall-clock cap for one attempt (covers async-task polling as well).
+    /// Wall-clock cap for one attempt, including breaker and permit waits.
     pub attempt_timeout: Option<Duration>,
 }
 
@@ -439,20 +439,34 @@ impl Gateway {
     /// Run one logical model call through budget check, provider admission,
     /// transient retry and the fallback chain. `attempt` performs a single
     /// provider request for the given model id.
-    pub async fn execute<T, F, Fut>(
-        &self,
-        ctx: &CallContext,
-        mut attempt: F,
-    ) -> Result<T, ModelError>
+    pub async fn execute<T, F, Fut>(&self, ctx: &CallContext, attempt: F) -> Result<T, ModelError>
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
+    {
+        self.execute_validated(ctx, attempt, Ok).await
+    }
+
+    /// Like [`Gateway::execute`], with response validation inside the
+    /// attempt's accounting. Usage is retained even when `validate` rejects
+    /// an answered request; retry and breaker decisions use that rejection.
+    pub async fn execute_validated<T, U, F, Fut, V>(
+        &self,
+        ctx: &CallContext,
+        mut attempt: F,
+        validate: V,
+    ) -> Result<U, ModelError>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
+        V: FnMut(T) -> Result<U, ModelError>,
     {
         let mut models = vec![ctx.primary_model.clone()];
         if ctx.allow_fallback && ctx.task.allow_fallback {
             models.extend(self.fallback_models(&ctx.primary_model, ctx.image_count > 0));
         }
-        self.execute_models(ctx, &models, &mut attempt).await
+        self.execute_models_validated(ctx, &models, &mut attempt, validate)
+            .await
     }
 
     /// [`Gateway::execute`] over an explicit model chain (no profile fallback).
@@ -465,6 +479,50 @@ impl Gateway {
     where
         F: FnMut(String) -> Fut,
         Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
+    {
+        self.execute_models_validated(ctx, models, attempt, Ok)
+            .await
+    }
+
+    async fn execute_models_validated<T, U, F, Fut, V>(
+        &self,
+        ctx: &CallContext,
+        models: &[String],
+        attempt: &mut F,
+        validate: V,
+    ) -> Result<U, ModelError>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
+        V: FnMut(T) -> Result<U, ModelError>,
+    {
+        tokio::time::timeout(
+            ctx.task.timeout,
+            self.execute_models_inner(ctx, models, attempt, validate),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(ModelError::Deadline {
+                limit: ctx.task.timeout,
+                detail: format!(
+                    "{} exceeded its whole-call timeout of {:?}",
+                    ctx.task.label, ctx.task.timeout
+                ),
+            })
+        })
+    }
+
+    async fn execute_models_inner<T, U, F, Fut, V>(
+        &self,
+        ctx: &CallContext,
+        models: &[String],
+        attempt: &mut F,
+        mut validate: V,
+    ) -> Result<U, ModelError>
+    where
+        F: FnMut(String) -> Fut,
+        Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
+        V: FnMut(T) -> Result<U, ModelError>,
     {
         let attempts = ctx.transient_attempts.max(1);
         let mut last_error: Option<ModelError> = None;
@@ -529,13 +587,30 @@ impl Gateway {
                 continue;
             }
             for attempt_index in 0..attempts {
+                let attempt_deadline = ctx
+                    .attempt_timeout
+                    .map(|limit| tokio::time::Instant::now() + limit);
+                let admission_error = || {
+                    ModelError::transient(
+                        None,
+                        format!(
+                            "{} exceeded its attempt timeout while waiting for admission",
+                            ctx.task.label
+                        ),
+                    )
+                };
                 // An open breaker is about this model only: the rest of the
                 // fallback chain has breakers of its own, so the call moves on
                 // instead of returning the circuit-open error to the caller.
-                let probe = match self
-                    .wait_for_admission(&breaker, &ctx.provider, model, ctx.attempt_timeout)
-                    .await
-                {
+                let admission =
+                    self.wait_for_admission(&breaker, &ctx.provider, model, ctx.attempt_timeout);
+                let admission = match attempt_deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, admission)
+                        .await
+                        .unwrap_or_else(|_| Err(admission_error())),
+                    None => admission.await,
+                };
+                let probe = match admission {
                     Ok(probe) => probe,
                     Err(error) => {
                         tracing::warn!(
@@ -550,14 +625,25 @@ impl Gateway {
                     }
                 };
                 let mut probe_guard = control::ProbeGuard::new(&breaker, probe);
-                let permit = control
-                    .semaphore
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .map_err(|_| {
+                let acquire = control.semaphore.clone().acquire_owned();
+                let permit = async {
+                    acquire.await.map_err(|_| {
                         ModelError::transient(None, "AI gateway provider semaphore closed")
-                    })?;
+                    })
+                };
+                let permit = match attempt_deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, permit)
+                        .await
+                        .unwrap_or_else(|_| Err(admission_error())),
+                    None => permit.await,
+                };
+                let permit = match permit {
+                    Ok(permit) => permit,
+                    Err(error) => {
+                        last_error = Some(error);
+                        break;
+                    }
+                };
                 let started = Instant::now();
                 let span = tracing::info_span!(
                     "gen_ai.request",
@@ -572,32 +658,39 @@ impl Gateway {
                     error.type = tracing::field::Empty,
                 );
                 let request = tracing::Instrument::instrument(attempt(model.clone()), span.clone());
-                let result = match ctx.attempt_timeout {
-                    Some(limit) => {
-                        tokio::time::timeout(limit, request)
-                            .await
-                            .unwrap_or_else(|_| {
-                                Err(ModelError::transient(
-                                    None,
-                                    format!(
-                                        "{} request exceeded transport timeout of {}s",
-                                        ctx.task.label,
-                                        limit.as_secs()
-                                    ),
-                                ))
-                            })
-                    }
+                let result = match attempt_deadline {
+                    Some(deadline) => tokio::time::timeout_at(deadline, request)
+                        .await
+                        .unwrap_or_else(|_| {
+                            Err(ModelError::transient(
+                                None,
+                                format!(
+                                    "{} request exceeded transport timeout of {}s",
+                                    ctx.task.label,
+                                    ctx.attempt_timeout.unwrap().as_secs()
+                                ),
+                            ))
+                        }),
                     None => request.await,
                 };
                 drop(permit);
                 let latency = started.elapsed();
+                let usage = result.as_ref().ok().and_then(|output| output.usage);
+                let result = result.and_then(|output| validate(output.value));
+                if let Some(usage) = usage {
+                    span.record("gen_ai.usage.input_tokens", usage.prompt_tokens);
+                    span.record("gen_ai.usage.output_tokens", usage.completion_tokens);
+                    let usage = crate::ledger::Usage {
+                        requests: 1,
+                        input_tokens: usage.prompt_tokens.unwrap_or(0),
+                        output_tokens: usage.completion_tokens.unwrap_or(0),
+                        cost_micros: self.config.prices.cost_micros(model, &usage),
+                    };
+                    self.stats.record_usage(usage);
+                    crate::ledger::record_usage(&ctx.task.label, usage);
+                }
                 match &result {
-                    Ok(output) => {
-                        if let Some(usage) = output.usage {
-                            span.record("gen_ai.usage.input_tokens", usage.prompt_tokens);
-                            span.record("gen_ai.usage.output_tokens", usage.completion_tokens);
-                        }
-                    }
+                    Ok(_) => {}
                     Err(error) => {
                         span.record("error.type", error.kind());
                     }
@@ -614,7 +707,7 @@ impl Gateway {
                     estimated_input_tokens: ctx.estimated_input_tokens,
                     budget_tokens: budget.limit_tokens,
                     attempt: attempt_index + 1,
-                    usage: result.as_ref().ok().and_then(|output| output.usage),
+                    usage,
                     latency,
                     outcome: match &result {
                         Ok(_) => "ok",
@@ -622,17 +715,7 @@ impl Gateway {
                     },
                 });
                 match result {
-                    Ok(output) => {
-                        if let Some(usage) = output.usage {
-                            let usage = crate::ledger::Usage {
-                                requests: 1,
-                                input_tokens: usage.prompt_tokens.unwrap_or(0),
-                                output_tokens: usage.completion_tokens.unwrap_or(0),
-                                cost_micros: self.config.prices.cost_micros(model, &usage),
-                            };
-                            self.stats.record_usage(usage);
-                            crate::ledger::record_usage(&ctx.task.label, usage);
-                        }
+                    Ok(value) => {
                         if model_index > 0 {
                             self.stats.record_degraded_success(
                                 &ctx.task.label,
@@ -642,7 +725,7 @@ impl Gateway {
                                 "fallback_model",
                             );
                         }
-                        return Ok(output.value);
+                        return Ok(value);
                     }
                     Err(error) if error.is_transient() => {
                         if attempt_index + 1 < attempts {

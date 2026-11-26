@@ -2,16 +2,14 @@
 name = "taskloom"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.86"
 license = "MIT OR Apache-2.0"
-description = "Production LLM task execution: typed tasks, model chains, resilient JSON, hedging, circuit breakers, call ledgers, record/replay and step caching."
+description = "Typed LLM task execution: model chains, resilient JSON, deadlines, circuit breakers, call accounting, record/replay and step caching."
 readme = "README.md"
 keywords = ["llm", "agent", "openai", "anthropic", "gateway"]
 categories = ["api-bindings", "asynchronous"]
-# Fill in once the repository is public:
-# repository = "https://github.com/<owner>/taskloom"
-# documentation = "https://docs.rs/taskloom"
-include = ["src/**", "examples/**", "tests/**", "README.md", "CHANGELOG.md", "LICENSE-*"]
+repository = "https://github.com/seriable/taskloom"
+include = ["src/**", "examples/**", "tests/**", "docs/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -29,11 +27,13 @@ schemars = ["dep:schemars"]
 base64 = { version = "0.22", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
+fs2 = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
 schemars = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+tempfile = "3"
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros"] }
 tracing = "0.1"
 
@@ -46,4 +46,4 @@ name = "anthropic"
 required-features = ["anthropic"]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util"] }
+tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }

@@ -18,6 +18,11 @@ pub const CIRCUIT_OPEN_MARKER: &str = "ai_gateway_circuit_open";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelError {
+    /// The complete logical call exhausted its time limit. Not retried.
+    Deadline {
+        limit: std::time::Duration,
+        detail: String,
+    },
     /// Connection failure, timeout, 408/429 or 5xx. Safe to retry unchanged.
     Transient { status: Option<u16>, detail: String },
     /// The request cannot fit the model window or the task input budget.
@@ -62,6 +67,7 @@ impl ModelError {
     /// Short machine-readable kind used by the call log and statistics.
     pub fn kind(&self) -> &'static str {
         match self {
+            Self::Deadline { .. } => "deadline",
             Self::Transient { .. } => "transient",
             Self::ContextOverflow { .. } => CONTEXT_OVERFLOW_MARKER,
             Self::SchemaMismatch { .. } => "schema_mismatch",
@@ -81,7 +87,8 @@ impl ModelError {
 
     pub fn detail(&self) -> &str {
         match self {
-            Self::Transient { detail, .. }
+            Self::Deadline { detail, .. }
+            | Self::Transient { detail, .. }
             | Self::ContextOverflow { detail, .. }
             | Self::SchemaMismatch { detail }
             | Self::ContentRejected { detail }
@@ -94,6 +101,7 @@ impl ModelError {
     pub fn with_detail(self, detail: impl Into<String>) -> Self {
         let detail = detail.into();
         match self {
+            Self::Deadline { limit, .. } => Self::Deadline { limit, detail },
             Self::Transient { status, .. } => Self::Transient { status, detail },
             Self::ContextOverflow {
                 required_tokens,

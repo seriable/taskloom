@@ -2,9 +2,8 @@
 //!
 //! `POST {base_url}/v1/messages` with an API key. Images go inline as
 //! base64; a task's JSON Schema goes as `output_config.format` (structured
-//! outputs). Sampling parameters are not sent by default: API version
-//! `2026-10-21` rejects `temperature` on Messages requests
-//! ([`Anthropic::with_sampling`] sends it for older versions).
+//! outputs). Sampling parameters are omitted by default for models that do
+//! not accept them; [`Anthropic::with_sampling`] enables them when supported.
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +16,7 @@ use crate::gateway::{ModelError, TokenUsage};
 use crate::provider::{ChatRequest, ChatResponse, Provider, Streaming};
 
 /// The API version sent by default.
-pub const DEFAULT_API_VERSION: &str = "2026-10-21";
+pub const DEFAULT_API_VERSION: &str = "2023-06-01";
 /// `max_tokens` when the task leaves the output allowance to the provider
 /// (the Messages API requires one).
 pub const DEFAULT_MAX_TOKENS: u32 = 16_000;
@@ -220,6 +219,13 @@ impl Anthropic {
 }
 
 impl Provider for Anthropic {
+    fn cache_namespace(&self) -> String {
+        format!(
+            "anthropic|{}|{}|{:?}|{}|{}",
+            self.base_url, self.version, self.betas, self.sampling, self.default_max_tokens
+        )
+    }
+
     fn id(&self) -> &str {
         &self.base_url
     }
@@ -419,6 +425,6 @@ mod tests {
         let raw = server.await.unwrap().to_ascii_lowercase();
         assert!(raw.starts_with("post /v1/messages"), "{raw}");
         assert!(raw.contains("x-api-key: key"), "{raw}");
-        assert!(raw.contains("anthropic-version: 2026-10-21"), "{raw}");
+        assert!(raw.contains("anthropic-version: 2023-06-01"), "{raw}");
     }
 }

@@ -1,7 +1,6 @@
 //! # taskloom
 //!
-//! Production LLM task execution for pipelines that must be reproducible and
-//! cost-bounded.
+//! Typed, replayable LLM task execution with token budgets and call accounting.
 //!
 //! A task ([`AgentTask`], usually a [`PromptTask`]) says only what is its
 //! own: its label, its prompts, the models and protocol it uses
@@ -70,7 +69,8 @@ pub use task::{
 };
 pub use task_error::{Rejection, TaskError};
 pub use transport::{
-    EmbedRequest, Embedded, FnTransport, Format, ModelResolver, NoRoles, Phase, Request, Transport,
+    EmbedRequest, Embedded, FnTransport, Format, ModelResolver, NoRoles, Phase, Request, Response,
+    Transport,
 };
 
 /// Decodes a JSON answer into `T` (for [`AgentTask::decode`] of tasks whose

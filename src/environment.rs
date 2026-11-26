@@ -13,11 +13,12 @@
 //!   it already had.
 //!
 //! A request is identified by its label, model, protocol, attachment,
-//! transport options, retry salt ([`crate::retry`]), prompts, and the path,
-//! size and modification time of every image or file it sends: a re-asking
+//! transport options, temperature, output limit, retry salt ([`crate::retry`]),
+//! prompts, and the path, size and modification time of every image or file it sends: a re-asking
 //! for another sample (another salt) or a file rewritten in place is another
 //! request.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -26,7 +27,7 @@ use sha2::{Digest, Sha256};
 
 use crate::locale::Locale;
 use crate::task::{Answer, Protocol};
-use crate::transport::Request;
+use crate::transport::{Request, Response};
 
 /// How long a step-cache entry is served by default.
 pub const DEFAULT_STEP_CACHE_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -135,7 +136,7 @@ impl Environment {
 
     pub(crate) async fn lookup(&self, key: &RequestKey, step_cache: bool) -> Lookup {
         if let Recording::Replay(dir) = &self.recording {
-            return match read(&key.file_in(dir)).await {
+            return match read(&key.file_in(dir), &key.model).await {
                 Some(answer) => Lookup::Found(answer),
                 None => Lookup::MissingInReplay,
             };
@@ -151,7 +152,7 @@ impl Environment {
                     .and_then(|modified| modified.elapsed().ok())
                     .is_some_and(|age| age < max_age);
                 if fresh {
-                    if let Some(answer) = read(&file).await {
+                    if let Some(answer) = read(&file, &key.model).await {
                         return Lookup::Found(answer);
                     }
                 }
@@ -162,24 +163,54 @@ impl Environment {
 
     /// Writes the raw answer, with the request it answers, in recording
     /// mode (evaluations re-run recorded requests: [`crate::eval`]).
-    pub(crate) async fn record(&self, key: &RequestKey, answer: &Answer, request: &Request<'_>) {
+    pub(crate) async fn record(
+        &self,
+        key: &RequestKey,
+        response: &Response,
+        request: &Request<'_>,
+    ) -> Result<(), crate::TaskError> {
         if let Recording::Record(dir) = &self.recording {
             let recorded = RecordedRequest::of(request);
-            write_record(&key.file_in(dir), answer, Some(&recorded)).await;
+            let file = key.file_in(dir);
+            write_record(
+                &file,
+                &response.answer,
+                Some(&recorded),
+                Some(&response.model),
+            )
+            .await
+            .map_err(|source| crate::TaskError::Storage { path: file, source })?;
         }
+        Ok(())
     }
 
     /// Writes a raw answer that has no chat request (embeddings).
-    pub(crate) async fn record_payload(&self, key: &RequestKey, answer: &Answer) {
+    pub(crate) async fn record_payload(
+        &self,
+        key: &RequestKey,
+        answer: &Answer,
+    ) -> Result<(), crate::TaskError> {
         if let Recording::Record(dir) = &self.recording {
-            write(&key.file_in(dir), answer).await;
+            let file = key.file_in(dir);
+            write_record(&file, answer, None, None)
+                .await
+                .map_err(|source| crate::TaskError::Storage { path: file, source })?;
         }
+        Ok(())
     }
 
     /// Keeps a validated answer for the step cache.
     pub(crate) async fn cache(&self, key: &RequestKey, answer: &Answer) {
         if let Some(dir) = self.step_cache_dir.get() {
             write(&key.file_in(dir), answer).await;
+        }
+    }
+
+    pub(crate) async fn cache_response(&self, key: &RequestKey, response: &Response) {
+        if let Some(dir) = self.step_cache_dir.get() {
+            let file = key.file_in(dir);
+            let result = write_record(&file, &response.answer, None, Some(&response.model)).await;
+            warn_on_store_error(&file, result);
         }
     }
 
@@ -202,6 +233,15 @@ impl Environment {
                 continue;
             };
             for file in files.flatten() {
+                // The persistent directory lock must not be unlinked while
+                // another process can still hold it.
+                if file
+                    .path()
+                    .extension()
+                    .is_none_or(|extension| extension != "json")
+                {
+                    continue;
+                }
                 let stale = file
                     .metadata()
                     .ok()
@@ -220,10 +260,22 @@ impl Environment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestKey {
     label: String,
+    model: String,
     hash: String,
 }
 
 impl RequestKey {
+    /// Isolates an endpoint or transport configuration in a shared store.
+    /// The namespace length is encoded before hashing.
+    pub fn in_namespace(mut self, namespace: &str) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update((namespace.len() as u64).to_le_bytes());
+        hasher.update(namespace.as_bytes());
+        hasher.update(self.hash.as_bytes());
+        self.hash = hex::encode(hasher.finalize());
+        self
+    }
+
     /// The key of `request` sent under `protocol` (and the current retry
     /// salt). The phase is not part of it: a repair request differs by its
     /// prompt.
@@ -238,6 +290,12 @@ impl RequestKey {
                 request.attachment, request.options
             ),
             &schema.unwrap_or_default(),
+            &format!(
+                "{:?}|{}|{}",
+                request.format,
+                request.temperature.to_bits(),
+                request.max_output_tokens
+            ),
             &crate::retry::current_retry_salt().to_string(),
             request.system_prompt,
             request.user_prompt,
@@ -263,6 +321,7 @@ impl RequestKey {
         }
         Self {
             label: request.label.to_string(),
+            model: request.model.to_string(),
             hash: hex::encode(hasher.finalize()),
         }
     }
@@ -276,6 +335,7 @@ impl RequestKey {
         }
         Self {
             label: label.to_string(),
+            model: model.to_string(),
             hash: hex::encode(hasher.finalize()),
         }
     }
@@ -296,25 +356,34 @@ impl RequestKey {
                 }
             })
             .collect::<String>();
-        dir.join(if folder.is_empty() {
-            "_".to_string()
-        } else {
-            folder
-        })
+        dir.join(
+            if folder.is_empty() || matches!(folder.as_str(), "." | "..") {
+                "_".to_string()
+            } else {
+                folder
+            },
+        )
         .join(format!("{}.json", self.hash))
     }
 }
 
 pub(crate) enum Lookup {
-    Found(Answer),
+    Found(Response),
     MissingInReplay,
     Ask,
 }
 
-async fn read(file: &Path) -> Option<Answer> {
+async fn read(file: &Path, requested_model: &str) -> Option<Response> {
     let bytes = tokio::fs::read(file).await.ok()?;
     let record = serde_json::from_slice::<serde_json::Value>(&bytes).ok()?;
-    Answer::from_record(&record)
+    Some(Response {
+        answer: Answer::from_record(&record)?,
+        model: record
+            .get("served_model")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(requested_model)
+            .to_string(),
+    })
 }
 
 /// The request a recording answers.
@@ -357,27 +426,74 @@ impl RecordedRequest {
 }
 
 async fn write(file: &Path, answer: &Answer) {
-    write_record(file, answer, None).await;
+    warn_on_store_error(file, write_record(file, answer, None, None).await);
+}
+
+fn warn_on_store_error(file: &Path, result: std::io::Result<()>) {
+    if let Err(error) = result {
+        tracing::warn!(path = %file.display(), %error, "agent answer store write failed");
+    }
 }
 
 /// Writes through a temporary file, so a reader never sees half an answer.
-async fn write_record(file: &Path, answer: &Answer, request: Option<&RecordedRequest>) {
-    let Some(parent) = file.parent() else {
-        return;
-    };
-    if let Err(error) = tokio::fs::create_dir_all(parent).await {
-        tracing::warn!(path = %parent.display(), %error, "agent answer store unavailable");
-        return;
-    }
-    let temporary = file.with_extension("json.tmp");
+async fn write_record(
+    file: &Path,
+    answer: &Answer,
+    request: Option<&RecordedRequest>,
+    served_model: Option<&str>,
+) -> std::io::Result<()> {
+    let parent = file.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "recording has no parent directory",
+        )
+    })?;
+    tokio::fs::create_dir_all(parent).await?;
     let mut record = answer.to_record();
+    if let Some(model) = served_model {
+        record["served_model"] = model.into();
+    }
     if let Some(request) = request {
         record["request"] = serde_json::to_value(request).unwrap_or_default();
     }
-    let bytes = record.to_string();
-    if tokio::fs::write(&temporary, bytes).await.is_ok() {
-        let _ = tokio::fs::rename(&temporary, file).await;
-    } else {
-        let _ = tokio::fs::remove_file(&temporary).await;
-    }
+    let file = file.to_path_buf();
+    let bytes = record.to_string().into_bytes();
+    // Each writer owns a unique file. `persist` atomically replaces the
+    // destination on Unix and Windows; readers see an old or a complete new
+    // entry. Blocking disk flush/replacement does not block Tokio workers.
+    tokio::task::spawn_blocking(move || {
+        // Keep the lock file in place: deleting it would allow another
+        // process to lock a different inode for the same directory. Writers
+        // are serialized per task label, avoiding Windows replacement races.
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(file.parent().unwrap().join(".taskloom-store.lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
+        temporary.write_all(&bytes)?;
+        temporary.as_file().sync_all()?;
+        for retry in 0..10 {
+            match temporary.persist(&file) {
+                Ok(_) => return Ok(()),
+                Err(error) => {
+                    // Windows can temporarily deny replacement while another
+                    // writer or a scanner holds the destination. Keep our
+                    // complete unique file and retry; never delete the target.
+                    let retryable =
+                        cfg!(windows) && matches!(error.error.raw_os_error(), Some(5 | 32 | 33));
+                    if !retryable || retry == 9 {
+                        return Err(error.error);
+                    }
+                    temporary = error.file;
+                    std::thread::sleep(Duration::from_millis(1 << retry));
+                }
+            }
+        }
+        unreachable!()
+    })
+    .await
+    .map_err(std::io::Error::other)?
 }

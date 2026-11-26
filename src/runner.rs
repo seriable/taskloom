@@ -4,7 +4,7 @@
 use crate::environment::{Environment, Lookup, RequestKey};
 use crate::gateway::ModelError;
 use crate::task::{AgentTask, Answer, ModelChoice, Protocol, TaskSpec};
-use crate::transport::{Format, ModelResolver, NoRoles, Phase, Request, Transport};
+use crate::transport::{Format, ModelResolver, NoRoles, Phase, Request, Response, Transport};
 use crate::{Rejection, TaskError};
 
 /// A task's result with how it was obtained.
@@ -13,7 +13,8 @@ pub struct TaskOutcome<T> {
     pub output: T,
     /// The model whose answer was used.
     pub model: String,
-    /// Models asked, the one used included.
+    /// Entries tried in the task's model chain, the one used included.
+    /// Internal gateway retries and fallback models are not counted here.
     pub models_tried: usize,
     /// Served from a recording or the step cache, not from the provider.
     pub reused: bool,
@@ -62,6 +63,7 @@ fn error_type(error: &TaskError) -> &'static str {
         TaskError::Deadline(_) => "deadline",
         TaskError::NotRecorded(_) => "not_recorded",
         TaskError::Cancelled => "cancelled",
+        TaskError::Storage { .. } => "storage",
         TaskError::Other(_) => "other",
     }
 }
@@ -127,6 +129,24 @@ impl<'a> Agent<'a> {
         self.environment
     }
 
+    fn timeout_for(
+        &self,
+        label: &str,
+        explicit: Option<std::time::Duration>,
+    ) -> Option<std::time::Duration> {
+        match (explicit, self.transport.task_timeout(label)) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    fn storage_key(&self, key: RequestKey) -> RequestKey {
+        match self.transport.cache_namespace() {
+            Some(namespace) => key.in_namespace(&namespace),
+            None => key,
+        }
+    }
+
     /// Runs `task` and returns its decoded result.
     pub async fn run<T: AgentTask>(&self, task: &T) -> Result<T::Output, TaskError> {
         self.run_traced(task).await.map(|outcome| outcome.output)
@@ -138,6 +158,7 @@ impl<'a> Agent<'a> {
         task: &T,
     ) -> Result<TaskOutcome<T::Output>, TaskError> {
         let spec = task.spec();
+        let deadline = self.timeout_for(task.label(), spec.deadline);
         // One span per task, named and fielded after the OpenTelemetry GenAI
         // conventions so a `tracing-opentelemetry` layer exports it as is.
         let span = tracing::info_span!(
@@ -155,7 +176,7 @@ impl<'a> Agent<'a> {
         );
         let work = async {
             let (result, usage) = crate::ledger::metered(async {
-                match spec.deadline {
+                match deadline {
                     Some(limit) => tokio::time::timeout(limit, self.ask_models(task, &spec))
                         .await
                         .map_err(|_| TaskError::Deadline(limit))?,
@@ -210,9 +231,16 @@ impl<'a> Agent<'a> {
             let mut keys = Vec::with_capacity(inputs.len());
             let mut pending = Vec::new();
             for (index, input) in inputs.iter().enumerate() {
-                let key = RequestKey::for_payload(label, &model, "embedding", input);
+                let key =
+                    self.storage_key(RequestKey::for_payload(label, &model, "embedding", input));
                 match self.environment.lookup(&key, cache).await {
-                    Lookup::Found(answer) => vectors[index] = vector_of(&answer),
+                    Lookup::Found(response) => {
+                        vectors[index] = Some(vector_of(&response.answer).ok_or_else(|| {
+                            TaskError::Rejected(Rejection::new(
+                                "stored embedding is not a numeric vector",
+                            ))
+                        })?);
+                    }
                     Lookup::MissingInReplay => return Err(TaskError::NotRecorded(key.describe())),
                     Lookup::Ask => {}
                 }
@@ -250,9 +278,25 @@ impl<'a> Agent<'a> {
                     sent.len()
                 ))));
             }
+            let mut dimension = None;
+            for vector in vectors.iter().flatten().chain(sent.iter()) {
+                if vector.is_empty() || vector.iter().any(|value| !value.is_finite()) {
+                    return Err(TaskError::Rejected(Rejection::new(
+                        "an embedding must be nonempty and finite",
+                    )));
+                }
+                if dimension.is_some_and(|expected| vector.len() != expected) {
+                    return Err(TaskError::Rejected(Rejection::new(
+                        "embedding dimensions do not match",
+                    )));
+                }
+                dimension = Some(vector.len());
+            }
             for (index, vector) in pending.into_iter().zip(sent) {
                 let answer = Answer::Json(serde_json::json!(vector));
-                self.environment.record_payload(&keys[index], &answer).await;
+                self.environment
+                    .record_payload(&keys[index], &answer)
+                    .await?;
                 if cache {
                     self.environment.cache(&keys[index], &answer).await;
                 }
@@ -264,6 +308,14 @@ impl<'a> Agent<'a> {
                 reused,
                 usage,
             })
+        };
+        let work = async {
+            match self.timeout_for(label, None) {
+                Some(limit) => tokio::time::timeout(limit, work)
+                    .await
+                    .map_err(|_| TaskError::Deadline(limit))?,
+                None => work.await,
+            }
         };
         crate::cancel::run_under(self.cancel, work).await
     }
@@ -335,13 +387,19 @@ impl<'a> Agent<'a> {
                 options: &spec.options,
                 on_delta,
             };
-            let key = RequestKey::for_request(&request, spec.protocol);
+            let key = self.storage_key(RequestKey::for_request(&request, spec.protocol));
             let (mut answer, mut reused) = match self
                 .obtain(request, &key, spec, spec.protocol)
                 .await
             {
                 Ok(obtained) => obtained,
                 Err(error @ TaskError::NotRecorded(_)) => return Err(error),
+                Err(
+                    error @ (TaskError::Deadline(_)
+                    | TaskError::Cancelled
+                    | TaskError::Storage { .. }
+                    | TaskError::Provider(ModelError::Deadline { .. })),
+                ) => return Err(error),
                 Err(error) => {
                     if has_next {
                         tracing::warn!(task = label, model, %error, "agent task failed on this model; trying the next");
@@ -355,14 +413,14 @@ impl<'a> Agent<'a> {
             loop {
                 let fresh = (spec.step_cache && !all_reused).then(|| answer.clone());
                 let previous = answer.clone();
-                match task.decode(answer) {
+                match task.decode(answer.answer) {
                     Ok(output) => {
                         if let Some(answer) = fresh {
-                            self.environment.cache(&key, &answer).await;
+                            self.environment.cache_response(&key, &answer).await;
                         }
                         return Ok(TaskOutcome {
                             output,
-                            model: model.clone(),
+                            model: previous.model,
                             models_tried: index + 1,
                             reused: all_reused,
                             usage: crate::ledger::Usage::default(),
@@ -373,14 +431,16 @@ impl<'a> Agent<'a> {
                         tracing::warn!(task = label, model, round, reason = %rejection, "agent task answer rejected; asking the model to repair it");
                         let repair_prompt = format!(
                             "{user_prompt}\n\n{}",
-                            locale.repair(&rejection.0, &previous_text(&previous))
+                            locale.repair(&rejection.0, &previous_text(&previous.answer))
                         );
                         let repair = Request {
+                            model: &previous.model,
                             user_prompt: &repair_prompt,
                             phase: Phase::Repair { round },
                             ..request
                         };
-                        let repair_key = RequestKey::for_request(&repair, spec.protocol);
+                        let repair_key =
+                            self.storage_key(RequestKey::for_request(&repair, spec.protocol));
                         let protocol = match spec.protocol {
                             Protocol::ResilientJson => Protocol::Json,
                             other => other,
@@ -392,6 +452,12 @@ impl<'a> Agent<'a> {
                                 all_reused = all_reused && reused;
                             }
                             Err(error @ TaskError::NotRecorded(_)) => return Err(error),
+                            Err(
+                                error @ (TaskError::Deadline(_)
+                                | TaskError::Cancelled
+                                | TaskError::Storage { .. }
+                                | TaskError::Provider(ModelError::Deadline { .. })),
+                            ) => return Err(error),
                             Err(error) => {
                                 last_error = Some(error);
                                 continue 'models;
@@ -419,7 +485,7 @@ impl<'a> Agent<'a> {
         key: &RequestKey,
         spec: &TaskSpec,
         protocol: Protocol,
-    ) -> Result<(Answer, bool), TaskError> {
+    ) -> Result<(Response, bool), TaskError> {
         match self.environment.lookup(key, spec.step_cache).await {
             Lookup::Found(answer) => Ok((answer, true)),
             Lookup::MissingInReplay => Err(TaskError::NotRecorded(key.describe())),
@@ -431,7 +497,7 @@ impl<'a> Agent<'a> {
                     sent.await
                 };
                 let answer = sent?;
-                self.environment.record(key, &answer, &request).await;
+                self.environment.record(key, &answer, &request).await?;
                 Ok((answer, false))
             }
         }
@@ -443,7 +509,7 @@ impl<'a> Agent<'a> {
         request: Request<'_>,
         spec: &TaskSpec,
         protocol: Protocol,
-    ) -> Result<Answer, TaskError> {
+    ) -> Result<Response, TaskError> {
         let once = || self.send_once(request, protocol);
         match spec.hedge {
             Some(hedge) => crate::hedge::hedged(hedge.after, hedge.copies, once).await,
@@ -455,9 +521,9 @@ impl<'a> Agent<'a> {
         &self,
         request: Request<'_>,
         protocol: Protocol,
-    ) -> Result<Answer, TaskError> {
+    ) -> Result<Response, TaskError> {
         match protocol {
-            Protocol::Json | Protocol::Text => self.transport.send(request).await,
+            Protocol::Json | Protocol::Text => self.transport.send_with_metadata(request).await,
             Protocol::ResilientJson => self.resilient_json(request).await,
         }
     }
@@ -468,7 +534,7 @@ impl<'a> Agent<'a> {
     /// object is recovered locally. Context overflow, auth, configuration
     /// and content rejection fail at once: the text protocol would fail the
     /// same way.
-    async fn resilient_json(&self, base: Request<'_>) -> Result<Answer, TaskError> {
+    async fn resilient_json(&self, base: Request<'_>) -> Result<Response, TaskError> {
         let label = base.label;
         // Every such request passes here: its size in logs shows which
         // requests are big enough to stall a provider.
@@ -487,7 +553,12 @@ impl<'a> Agent<'a> {
                 phase: Phase::Structured { attempt },
                 ..base
             };
-            match crate::retry::with_retry_salt(attempt - 1, self.transport.send(request)).await {
+            match crate::retry::with_retry_salt(
+                attempt - 1,
+                self.transport.send_with_metadata(request),
+            )
+            .await
+            {
                 Ok(answer) => return Ok(answer),
                 Err(TaskError::Provider(error @ ModelError::SchemaMismatch { .. })) => {
                     tracing::warn!(attempt, task_kind = label, error = %error, "agent returned an unusable structured answer; retrying once");
@@ -512,11 +583,11 @@ impl<'a> Agent<'a> {
             phase: Phase::TextFallback,
             ..base
         };
-        match self.transport.send(request).await {
+        match self.transport.send_with_metadata(request).await {
             Ok(answer) => {
-                let text = answer.into_text().unwrap_or_default();
+                let text = answer.answer.into_text().unwrap_or_default();
                 crate::json_text::object_in_text(&text)
-                    .map(Answer::Json)
+                    .map(|value| Response { answer: Answer::Json(value), model: answer.model })
                     .map_err(|parse_error| {
                         TaskError::Provider(last_error.unwrap_or_else(|| {
                             ModelError::schema_mismatch(format!(

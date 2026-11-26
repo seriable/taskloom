@@ -240,6 +240,13 @@ fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
 }
 
 impl Provider for OpenAiCompatible {
+    fn cache_namespace(&self) -> String {
+        format!(
+            "openai|{}|{}|{:?}",
+            self.base_url, self.json_mode, self.image_detail
+        )
+    }
+
     fn id(&self) -> &str {
         &self.base_url
     }

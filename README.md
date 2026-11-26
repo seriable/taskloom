@@ -1,7 +1,9 @@
 # taskloom
 
-Production LLM task execution for Rust pipelines that must be **reproducible
-and cost-bounded**.
+[![CI](https://github.com/seriable/taskloom/actions/workflows/ci.yml/badge.svg)](https://github.com/seriable/taskloom/actions/workflows/ci.yml)
+
+Typed, replayable LLM task execution for Rust pipelines, with **token budgets
+and call accounting**. Requires Rust 1.86 or newer.
 
 taskloom runs *typed model tasks*: a task says what is its own (a label,
 prompts, the models it may use, how its answer becomes a typed value) and
@@ -41,7 +43,7 @@ budget, taskloom is for you.
 
 ```toml
 [dependencies]
-taskloom = { version = "0.1", features = ["openai"] }
+taskloom = { git = "https://github.com/seriable/taskloom", tag = "v0.1.0", features = ["openai"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -92,10 +94,35 @@ let replay = Environment::new().with_recording(Recording::Replay("answers/".into
 let from_env = Environment::new().with_recording(Recording::from_env("TASKLOOM"));
 ```
 
-A request is identified by its label, model, protocol, options, retry salt,
-prompts and the size and modification time of every file it sends, so a
-changed prompt or a rewritten image is a new request. See
+A request is identified by its label, model, protocol, options, temperature,
+output-token limit, schema, retry salt, prompts and the size and modification
+time of every file it sends, so a changed prompt or a rewritten image is a new request. See
 [`examples/record_replay.rs`](examples/record_replay.rs).
+
+Recordings and step-cache entries also retain the model that actually served
+the answer, including gateway fallback models. `TaskOutcome::model` reports
+that model on live calls, cache hits and replay; `models_tried` counts entries
+in the task's own model chain, excluding internal gateway retries/fallbacks.
+Routing transports can implement `Transport::send_with_metadata` to report
+their serving model; existing transports can keep implementing `send` alone.
+
+The request-key and transport-namespace corrections change recording/cache
+filenames: entries written before them must be recorded again. Replay fails on a missing entry
+and never falls through to a live request. Records without serving-model
+metadata use the requested model when read under a current key.
+
+Built-in transports isolate stores by endpoint, provider protocol settings,
+model routing and transport settings. Use `.with_cache_namespace("tenant-a")`
+for tenant-specific routing or a custom HTTP client whose settings change
+answers; never put credentials in the namespace. Custom transports can
+override `Transport::cache_namespace` (forwarded through `&T` and `Arc<T>`).
+Stores contain prompts and answers; keep their directories out of source control.
+
+Writes serialize cooperating processes per task label using a persistent
+`.taskloom-store.lock` file, unique temporary files and atomic replacement, with bounded retries
+for temporary Windows file-sharing conflicts. A recording failure returns
+`TaskError::Storage` immediately; a failed optional step-cache write is logged
+and does not discard a valid answer.
 
 ## Budgets and the gateway
 
@@ -120,15 +147,29 @@ let gateway = Gateway::new(GatewayConfig {
 The gateway wraps *any* transport through an attempt closure
 (`Gateway::execute`), so you can put your own HTTP client behind it.
 
+The registry's `TaskProfile::timeout` is a total task limit (default 120 s),
+covering queueing, backoff, protocol retries, repairs and model chains.
+`TaskSpec::deadline` can shorten it; the shorter limit wins. `AttemptTimeout`
+limits each attempt, including its circuit-breaker and concurrency-permit waits.
+An expired total limit stops the task with `TaskError::Deadline` and never
+starts another fallback. Direct gateway calls use `ModelError::Deadline`.
+For long-running tasks, increase the task entry's `timeout_seconds` explicitly.
+
 ## Providers
 
 | Feature | Provider | Notes |
 |---|---|---|
 | `openai` | `openai::OpenAiCompatible` | OpenAI and compatible gateways: chat completions (JSON mode or `json_schema`), SSE streaming with usage, embeddings. |
-| `anthropic` | `anthropic::Anthropic` | Messages API: structured outputs via `output_config.format`, SSE streaming, `anthropic-version: 2026-10-21` (no sampling parameters unless `with_sampling(true)`). |
+| `anthropic` | `anthropic::Anthropic` | Messages API: structured outputs via `output_config.format`, SSE streaming, `anthropic-version: 2023-06-01` (no sampling parameters unless `with_sampling(true)`). |
 
 Both run behind `GatewayTransport`, so budgets, breakers, retries,
 fallback chains, costs and spans apply the same way.
+
+Embeddings retry transient failures on the requested model only: automatic
+cross-model fallback is disabled because vector spaces are not interchangeable.
+The runner validates vector dimensions and finite values before caching them,
+including batches with partial cache hits. Provider API capabilities vary by
+model and endpoint; verify schema and sampling support on your deployed models.
 
 ## Cost, progress, repair and cancellation
 
@@ -157,6 +198,13 @@ println!("{:?}", ledger.snapshot().total_usage());
 
 See [`examples/production.rs`](examples/production.rs) (offline) and
 [`examples/anthropic.rs`](examples/anthropic.rs).
+
+Usage reported with a response is counted even if its JSON, refusal status,
+or embedding count is rejected. Failed tasks expose that usage through the
+call ledger and gateway statistics; successful tasks also include prior
+answered attempts in `TaskOutcome::usage`. Missing provider usage, unfinished
+streams and cancelled requests cannot be priced reliably. These counters
+are accounting, not a job-wide currency spending limit.
 
 ## Evaluating a prompt change
 
@@ -225,6 +273,18 @@ OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
 
 0.1: the API may still change. taskloom was extracted from a production
 video pipeline that runs some sixty model tasks through it.
+
+This release is distributed on GitHub; the installation example pins its Git
+tag. It has not been published to crates.io. Input token limits and reported
+costs do not impose a whole-job currency cap. Retrying or hedging can increase
+the number of paid requests; configure task deadlines and fallback chains
+for your workload. Live-provider interoperability and large-scale load testing
+are separate from the offline CI checks.
+
+See [the readiness assessment](docs/readiness.md) for verified checks,
+remaining release blockers and the boundary of this task-execution library.
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

@@ -4,7 +4,7 @@
 //! A [`Provider`] sends exactly one request and classifies its failure; it
 //! never retries. The gateway decides on admission, retries, breakers and
 //! fallback models, so a provider stays a thin protocol adapter.
-//! [`OpenAiCompatible`](crate::openai::OpenAiCompatible) (feature `openai`)
+//! `openai::OpenAiCompatible` (feature `openai`)
 //! is the built-in one.
 
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 
 use crate::gateway::{AttemptOutput, Gateway, ModelError, TokenEstimator, TokenUsage};
 use crate::task::Answer;
-use crate::transport::{EmbedRequest, Embedded, Format, Request, Transport};
+use crate::transport::{EmbedRequest, Embedded, Format, Request, Response, Transport};
 use crate::TaskError;
 
 /// One chat-completion request to one model.
@@ -76,6 +76,11 @@ pub trait Provider: Send + Sync {
     /// The provider's identity for concurrency and breakers (its base URL).
     fn id(&self) -> &str;
 
+    /// Endpoint and answer-affecting protocol settings. Do not include secrets.
+    fn cache_namespace(&self) -> String {
+        self.id().to_string()
+    }
+
     /// Sends one request; no retries. With `streaming`, a provider that
     /// can stream reports text as it arrives and enforces the idle timeout;
     /// one that cannot ignores it.
@@ -99,6 +104,10 @@ pub trait Provider: Send + Sync {
 }
 
 impl<P: Provider + ?Sized> Provider for Arc<P> {
+    fn cache_namespace(&self) -> String {
+        (**self).cache_namespace()
+    }
+
     fn id(&self) -> &str {
         (**self).id()
     }
@@ -119,7 +128,7 @@ impl<P: Provider + ?Sized> Provider for Arc<P> {
     }
 }
 
-/// Transport option: the wall-clock cap of one attempt.
+/// Transport option: the wall-clock cap of one attempt, including admission.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AttemptTimeout(pub Duration);
 
@@ -143,6 +152,7 @@ pub struct GatewayTransport<P> {
     attempt_timeout: Option<Duration>,
     idle_timeout: Option<Duration>,
     seeds: bool,
+    cache_namespace: String,
 }
 
 impl<P: Provider> GatewayTransport<P> {
@@ -155,6 +165,7 @@ impl<P: Provider> GatewayTransport<P> {
             attempt_timeout: Some(Duration::from_secs(120)),
             idle_timeout: None,
             seeds: false,
+            cache_namespace: String::new(),
         }
     }
 
@@ -194,11 +205,18 @@ impl<P: Provider> GatewayTransport<P> {
         self
     }
 
+    /// Isolates a tenant or custom HTTP-client configuration when the
+    /// endpoint alone does not identify its answers. Never put secrets here.
+    pub fn with_cache_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.cache_namespace = namespace.into();
+        self
+    }
+
     pub fn gateway(&self) -> &Gateway {
         &self.gateway
     }
 
-    async fn send_request(&self, request: Request<'_>) -> Result<Answer, ModelError> {
+    async fn send_request(&self, request: Request<'_>) -> Result<Response, ModelError> {
         if request.attachment.is_some() {
             return Err(ModelError::misconfigured(format!(
                 "{}: this transport sends no file attachments",
@@ -256,28 +274,35 @@ impl<P: Provider> GatewayTransport<P> {
         let gateway = &self.gateway;
         let base = &base;
         self.gateway
-            .execute(&context, |model: String| async move {
-                let schema = schema
-                    .filter(|_| json && gateway.model_profile(&model).supports_json_schema)
-                    .cloned();
-                let attempt = ChatRequest {
-                    model,
-                    schema,
-                    ..base.clone()
-                };
-                let response = provider.complete(&attempt, streaming).await?;
-                if response.finish_reason.as_deref() == Some("refusal") {
-                    return Err(ModelError::ContentRejected {
-                        detail: format!("{label}: the model refused to answer"),
-                    });
-                }
-                let answer = if json {
-                    Answer::Json(decode_json(label, &response)?)
-                } else {
-                    Answer::Text(response.content)
-                };
-                Ok(AttemptOutput::new(answer, response.usage))
-            })
+            .execute_validated(
+                &context,
+                |model: String| async move {
+                    let schema = schema
+                        .filter(|_| json && gateway.model_profile(&model).supports_json_schema)
+                        .cloned();
+                    let attempt = ChatRequest {
+                        model,
+                        schema,
+                        ..base.clone()
+                    };
+                    let response = provider.complete(&attempt, streaming).await?;
+                    let usage = response.usage;
+                    Ok(AttemptOutput::new((attempt.model, response), usage))
+                },
+                |(model, response)| {
+                    if response.finish_reason.as_deref() == Some("refusal") {
+                        return Err(ModelError::ContentRejected {
+                            detail: format!("{label}: the model refused to answer"),
+                        });
+                    }
+                    let answer = if json {
+                        Answer::Json(decode_json(label, &response)?)
+                    } else {
+                        Answer::Text(response.content)
+                    };
+                    Ok(Response { answer, model })
+                },
+            )
             .await
     }
 
@@ -293,6 +318,9 @@ impl<P: Provider> GatewayTransport<P> {
             0,
             self.estimator,
         );
+        // Different models have different vector spaces. Partial cache hits
+        // must never be combined with vectors from a fallback model.
+        context.allow_fallback = false;
         context.transient_attempts = request
             .options
             .get::<TransientAttempts>()
@@ -309,48 +337,75 @@ impl<P: Provider> GatewayTransport<P> {
         let inputs = &inputs;
         let expected = inputs.len();
         self.gateway
-            .execute(&context, |model: String| async move {
-                let response = provider
-                    .embed(&EmbeddingRequest {
-                        model,
-                        inputs: inputs.clone(),
-                    })
-                    .await?;
-                if response.vectors.len() != expected {
-                    return Err(ModelError::schema_mismatch(format!(
-                        "expected {expected} embeddings, got {}",
-                        response.vectors.len()
-                    )));
-                }
-                Ok(AttemptOutput::new(
-                    Embedded {
+            .execute_validated(
+                &context,
+                |model: String| async move {
+                    let response = provider
+                        .embed(&EmbeddingRequest {
+                            model,
+                            inputs: inputs.clone(),
+                        })
+                        .await?;
+                    let usage = response.usage;
+                    Ok(AttemptOutput::new(response, usage))
+                },
+                |response| {
+                    if response.vectors.len() != expected {
+                        return Err(ModelError::schema_mismatch(format!(
+                            "expected {expected} embeddings, got {}",
+                            response.vectors.len()
+                        )));
+                    }
+                    Ok(Embedded {
                         vectors: response.vectors,
-                    },
-                    response.usage,
-                ))
-            })
+                    })
+                },
+            )
             .await
     }
 }
 
 impl<P: Provider> Transport for GatewayTransport<P> {
+    fn cache_namespace(&self) -> Option<String> {
+        let settings = format!(
+            "taskloom-store-v2|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}",
+            self.provider.cache_namespace(),
+            self.cache_namespace,
+            self.gateway.config().models,
+            self.estimator,
+            self.transient_attempts,
+            self.attempt_timeout,
+            self.idle_timeout,
+            self.seeds,
+        );
+        Some(hex::encode(Sha256::digest(settings.as_bytes())))
+    }
+
+    fn task_timeout(&self, label: &str) -> Option<Duration> {
+        Some(self.gateway.task_profile(label).timeout)
+    }
+
     fn send<'a>(&'a self, request: Request<'a>) -> BoxFuture<'a, Result<Answer, TaskError>> {
         Box::pin(async move {
             self.send_request(request)
                 .await
-                .map_err(TaskError::Provider)
+                .map(|response| response.answer)
+                .map_err(TaskError::from)
         })
+    }
+
+    fn send_with_metadata<'a>(
+        &'a self,
+        request: Request<'a>,
+    ) -> BoxFuture<'a, Result<Response, TaskError>> {
+        Box::pin(async move { self.send_request(request).await.map_err(TaskError::from) })
     }
 
     fn embed<'a>(
         &'a self,
         request: EmbedRequest<'a>,
     ) -> BoxFuture<'a, Result<Embedded, TaskError>> {
-        Box::pin(async move {
-            self.embed_request(request)
-                .await
-                .map_err(TaskError::Provider)
-        })
+        Box::pin(async move { self.embed_request(request).await.map_err(TaskError::from) })
     }
 }
 
