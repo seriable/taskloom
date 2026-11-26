@@ -271,7 +271,7 @@ OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
 
 ## Status
 
-0.1: the API may still change. taskloom was extracted from a production
+0.1 is an early GitHub preview: the API may still change. taskloom was extracted from a production
 video pipeline that runs some sixty model tasks through it.
 
 This release is distributed on GitHub; the installation example pins its Git
@@ -280,6 +280,9 @@ costs do not impose a whole-job currency cap. Retrying or hedging can increase
 the number of paid requests; configure task deadlines and fallback chains
 for your workload. Live-provider interoperability and large-scale load testing
 are separate from the offline CI checks.
+
+Local Windows and Linux all-feature tests and Rust 1.86 tests pass. Hosted
+GitHub CI has not completed validation; its live status is shown by the badge.
 
 See [the readiness assessment](docs/readiness.md) for verified checks,
 remaining release blockers and the boundary of this task-execution library.

@@ -58,7 +58,7 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 
 ## 本地验证与限制
 
-验证环境：Windows，Rust/Cargo 1.99。
+验证环境：Windows（Rust/Cargo 1.99 和真实 1.86）；WSL Debian Linux（Rust/Cargo 1.95）。
 
 - 全 feature：75 个单元测试、19 个集成测试，共 94 个（含多进程测试子入口）。
 - feature 组合：无默认 feature、openai、anthropic、schemars 分别运行测试。
@@ -67,12 +67,14 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 - basic、record_replay、production、eval 四个离线示例。
 
 新增测试位于 `tests/gateway_regressions.rs`、`tests/reliability.rs` 和 `tests/step_cache.rs`。
-GitHub CI 覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
+GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
+当前托管 CI 尚未完成验证；发布验证通过的是本地 Windows、真实最低 Rust 版本，以及独立 Linux 环境。
+不能把本地通过的结果描述为 GitHub CI 已通过。
 本次没有调用收费的真实模型接口。测试通过不能保证所有第三方兼容接口均接受同一组参数。
 
 真实接口验收应覆盖：普通 JSON、Schema、流式结束/中断、拒答、429、输出截断和取消，
 并核实 Anthropic 版本头、各模型采样参数及 API 字段兼容性。
 使用量只能记录 Provider 实际返回的数据；被取消的请求或未完成的流仍可能在服务端产生费用。
 
-v0.1 仅发布 GitHub 源码和版本标签，尚未发布 crates.io 包；安装示例使用固定 Git tag。
+v0.1 是 GitHub 预览版，仅发布源码和版本标签，尚未发布 crates.io 包；安装示例使用固定 Git tag。
 准备投入生产前，应在目标 Provider 上完成小规模联调及对应工作负载的压力与恢复测试。
