@@ -121,6 +121,17 @@ acceptance. Broader PEER lifecycle/long-task/native tool-error-repair and qualit
 gates stay open. See `workflow-recovery-acceptance.md` and
 `acceptance/p0-workflow-crash-20261128.json`.
 
+Later explicit tool-error repair increment: actual MCP notes_status returned one
+explicit error, then a later native assistant decision requested a new granted
+safe read. Two dispatches (one error, one success), actual empty-store agreement,
+read-only authority and unchanged terminal reentry passed six controls. This
+is not an uncertain-write retry or broad repair benchmark. The current helper
+also reran the nine-control native write-crash acceptance with read-error
+injection disabled; old fault probes remain retained. See
+`acceptance/p0-tool-repair-20261128.json`. Long-task realism/quality, broader
+PEER lifecycle and semantic/retrieval gates remain open, so the full P0 package
+is still incomplete.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,

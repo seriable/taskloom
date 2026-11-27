@@ -72,3 +72,34 @@ finished. Raw before-approval, live second-process conflict, in-flight kill,
 restart, uncertainty, actual observation, reentry and reconciled snapshots are
 saved. The source-only distribution includes these scripts and evidence, not
 model weights, installed dependencies, note-store state or local executables.
+
+## Explicit read-error repair
+
+`examples/benchmarks/native_tool_repair.py` exercises a different failure type:
+the MCP helper returns one explicit `isError` for `notes_status`. The model must
+observe that returned error before a later assistant decision requests a new
+safe read. It cannot receive credit for preissuing two calls in one batch. Only
+read-only `notes_status` is granted; append is absent from its host tool contract.
+The successful read and final count are compared with the real owned empty
+store. There is no runtime/server retry supplying a fabricated success.
+
+The actual Qwen3-4B probe passed six controls: one error then one successful read,
+each dispatched once; actual error-before-new-assistant-call ordering; final
+`entries=0`; read-only capabilities; no uncertain transport/approval bypass; and
+unchanged terminal reentry. It used three native requests, 1,584 input / 38 output
+tokens, at declared USD 0 generation/local-service fees and cap 0. This is one
+visible deliberately faulted read task, not arbitrary repair quality or authority
+to repeat an uncertain write. Raw messages, tool events and the successful
+current-helper write-crash regression are retained separately in
+`acceptance/p0-tool-repair-20261128.json`. The regression passed all nine original
+crash controls with 3 requests/1,237 input/64 output tokens; preceding failed and
+successful crash probes remain unchanged.
+
+```powershell
+python examples/benchmarks/native_tool_repair.py target/native-read-repair --config target/native-generation-4b-config.json --taskloom target/debug/taskloom.exe
+```
+
+The helper's `--fail-first-status-once` option defaults off and records a
+persisted fault marker under its explicit note directory. Later reads return
+actual status. No runtime, API or checkpoint migration is needed. Existing
+read/write examples retain their behavior when the new option is absent.

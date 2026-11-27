@@ -39,3 +39,13 @@ python examples/benchmarks/native_skills.py target/native-skills-located --confi
 The runner's default remains 1.0.0. Campaigns using 1.1.0 have changed prompts
 and output contracts; their outcomes are not a controlled same-conditions score
 improvement over historical failures.
+
+For explicit runtime fault acceptance, the separately started connector supports
+`--hold-after-append-once-seconds 0..30` (default 0) and
+`--fail-first-status-once` (default off). The former holds only the response
+after a real fsynced append, allowing an owned caller process to be killed; it
+cannot be combined with `--fail-after-append-once`. The latter returns one
+explicit read error so a model can request a new safe read after observing it.
+Both keep host grants and exact approvals authoritative. See
+`../../docs/workflow-recovery-acceptance.md` for actual native results and
+reproducible scripts; neither feature is an install hook or a silent retry.

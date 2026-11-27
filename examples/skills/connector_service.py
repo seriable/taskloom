@@ -33,6 +33,7 @@ class Service:
         self.repository = args.repository
         self.note_identity = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
         self.fail = args.fail_after_append_once
+        self.fail_status_once = args.fail_first_status_once
         self.hold_seconds = args.hold_after_append_once_seconds
         if not 0 <= self.hold_seconds <= 30:
             raise ValueError('append hold must be between zero and 30 seconds')
@@ -163,6 +164,13 @@ class Handler(BaseHTTPRequestHandler):
                 result = service.metadata()
             elif params['name'] == 'notes_status' and arguments == {}:
                 with service.mutex:
+                    marker = service.root / 'status-read-failed-once'
+                    if service.fail_status_once and not marker.exists():
+                        with marker.open('xb') as stream:
+                            stream.write(b'explicit read error returned once; no note was written\n')
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        raise ValueError('Explicit injected read failure. No status is known from this call. A new read-only notes_status request is safe; do not guess the result.')
                     notes = service.notes()
                     result = {'entries': len(notes), 'latest': notes[-5:]}
             elif params['name'] == 'notes_append' and set(arguments) == {'text'} and isinstance(arguments['text'], str) and 1 <= len(arguments['text']) <= 2048:
@@ -222,6 +230,8 @@ def main():
     parser.add_argument('--port', type=int, default=18084)
     parser.add_argument('--ready-file', type=Path)
     parser.add_argument('--fail-after-append-once', action='store_true')
+    parser.add_argument('--fail-first-status-once', action='store_true',
+                        help='return one explicit read error, then normal status; default disabled')
     parser.add_argument('--hold-after-append-once-seconds', type=float, default=0,
                         help='explicit 0..30 second fault-test hold after first fsynced append; default disabled')
     args = parser.parse_args()
