@@ -62,7 +62,9 @@ inconsistent or future-version checkpoints are rejected rather than reset.
 The default maximum file size is 64 MiB, configurable on `FileRunStore`.
 Before dispatch, a run reserves its declared maximum reply size plus duplicate
 tool state, context and terminal metadata. It stops with `StorageLimit` if that
-allowance cannot fit. Native model replies are capped by
+allowance cannot fit. The allowance always includes room for an operator's
+terminal record (about 21 KiB: actor and note stored twice, escaped), so a run
+that was admitted can still be cancelled, aborted or reconciled under the cap. Native model replies are capped by
 `RunLimits::max_model_result_bytes` (64 KiB by default); tool outputs use
 `max_tool_result_bytes`. A reply that violates its declared byte ceiling is
 not retained: the saved run is terminal, observed charges remain, and resume

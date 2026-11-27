@@ -38,6 +38,9 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 base64 = { version = "0.22", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
+# Must be the html5ever release scraper is built on (scraper 0.23 uses 0.29):
+# the bounded parser feeds scraper's tree sink through html5ever's types.
+# Upgrade both together.
 html5ever = { version = "0.29", optional = true }
 jsonschema = { version = "0.29", default-features = false, optional = true }
 # jsonschema accepts newer uuid releases whose MSRV exceeds Rust 1.86.

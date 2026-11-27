@@ -87,8 +87,13 @@ retained, observed cost stays charged, and reentry does not call it again.
 
 Cancellation, approval rejection, `RecordResult`/`Abort` reconciliation and
 `abandon_turn` do not run dispatch-admission checks. Actual writes still obey
-store byte limits, including operator-supplied notes; use a bounded note that
-fits, or explicitly enlarge the trusted store's cap. When the limit is reached, start a new session
+store byte limits, but admission keeps room for them: every run admission
+leaves about 21 KiB for a terminal record, and the session commit reservation
+includes the longest `abandon_turn` acknowledgement (actor 256 bytes, note
+4096 bytes, without control characters other than newline and tab). A run or
+turn that was admitted can therefore always be cancelled or abandoned. Small
+stores need that headroom: about 28 KiB for a run store and 40 KiB for a session
+store that bounds runs. When the limit is reached, start a new session
 (optionally seeding it with a summary from the old one); the existing session
 and its history are kept unchanged. Custom `SessionStore`/`RunLease`
 implementations opt in by returning their limit from `max_bytes`.

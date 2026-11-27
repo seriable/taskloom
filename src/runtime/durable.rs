@@ -92,7 +92,11 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         let size = serde_json::to_vec(state)
             .map_err(|e| corrupt(&e.to_string()))?
             .len() as u64;
-        if size.saturating_add(additional as u64).saturating_add(1024) > max {
+        if size
+            .saturating_add(additional as u64)
+            .saturating_add(TERMINAL_RECORD_RESERVE)
+            > max
+        {
             return Err(RuntimeError::StorageLimit(format!(
                 "run needs {additional} bytes for its bounded response and terminal record beyond its {size}-byte checkpoint; effective storage limit is {max} bytes; start a new session/run or configure smaller result limits"
             )));
@@ -750,6 +754,10 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 .max_tool_calls
                 .saturating_sub(candidate.report.tool_calls)
         };
+        // The reply is stored once as the assistant message; its tool calls
+        // (bounded by the same reply size) are copied again into the tool
+        // steps, hence twice the reply limit. Each step also holds a copy of
+        // its tool definition plus fixed metadata (ids, progress, attempts).
         let reserve = self
             .agent
             .limits
@@ -985,6 +993,10 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         let request_bytes = serde_json::to_vec(&request)
             .map_err(|e| corrupt(&e.to_string()))?
             .len();
+        // A result is stored twice (the step's output and the tool message).
+        // The request is stored in the step and its approval or dispatch
+        // record, and a cancel while awaiting approval copies it once more
+        // into the rejected-approval record.
         self.check_capacity(
             state,
             lease,
@@ -992,7 +1004,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 .limits
                 .max_tool_result_bytes
                 .saturating_mul(2)
-                .saturating_add(request_bytes.saturating_mul(2)),
+                .saturating_add(request_bytes.saturating_mul(3)),
         )?;
         if self.approvals.requires(&step.definition)
             && !step
@@ -1252,9 +1264,31 @@ fn unix_ms() -> Result<u64, RuntimeError> {
         .map_err(|_| corrupt("wall clock exceeds the persistent timestamp range"))
 }
 
+/// Longest accepted decision actor and note, in bytes.
+const MAX_ACTOR_BYTES: usize = 256;
+const MAX_NOTE_BYTES: usize = 4096;
+
+/// Headroom every admission leaves for an operator's terminal record, so a
+/// run admitted to work can always still be cancelled, aborted or stopped
+/// under the store's size cap. A cancel stores the actor and note twice (the
+/// rejected-approval record and the stop detail); `validate_actor` refuses
+/// control characters, so JSON escaping at most doubles them. The rest covers
+/// the status, cursor, events and timestamps. A copy of a pending approval
+/// request is reserved by the tool admission itself.
+const TERMINAL_RECORD_RESERVE: u64 = (2 * 2 * (MAX_ACTOR_BYTES + MAX_NOTE_BYTES) + 4096) as u64;
+
 fn validate_actor(actor: &str, note: &str) -> Result<(), RuntimeError> {
-    if actor.trim().is_empty() || actor.len() > 256 || note.len() > 4096 {
-        return Err(RuntimeError::Configuration("decisions require a nonempty actor (at most 256 bytes) and a note of at most 4096 bytes".into()));
+    let control = |text: &str| {
+        text.chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t')
+    };
+    if actor.trim().is_empty()
+        || actor.len() > MAX_ACTOR_BYTES
+        || note.len() > MAX_NOTE_BYTES
+        || control(actor)
+        || control(note)
+    {
+        return Err(RuntimeError::Configuration("decisions require a nonempty actor (at most 256 bytes) and a note of at most 4096 bytes, without control characters other than newline and tab".into()));
     }
     Ok(())
 }

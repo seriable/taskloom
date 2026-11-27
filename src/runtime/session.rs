@@ -426,6 +426,8 @@ impl<'a> SessionManager<'a> {
             || actor.trim().is_empty()
             || actor.len() > 256
             || note.len() > 4096
+            || has_control(actor)
+            || has_control(note)
         {
             return Err(RuntimeError::Conflict(
                 "abandon requires a failed terminal run and a bounded operator acknowledgement"
@@ -624,6 +626,11 @@ impl<'a> SessionManager<'a> {
     }
 }
 
+fn has_control(text: &str) -> bool {
+    text.chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\t')
+}
+
 fn commit_metadata_bytes(session: &Session, binding: &SessionBinding) -> Result<u64, RuntimeError> {
     let mut committed = session.clone();
     committed.active = None;
@@ -636,8 +643,10 @@ fn commit_metadata_bytes(session: &Session, binding: &SessionBinding) -> Result<
         message_end_count: usize::MAX,
         report_fingerprint: "0".repeat(64),
         outcome: StopReason::Completed,
-        actor: None,
-        note: None,
+        // The longest acknowledgement `abandon_turn` accepts, at its worst
+        // JSON escaping (control characters are refused, so at most double).
+        actor: Some("\"".repeat(256)),
+        note: Some("\"".repeat(4096)),
     });
     Ok(serde_json::to_vec(&committed).map_err(storage)?.len() as u64)
 }

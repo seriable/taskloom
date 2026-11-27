@@ -15,6 +15,11 @@ use taskloom::{
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+// Run stores are 28 KiB: 8 KiB of run state plus the ~21 KiB every admission
+// keeps free for an operator's terminal record. Session stores that bound runs
+// are 40 KiB: they also reserve ~9 KiB of commit metadata for the longest
+// `abandon_turn` acknowledgement.
+
 struct SchemaEcho(AtomicUsize);
 impl Provider for SchemaEcho {
     fn id(&self) -> &str {
@@ -114,7 +119,7 @@ impl Model for SizedModel {
 #[tokio::test]
 async fn reply_limit_violation_is_terminal_and_never_replays_paid_work() {
     let dir = tempfile::tempdir().unwrap();
-    let runs = FileRunStore::new(dir.path()).with_max_bytes(8192);
+    let runs = FileRunStore::new(dir.path()).with_max_bytes(28672);
     let model = SizedModel {
         length: AtomicUsize::new(10000),
         calls: AtomicUsize::new(0),
@@ -147,8 +152,8 @@ async fn reply_limit_violation_is_terminal_and_never_replays_paid_work() {
 #[tokio::test]
 async fn bounded_small_stores_still_commit_answers_that_fit() {
     let dir = tempfile::tempdir().unwrap();
-    let sessions = FileSessionStore::new(dir.path().join("sessions")).with_max_bytes(8192);
-    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(8192);
+    let sessions = FileSessionStore::new(dir.path().join("sessions")).with_max_bytes(40960);
+    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(28672);
     let manager = SessionManager::new(&sessions);
     manager.create("small", vec![]).await.unwrap();
     let model = SizedModel {
@@ -175,11 +180,11 @@ async fn bounded_small_stores_still_commit_answers_that_fit() {
 #[tokio::test]
 async fn oversized_input_is_rejected_without_stranding_an_active_session() {
     let dir = tempfile::tempdir().unwrap();
-    let sessions = FileSessionStore::new(dir.path()).with_max_bytes(8192);
+    let sessions = FileSessionStore::new(dir.path()).with_max_bytes(16384);
     let manager = SessionManager::new(&sessions);
     manager.create("chat", vec![]).await.unwrap();
     assert!(matches!(
-        manager.begin_turn("chat", "large", &"x".repeat(5000)).await,
+        manager.begin_turn("chat", "large", &"x".repeat(8000)).await,
         Err(RuntimeError::StorageLimit(_))
     ));
     let saved = manager.load("chat").await.unwrap();
@@ -264,7 +269,7 @@ impl Model for ToolModel {
 #[tokio::test]
 async fn tool_capacity_is_reserved_before_dispatching_the_callback() {
     let dir = tempfile::tempdir().unwrap();
-    let runs = FileRunStore::new(dir.path()).with_max_bytes(8192);
+    let runs = FileRunStore::new(dir.path()).with_max_bytes(28672);
     let model = ToolModel(AtomicUsize::new(0));
     let calls = Arc::new(AtomicUsize::new(0));
     let observed = calls.clone();
@@ -334,8 +339,8 @@ async fn a_small_store_refuses_uncommittable_model_work_before_dispatch() {
 #[tokio::test]
 async fn session_reserves_commit_metadata_and_refuses_a_large_turn_without_a_model_call() {
     let dir = tempfile::tempdir().unwrap();
-    let sessions = FileSessionStore::new(dir.path().join("sessions")).with_max_bytes(8192);
-    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(8192);
+    let sessions = FileSessionStore::new(dir.path().join("sessions")).with_max_bytes(40960);
+    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(28672);
     let manager = SessionManager::new(&sessions);
     manager.create("chat", vec![]).await.unwrap();
     let model = SizedModel {
@@ -374,7 +379,8 @@ async fn session_reserves_commit_metadata_and_refuses_a_large_turn_without_a_mod
     assert_eq!(result.run.status, RunStatus::Finished);
     assert_eq!(model.calls.load(Ordering::SeqCst), 8);
     let closed = manager
-        .abandon_turn("chat", "big", &saved, "operator", "capacity exhausted")
+        // The longest acknowledgement, escaped at its worst, still fits.
+        .abandon_turn("chat", "big", &saved, &"\\".repeat(256), &"\"".repeat(4096))
         .await
         .unwrap();
     assert!(closed.active.is_none());
@@ -448,4 +454,106 @@ fn quoted_attributes_cannot_hide_nesting_or_leave_parser_work_after_return() {
     drop(runtime);
     assert!(fetch_ms < Duration::from_secs(2));
     assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[tokio::test]
+async fn a_run_admitted_at_the_tightest_store_can_still_be_cancelled_with_the_longest_note() {
+    // Find the smallest store that still admits the run up to its approval
+    // pause, then cancel with the longest note, escaped at its worst.
+    let note = "\"".repeat(4096);
+    let actor = "\\".repeat(256);
+    let mut admitted = None;
+    for kib in 8..=96u64 {
+        let dir = tempfile::tempdir().unwrap();
+        let runs = FileRunStore::new(dir.path()).with_max_bytes(kib * 1024);
+        let model = ToolModel(AtomicUsize::new(0));
+        let mut tools = ToolRegistry::new();
+        tools
+            .register(FnTool::new(
+                ToolDefinition {
+                    name: "lookup".into(),
+                    description: "lookup".into(),
+                    input_schema: serde_json::json!({"type":"object"}),
+                    effect: ToolEffect::ReadOnly,
+                    permissions: BTreeSet::new(),
+                },
+                |_: serde_json::Value, _: ToolContext| async { Ok(serde_json::json!("x")) },
+            ))
+            .unwrap();
+        let agent = AgentLoop::new(&model, &tools, "test")
+            .with_policy(ToolPolicy::default().allow("lookup"))
+            .with_limits(RunLimits {
+                max_tool_calls: 1,
+                max_model_result_bytes: 1024,
+                max_tool_result_bytes: 1024,
+                ..Default::default()
+            });
+        let durable = DurableAgent::new(&agent, &runs).with_approvals(ApprovalPolicy {
+            read_only: true,
+            idempotent: true,
+            non_idempotent: true,
+            tools: BTreeSet::new(),
+        });
+        let paused = durable
+            .start("tight", vec![Message::user("lookup")])
+            .await
+            .unwrap();
+        if paused.status != RunStatus::WaitingApproval {
+            assert_eq!(paused.report.stop_reason, StopReason::StorageLimit);
+            continue;
+        }
+        let cancelled = durable.cancel("tight", &actor, &note).await.unwrap();
+        assert_eq!(cancelled.report.stop_reason, StopReason::Cancelled);
+        admitted = Some(kib);
+        break;
+    }
+    assert!(admitted.is_some(), "no store size admitted the run");
+}
+
+#[tokio::test]
+async fn decision_notes_with_control_characters_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let runs = FileRunStore::new(dir.path());
+    let model = ToolModel(AtomicUsize::new(0));
+    let tools = ToolRegistry::new();
+    let agent = AgentLoop::new(&model, &tools, "test");
+    let error = DurableAgent::new(&agent, &runs)
+        .cancel("none", "operator", "bell\u{7}")
+        .await
+        .unwrap_err();
+    assert!(matches!(error, RuntimeError::Configuration(_)));
+    // Newlines and tabs stay allowed (they reach the not-found path instead).
+    assert!(!matches!(
+        DurableAgent::new(&agent, &runs)
+            .cancel("none", "operator", "line\n\tindented")
+            .await,
+        Err(RuntimeError::Configuration(_))
+    ));
+}
+
+#[test]
+fn reordering_model_overrides_keeps_the_answer_namespace() {
+    let a = ModelProfileOverride {
+        id: "alpha".into(),
+        supports_images: Some(false),
+        ..Default::default()
+    };
+    let b = ModelProfileOverride {
+        id: "beta".into(),
+        supports_json_schema: Some(false),
+        ..Default::default()
+    };
+    use taskloom::Transport;
+    let key = |overrides: Vec<ModelProfileOverride>| {
+        GatewayTransport::new(
+            Arc::new(Gateway::new(GatewayConfig {
+                models: ModelRegistry::new().with_overrides(overrides),
+                ..Default::default()
+            })),
+            SchemaEcho(AtomicUsize::new(0)),
+        )
+        .cache_namespace()
+        .unwrap()
+    };
+    assert_eq!(key(vec![a.clone(), b.clone()]), key(vec![b, a]));
 }

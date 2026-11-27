@@ -268,21 +268,31 @@ impl ModelRegistry {
     /// Only protocol and model-routing settings belong in answer-store keys.
     /// Keep every prefix (including operational-only overrides), since a more
     /// specific override shadows all fields of a less specific one.
+    ///
+    /// Serialized as JSON (a stable format, unlike `Debug`) with overrides
+    /// sorted by prefix, so listing the same overrides in another order keeps
+    /// the key. The sort is stable: repeated prefixes keep their relative
+    /// order, which decides which one applies.
     pub(crate) fn answer_settings(&self) -> String {
-        let overrides = self
+        let mut overrides = self
             .overrides
             .iter()
             .map(|item| {
-                (
-                    item.id.trim().to_ascii_lowercase(),
-                    item.supports_json_schema,
-                    item.supports_images,
-                    item.max_images,
-                    &item.fallback_chain,
-                )
+                serde_json::json!({
+                    "id": item.id.trim().to_ascii_lowercase(),
+                    "supports_json_schema": item.supports_json_schema,
+                    "supports_images": item.supports_images,
+                    "max_images": item.max_images,
+                    "fallback_chain": item.fallback_chain,
+                })
             })
             .collect::<Vec<_>>();
-        format!("{:?}|{:?}", overrides, self.default_fallback_chain)
+        overrides.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+        serde_json::json!({
+            "overrides": overrides,
+            "default_fallback_chain": self.default_fallback_chain,
+        })
+        .to_string()
     }
 
     /// The built-in profiles only.

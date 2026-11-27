@@ -17,7 +17,8 @@ Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaki
   queueing.
 - **(breaking for stores)** The transport cache namespace keeps only
   answer-affecting settings (endpoint, explicit namespace, seeds, schema/image
-  capabilities and fallback routing). Tuning
+  capabilities and fallback routing; overrides are keyed by prefix in sorted
+  order, so reordering them keeps recordings valid). Tuning
   timeouts, retries, concurrency or budgets no longer invalidates recordings
   and cached steps; recordings made with 0.2.0-alpha.1 must be regenerated once.
 - `RequestKey::for_transport` builds the key the runner stores a request
@@ -38,7 +39,13 @@ Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaki
 - **(breaking)** New `RuntimeError::StorageLimit` / `StopReason::StorageLimit`
   (HTTP 507): a turn or dispatch that could not be committed under the store
   size cap is refused before dispatch. Stores report their cap through
-  `max_bytes()`; writes, including operator notes, always obey it.
+  `max_bytes()`; writes, including operator notes, always obey it. Every
+  admission keeps about 21 KiB free for an operator's terminal record, so a
+  run admitted to work can always still be cancelled with the longest note;
+  stores that bound runs therefore need at least that much headroom.
+- **(breaking)** Decision actors and notes (cancel, approve, reconcile) may not
+  contain control characters other than newline and tab, which bounds their
+  JSON size for that reservation.
 - **(breaking for Rust RunLimits literals)** `max_model_result_bytes` bounds
   serialized native replies (64 KiB by default, also defaulted in old JSON).
   Admission reserves declared reply limits, duplicated tool state and actual
