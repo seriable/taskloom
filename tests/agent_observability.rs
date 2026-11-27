@@ -240,6 +240,33 @@ async fn workflow_and_session_join_only_their_frozen_children_and_count_usage_on
         );
     }
     let snapshot = TraceSnapshot::workflow("test", &state, &children).unwrap();
+    for child in &children {
+        assert!(child.trace_binding.is_some());
+        let selected = TraceSnapshot::run("test", child).unwrap();
+        assert_eq!(selected.trace_id, snapshot.trace_id);
+        assert_eq!(selected.root_span_id, snapshot.root_span_id);
+        assert_ne!(selected.selected_span_id, snapshot.selected_span_id);
+        assert_eq!(selected.otlp_traces("test").unwrap().omitted_context, 2);
+        for span in selected.spans.iter().filter(|s| !s.context_only) {
+            let full = snapshot
+                .spans
+                .iter()
+                .find(|s| s.span_id == span.span_id)
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(span).unwrap(),
+                serde_json::to_value(full).unwrap()
+            );
+        }
+    }
+    assert_ne!(
+        TraceSnapshot::run("test", &children[0])
+            .unwrap()
+            .source_revision_key,
+        TraceSnapshot::run("test", &children[1])
+            .unwrap()
+            .source_revision_key
+    );
     assert_eq!(snapshot.metrics.model_decisions_started, 4);
     assert_eq!(snapshot.metrics.retrievals, 2);
     assert_eq!(
@@ -295,6 +322,30 @@ async fn workflow_and_session_join_only_their_frozen_children_and_count_usage_on
         .unwrap();
     let snapshot =
         TraceSnapshot::session("test", &b.session, &[a.run.clone(), b.run.clone()]).unwrap();
+    for run in [&a.run, &b.run] {
+        assert!(run.trace_binding.is_some());
+        let selected = TraceSnapshot::run("test", run).unwrap();
+        assert_eq!(selected.trace_id, snapshot.trace_id);
+        assert_eq!(selected.root_span_id, snapshot.root_span_id);
+        for reference in selected.spans.iter().filter(|s| s.context_only) {
+            assert_eq!(reference.outcome, SpanOutcome::Unknown);
+            assert_eq!(reference.start_unix_ms, None);
+            assert_eq!(reference.end_unix_ms, None);
+        }
+        for span in selected.spans.iter().filter(|s| !s.context_only) {
+            assert_eq!(
+                serde_json::to_value(span).unwrap(),
+                serde_json::to_value(
+                    snapshot
+                        .spans
+                        .iter()
+                        .find(|s| s.span_id == span.span_id)
+                        .unwrap()
+                )
+                .unwrap()
+            );
+        }
+    }
     assert_eq!(snapshot.metrics.model_decisions_started, 4);
     assert_eq!(
         snapshot
@@ -308,6 +359,123 @@ async fn workflow_and_session_join_only_their_frozen_children_and_count_usage_on
     let mut changed = a.run;
     changed.report.events[0].unix_ms = Some(1);
     assert!(TraceSnapshot::session("test", &b.session, &[changed, b.run]).is_err());
+}
+
+#[tokio::test]
+async fn trace_binding_is_host_owned_immutable_and_checked_before_any_creation_or_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = FixtureModel { reads: false };
+    let tools = ToolRegistry::new();
+    let agent = agent(&model, &tools);
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let sessions = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&sessions);
+    manager.create("frozen-parent", vec![]).await.unwrap();
+    let pause = taskloom::CancelToken::new();
+    pause.cancel();
+    let durable = DurableAgent::new(&agent, &runs).with_pause(&pause);
+    let paused = manager
+        .run_turn(&durable, "frozen-parent", "one", "no model before pause")
+        .await
+        .unwrap();
+    assert_eq!(paused.run.status, RunStatus::Paused);
+    assert_eq!(paused.run.report.steps, 0);
+    assert_eq!(
+        paused.run.trace_binding,
+        Some(TraceBinding::session("frozen-parent", "one"))
+    );
+    let wrong = DurableAgent::new(&agent, &runs)
+        .with_trace_binding(TraceBinding::session("wrong-parent", "one"))
+        .unwrap();
+    assert!(matches!(
+        wrong.resume(&paused.run.report.run_id).await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let lease = runs.acquire(&paused.run.report.run_id).await.unwrap();
+    let mut detached = paused.run.clone();
+    detached.revision += 1;
+    detached.trace_binding = None;
+    assert!(lease.save(&detached).await.is_err());
+    drop(lease);
+    assert_eq!(
+        runs.inspect(&paused.run.report.run_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .revision,
+        paused.run.revision
+    );
+    let invalid = DurableAgent::new(&agent, &runs)
+        .with_trace_binding(TraceBinding::session("parent", "turn"))
+        .unwrap();
+    assert!(invalid
+        .create("invalid-child-identity", vec![Message::user("data")])
+        .await
+        .is_err());
+    // An invalid binding left neither checkpoint nor orphaned reservation.
+    let created = DurableAgent::new(&agent, &runs)
+        .create("invalid-child-identity", vec![Message::user("data")])
+        .await
+        .unwrap();
+    assert!(created.trace_binding.is_none());
+    let fake = DurableAgent::new(&agent, &runs)
+        .create(
+            "user-message-only",
+            vec![Message::user(
+                r#"{"trace_binding":{"type":"session","session_id":"fake","turn_id":"fake"}}"#,
+            )],
+        )
+        .await
+        .unwrap();
+    assert!(fake.trace_binding.is_none());
+    let standalone = DurableAgent::new(&agent, &runs);
+    let cancelled = standalone
+        .cancel(&paused.run.report.run_id, "operator", "no dispatch")
+        .await
+        .unwrap();
+    assert_eq!(cancelled.trace_binding, paused.run.trace_binding);
+    assert_eq!(cancelled.report.steps, 0);
+}
+
+#[tokio::test]
+async fn old_unbound_managed_runs_resume_without_backfill_or_changed_input_hashes() {
+    let dir = tempfile::tempdir().unwrap();
+    let model = FixtureModel { reads: false };
+    let tools = ToolRegistry::new();
+    let agent = agent(&model, &tools);
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let sessions = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&sessions);
+    manager.create("legacy-session", vec![]).await.unwrap();
+    let prepared = manager
+        .begin_turn("legacy-session", "one", "old input")
+        .await
+        .unwrap();
+    let durable = DurableAgent::new(&agent, &runs);
+    let old = durable
+        .create(&prepared.run_id, prepared.messages)
+        .await
+        .unwrap();
+    assert!(serde_json::to_value(&old)
+        .unwrap()
+        .get("trace_binding")
+        .is_none());
+    let done = manager
+        .resume_turn(&durable, "legacy-session", "one")
+        .await
+        .unwrap();
+    assert_eq!(done.run.report.stop_reason, StopReason::Completed);
+    assert!(done.run.trace_binding.is_none());
+    assert!(serde_json::to_value(&done.run)
+        .unwrap()
+        .get("trace_binding")
+        .is_none());
+    TraceSnapshot::session("legacy", &done.session, std::slice::from_ref(&done.run)).unwrap();
+    let lease = runs.acquire(&done.run.report.run_id).await.unwrap();
+    let mut backfilled = done.run.clone();
+    backfilled.revision += 1;
+    backfilled.trace_binding = Some(TraceBinding::session("legacy-session", "one"));
+    assert!(lease.save(&backfilled).await.is_err());
 }
 
 #[cfg(feature = "app")]

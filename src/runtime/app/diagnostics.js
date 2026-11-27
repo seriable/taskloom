@@ -12,11 +12,11 @@ $('load-diagnostics').onclick=()=>act(async()=>{
   const data=await api('/diagnostics/'+kind+'/'+encodeURIComponent(id));
   displayedDiagnostic={kind,id,key:data.snapshot.source_revision_key,binding:data.export_binding};
   $('export-diagnostics').disabled=!data.export_configured;
-  show('diagnostic-summary','Trace '+data.snapshot.trace_id+' · '+data.snapshot.spans.length+' spans · '+data.snapshot.missing_children+' missing children. '+(data.export_configured?'Export destination: '+data.export_destination:'Export is not configured.'));
+  show('diagnostic-summary','Trace '+data.snapshot.trace_id+' · selected scope '+data.snapshot.selected_span_id+' · '+data.snapshot.spans.length+' spans · '+data.snapshot.missing_children+' missing children. Metrics describe this scope; overlapping parent/child scopes must not be summed. '+(data.export_configured?'Export destination: '+data.export_destination:'Export is not configured.'));
   $('diagnostic-spans').replaceChildren();
   for(const span of data.snapshot.spans){
     const row=document.createElement('tr');
-    const clock=!span.ended?'open':span.start_unix_ms==null||span.end_unix_ms==null?'wall clock unavailable':span.end_unix_ms<span.start_unix_ms?'wall clock moved backwards':'recorded wall clock';
+    const clock=span.context_only?'parent context reference':!span.ended?'open':span.start_unix_ms==null||span.end_unix_ms==null?'wall clock unavailable':span.end_unix_ms<span.start_unix_ms?'wall clock moved backwards':'recorded wall clock';
     for(const value of [span.kind,span.outcome,span.active_elapsed_ms??'unknown',clock+'\n'+span.span_id+'\nparent: '+(span.parent_span_id??'root')]){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}
     $('diagnostic-spans').append(row);
   }

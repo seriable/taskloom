@@ -15,6 +15,7 @@ use super::{BudgetSnapshot, RunState, RuntimeError};
 /// exclusion and atomic, monotonic replacement semantics.
 pub trait RunLease: Send + Sync {
     fn load(&self) -> BoxFuture<'_, Result<Option<RunState>, RuntimeError>>;
+    /// Preserve a run's original `trace_binding`, including legacy None.
     fn save<'a>(&'a self, state: &'a RunState) -> BoxFuture<'a, Result<(), RuntimeError>>;
     fn load_budget(&self) -> BoxFuture<'_, Result<Option<BudgetSnapshot>, RuntimeError>>;
     fn save_budget<'a>(
@@ -217,6 +218,11 @@ impl RunLease for FileLease {
                 .map_err(|_| RuntimeError::Storage("checkpoint writer panicked".into()))?;
             let path = inner.root.join(format!("{}.json", inner.key));
             if let Some(previous) = read_state(&path, inner.max_bytes, &inner.run_id)? {
+                if previous.trace_binding != state.trace_binding {
+                    return Err(RuntimeError::Storage(
+                        "immutable trace binding differs from the original checkpoint".into(),
+                    ));
+                }
                 if previous.revision > state.revision {
                     // A newer checkpoint exists: this writer's state is stale
                     // and must not be reported as durably saved.

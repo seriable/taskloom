@@ -478,7 +478,13 @@ impl<'a> SessionManager<'a> {
         input: SessionInput,
     ) -> Result<SessionRun, RuntimeError> {
         let session = self.load(id).await?;
-        let mut bounded = durable.clone();
+        let mut bounded =
+            durable
+                .clone()
+                .with_trace_binding(super::observability::TraceBinding::session(
+                    id,
+                    &input.turn_id,
+                ))?;
         if let (Some(max), Some(binding)) = (self.store.max_bytes(), &session.active) {
             // A committed session consists of the run's messages plus this
             // exact metadata. Reserve it before dispatch; a run checkpoint

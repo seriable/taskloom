@@ -20,6 +20,21 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
+def linked_checks(parent, child):
+    """Compare actual observations only; ancestor references assert no state."""
+    actual = [s for s in child['spans'] if not s['context_only']]
+    context = [s for s in child['spans'] if s['context_only']]
+    by_id = {s['span_id']: s for s in parent['spans']}
+    return {
+        'same_trace_and_global_root': child['trace_id'] == parent['trace_id'] and child['root_span_id'] == parent['root_span_id'],
+        'distinct_selected_metric_scope': child['selected_span_id'] != parent['selected_span_id'],
+        'real_child_spans_match_parent_exactly': bool(actual) and all(by_id.get(s['span_id']) == s for s in actual),
+        'two_unknown_untimed_parent_references': len(context) == 2 and all(
+            s['outcome'] == 'unknown' and not s['ended'] and s['start_unix_ms'] is None and s['end_unix_ms'] is None
+            for s in context),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('campaign', type=Path)
@@ -84,6 +99,19 @@ def main():
             receipt = cli(path, 'trace-export', 'workflow', identity, s['source_revision_key'], view['export_binding'])
             save(destination / (name + '-export.json'), receipt)
             report['exports'].append({'name': name, 'receipt': receipt, 'trace_id': s['trace_id']})
+            # Fresh campaigns must persist host correlation before dispatch.
+            # No legacy-data rewrite is performed to make this check pass.
+            observed = before if name == 'before' else campaign['cases']['note_reconciled' if name == 'after' else 'research']
+            run_id = observed['child']['report']['run_id']
+            child_view = cli(path, 'diagnostics', 'run', run_id)
+            save(destination / (name + '-child-snapshot.json'), child_view)
+            child_snapshot = child_view['snapshot']
+            for check, passed in linked_checks(s, child_snapshot).items():
+                report['checks'][name + '_child_' + check] = passed
+            child_receipt = cli(path, 'trace-export', 'run', run_id, child_snapshot['source_revision_key'], child_view['export_binding'])
+            save(destination / (name + '-child-export.json'), child_receipt)
+            report['exports'].append({'name': name + '-child', 'receipt': child_receipt, 'trace_id': child_snapshot['trace_id']})
+            report['checks'][name + '_child_context_omitted_separately'] = child_receipt['omitted_context'] == 2 and child_receipt['selected_span_id'] == child_snapshot['selected_span_id']
         a, b, research = [views[n]['snapshot'] for n in ['before', 'after', 'research']]
         report['checks']['trace_identity_survives_native_approval_restart_and_reconciliation'] = a['trace_id'] == b['trace_id'] and a['root_span_id'] == b['root_span_id']
         old = {s['span_id']: s.get('parent_span_id') for s in a['spans']}
@@ -96,7 +124,7 @@ def main():
         report['checks']['actual_retrieval_span_with_no_exported_quote'] = any(s['kind'] == 'retrieval' for s in research['spans']) and research['metrics']['retrievals'] >= 1
         report['checks']['service_costs_are_unknown_not_zero'] = all(s['metrics']['embedding_attributed_cost_micros'] is None and s['metrics']['tool_services_attributed_cost_micros'] is None for s in [a, b, research])
         report['checks']['receiver_accepted_both_signals_every_time'] = all(e['receipt']['traces']['status'] == 'accepted' and e['receipt']['metrics']['status'] == 'accepted' for e in report['exports'])
-        report['checks']['completed_workflows_have_valid_ended_clocks'] = all(e['receipt']['omitted_open'] == 0 and e['receipt']['omitted_without_clock'] == 0 and e['receipt']['omitted_invalid_clock'] == 0 for e in report['exports'] if e['name'] != 'before')
+        report['checks']['completed_workflows_have_valid_ended_clocks'] = all(e['receipt']['omitted_open'] == 0 and e['receipt']['omitted_without_clock'] == 0 and e['receipt']['omitted_invalid_clock'] == 0 for e in report['exports'] if not e['name'].startswith('before'))
         # The collector file may flush shortly after its HTTP acknowledgement.
         expected_ids={e['trace_id'] for e in report['exports']}
         for _ in range(50):
@@ -106,6 +134,7 @@ def main():
             time.sleep(0.1)
         (destination / 'collector.log').write_text(text, encoding='utf-8')
         report['checks']['actual_collector_log_contains_trace_ids_and_metrics'] = all(identity in text for identity in expected_ids) and 'taskloom.generation.requests' in text
+        report['checks']['collector_metrics_bind_selected_scope'] = all(e['receipt']['selected_span_id'] in text for e in report['exports']) and 'taskloom.selected_span_id' in text
         private = ['Explain exact approval binding. Search the approval contract and cite its exact source quotation.',
                    'Approval is bound to the exact tool name and arguments. Changing the payload requires a new decision.',
                    'Taskloom skill recovery evidence 2026-11-28.', 'TASKLOOM_LOCAL_API_KEY', 'TASKLOOM_EXAMPLE_CONNECTOR_TOKEN']

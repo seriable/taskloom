@@ -31,12 +31,21 @@ usage request count is a different quantity. A node can dispatch repeatedly to
 the **same** durable child without repeating an uncertain external effect.
 Child usage is counted once, not again as parent workflow usage.
 
-A separately inspected child run currently receives a standalone root trace;
-inspect its owning workflow/session to obtain the full parent trace. A durable
-host trace binding that keeps the same trace identity across those independent
-entry points is still open work. These projections also do not install a live
-tracing subscriber or inject W3C headers into external services. The roadmap's
-complete unified-trace gate is therefore not checked by this increment.
+New managed children persist a host-owned `TraceBinding` before their first
+checkpoint. Independently inspecting such a child uses the same trace, global
+root, run and descendant span IDs as inspecting its workflow/session. The
+binding is outside model input and execution configuration, changes no grants,
+and is immutable across checkpoint revisions, including cancellation. A model
+cannot create it through a prompt. SDK callers may attach an exact managed
+identity with `DurableAgent::with_trace_binding`; invalid child IDs or workflow
+input bindings fail before the initial budget journal is created.
+
+Child-only views have `selected_span_id` pointing at the real run and two
+`context_only` ancestor references. References have unknown outcome, no clocks
+and no asserted completion: they are omitted from OTLP as `omitted_context`,
+separately from actually open or missing-clock observations. Inspect the owning
+parent for its current observed state. These projections do not install a live
+subscriber or inject W3C headers into external services.
 
 New `RunEvent` and `WorkflowEvent` records include optional `unix_ms`. Relative
 elapsed time still drives the existing execution limits; wall time never changes
@@ -57,13 +66,16 @@ authorization, context, storage, generation-budget and recovery outcomes.
 
 ## Metrics, retrieval and billing
 
-Metrics describe one selected trace's saved journal: model decisions, native
+Metrics describe the selected scope's saved journal: model decisions, native
 usage requests/tokens, tool attempts/errors, recovered models, output checks,
 omitted context messages, retrievals, empty recalls and skipped oversized chunks.
 OTLP exports up to eighteen **gauges**, not process-wide totals, deltas or a cross-run
 latency ranking. Re-exporting snapshots can resend the same completed span IDs;
 the receipt/revision key permits host-side tracking, but exporter delivery is not
 exactly once. No automatic retry hides an uncertain receiver outcome.
+Gauges bind both `taskloom.trace_id` and `taskloom.selected_span_id`. A parent
+scope includes its children; a child scope contains only that run. Do not sum
+overlapping scopes or treat repeated snapshot observations as incremental work.
 Completeness and usage-reporting flags accompany the observations. Missing child
 records suppress generation gauges; unreported provider usage suppresses token
 and request gauges. Missing data does not become a zero-valued measurement.
@@ -179,15 +191,29 @@ for `RunEvent`/`WorkflowEvent` must add `unix_ms`; direct `AppConfig` literals n
 the new optional `observability` field or a default update. `AgentTask` API,
 minimal default features and Rust 1.86 remain supported. There are no new crates.
 
+Missing `RunState.trace_binding` remains absent when serialized. Old unbound
+children resume without backfill and retain their original input/report hashes;
+their standalone view still has a standalone trace. Parent inspection continues
+to join them from its verified persisted references. No implicit scan, parent
+inference from model text or historical ID rewrite is performed. New direct
+`RunState` literals must supply `trace_binding: None` or an exact host binding.
+Custom `RunLease` backends must preserve the original binding, including legacy
+`None`, as the file store does. A strict resume with conflicting existing host
+binding fails; administrative cancellation can still resolve the original run.
+
 ```powershell
 cargo test --locked --all-features --test agent_observability
 python examples/observability/download_collector.py target/collector-pinned
 target/collector-pinned/otelcol.exe --config target/collector-loopback.yaml
 python examples/benchmarks/native_skills.py target/native-observability --config local-native-otlp.json --taskloom target/debug/taskloom.exe --research-package research-located
 python examples/observability/accept_native.py target/native-observability --taskloom target/debug/taskloom.exe --collector-log target/collector.log
+python examples/observability/accept_sessions.py target/native-session-traces --config local-native-otlp.json --taskloom target/debug/taskloom.exe --collector-log target/collector.log
 ```
 
 See `examples/observability/README.md` for loopback receiver setup and versions,
 and `acceptance/p1-observability-20261128.json` for raw native evidence, actual
-Collector output, browser observations, failures and check boundaries. This
+Collector output, browser observations, failures and check boundaries. The later
+`acceptance/p1-trace-binding-20261128.json` records fresh native workflow/session
+parent binding, cold CLI/API continuity, actual receiver acceptance and failed
+diagnostic-ID probes before the fix. This
 increment does not complete P0 research/collaboration quality or P2 service/UI.

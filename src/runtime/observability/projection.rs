@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::invalid;
+use super::{invalid, TraceBinding};
 use crate::ledger::Usage;
 use crate::runtime::{
     rag::SearchResult, state::fingerprint, workflow::*, Message, RunEventKind, RunState, RunStatus,
@@ -34,6 +34,7 @@ pub enum SpanKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpanOutcome {
+    Unknown,
     Open,
     Ok,
     Error,
@@ -56,6 +57,9 @@ pub struct DiagnosticSpan {
     /// Distinguishes an actual end event with an unavailable clock from a
     /// genuinely open operation. Timestamp absence never means completion.
     pub ended: bool,
+    /// A durable parent reference in a selected-child view, not an observation
+    /// of the parent's current state, timestamps or completion.
+    pub context_only: bool,
     pub active_elapsed_ms: Option<u64>,
     pub attributes: BTreeMap<String, Value>,
 }
@@ -76,6 +80,7 @@ impl DiagnosticSpan {
             start_unix_ms: start,
             end_unix_ms: end,
             ended: end.is_some(),
+            context_only: false,
             active_elapsed_ms: None,
             attributes: BTreeMap::new(),
         }
@@ -140,6 +145,9 @@ pub struct TraceSnapshot {
     pub version: u32,
     pub trace_id: String,
     pub root_span_id: String,
+    /// Metric/inspection scope. Linked child views share the parent's trace,
+    /// but their metrics describe only this selected subtree.
+    pub selected_span_id: String,
     pub source_revision_key: String,
     pub captured_unix_ms: Option<u64>,
     pub spans: Vec<DiagnosticSpan>,
@@ -190,6 +198,7 @@ impl TraceSnapshot {
         Ok(Self {
             version: 1,
             root_span_id: key(&[&trace_id, "root"], 8),
+            selected_span_id: key(&[&trace_id, "root"], 8),
             source_revision_key: key(&[&trace_id, &revision.to_string()], 16),
             trace_id,
             captured_unix_ms: super::unix_ms(),
@@ -220,6 +229,41 @@ impl TraceSnapshot {
         Ok(index)
     }
     pub fn run(namespace: &str, state: &RunState) -> Result<Self, RuntimeError> {
+        state.validate()?;
+        if let Some(binding) = &state.trace_binding {
+            let (kind, root, segment) = binding.root();
+            let mut snapshot = Self::new(namespace, kind, root, state.revision)?;
+            let (root_kind, segment_kind, segment_key) = match binding {
+                TraceBinding::Workflow { .. } => (SpanKind::Workflow, SpanKind::Node, "node"),
+                TraceBinding::Session { .. } => (SpanKind::Session, SpanKind::Turn, "turn"),
+            };
+            let parent = snapshot.span_key(&[segment_key, segment]);
+            for (id, parent, kind) in [
+                (snapshot.root_span_id.clone(), None, root_kind),
+                (
+                    parent.clone(),
+                    Some(snapshot.root_span_id.clone()),
+                    segment_kind,
+                ),
+            ] {
+                let mut reference =
+                    DiagnosticSpan::new(id, parent, kind, None, None, SpanOutcome::Unknown);
+                reference.context_only = true;
+                snapshot.push(reference)?;
+            }
+            let run_id = snapshot.span_key(&[&parent, "run"]);
+            snapshot.selected_span_id = run_id.clone();
+            snapshot.source_revision_key = key(
+                &[
+                    &snapshot.source_revision_key,
+                    "selected-run",
+                    &state.report.run_id,
+                ],
+                16,
+            );
+            snapshot.add_run(state, run_id, Some(parent))?;
+            return Ok(snapshot);
+        }
         let mut snapshot = Self::new(namespace, "run", &state.report.run_id, state.revision)?;
         snapshot.add_run(state, snapshot.root_span_id.clone(), None)?;
         Ok(snapshot)
@@ -669,6 +713,14 @@ impl TraceSnapshot {
             }
             if let Some(reference) = workflow_run_id(state, node) {
                 if let Some(child) = children.iter().find(|r| r.report.run_id == reference) {
+                    let expected = TraceBinding::workflow(&state.id, &node.id);
+                    if child
+                        .trace_binding
+                        .as_ref()
+                        .is_some_and(|saved| saved != &expected)
+                    {
+                        return Err(invalid("child trace binding differs from workflow parent"));
+                    }
                     if !used.insert(reference) {
                         return Err(invalid("duplicate workflow child"));
                     }
@@ -736,6 +788,14 @@ impl TraceSnapshot {
                 return Err(invalid("duplicate session child"));
             }
             child.validate()?;
+            let expected = TraceBinding::session(&session.id, &binding.turn_id);
+            if child
+                .trace_binding
+                .as_ref()
+                .is_some_and(|saved| saved != &expected)
+            {
+                return Err(invalid("child trace binding differs from session parent"));
+            }
             if child.initial_message_count != binding.base_message_count + 1
                 || child.report.messages.get(..binding.base_message_count)
                     != session.messages.get(..binding.base_message_count)

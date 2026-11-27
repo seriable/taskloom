@@ -225,6 +225,8 @@ pub struct RunState {
     /// Exact input boundary, used to bind session turns to idempotent run ids.
     pub initial_message_count: usize,
     pub config: RunConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_binding: Option<super::observability::TraceBinding>,
     pub status: RunStatus,
     pub cursor: RunCursor,
     pub report: RunReport,
@@ -267,6 +269,11 @@ impl RunState {
             .get(..self.initial_message_count)
             .ok_or_else(|| invalid("initial input boundary is outside the transcript"))?;
         validate_history(initial).map_err(|error| invalid(&error.to_string()))?;
+        if let Some(binding) = &self.trace_binding {
+            binding
+                .validate_state(self)
+                .map_err(|e| invalid(&e.to_string()))?;
+        }
         if let Some(binding) = &self.config.skill_binding {
             binding.validate().map_err(|e| invalid(&e.to_string()))?;
         }

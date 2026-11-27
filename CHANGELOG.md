@@ -7,8 +7,11 @@
   Explicit OTLP/HTTP JSON export sends bounded allowlisted spans and gauges;
   nothing uploads by default. CLI/API/UI expose billing boundaries and local
   evaluation comparison without inferring rankings. Actual native-model and
-  official Collector evidence is retained. Standalone child views still need a
-  durable parent trace binding. New optional event timestamps preserve old wire
+  official Collector evidence is retained. New managed children persist immutable
+  host trace bindings; independent views retain parent identity and qualify
+  context-only ancestors. Gauges include the selected scope to distinguish
+  overlapping observations. Legacy unbound runs resume without backfill.
+  New optional event timestamps preserve old wire
   hashes; direct Rust event literals need `unix_ms`. See `docs/observability.md`.
 - Opt-in exact-locator citation contracts retain model JSON and resolve only
   unambiguous retrieved document/revision/UTF-8-byte-offset references. Workflow

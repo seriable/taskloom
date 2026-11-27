@@ -463,9 +463,54 @@ attempt and one recorded request. Its usage-completeness flag was false, so
 the surviving request's token subtotal cannot masquerade as complete usage.
 
 This is actual native/API and receiver evidence, with fixture network-control
-tests separately labelled. It is an on-demand journal projection. Standalone
-child entry points still need durable parent trace binding; generation metrics
-can lag newer reservation journals, and embedding/tool-service allocation is
+tests separately labelled. It is an on-demand journal projection. At that
+increment standalone child entry points still needed durable parent binding;
+the subsequent campaign below adds and verifies it for new managed children.
+Generation metrics can lag newer reservation journals, and embedding/tool-service allocation is
 explicitly unknown rather than zero. The complete unified-trace gate and all
-remaining P0/P2 requirements are open. See `observability.md` and
+remaining P0/P2 requirements were open at that increment. See `observability.md` and
 `acceptance/p1-observability-20261128.json` for raw artifacts and source hashes.
+
+## Native parent binding and independent inspection, 2026-11-28
+
+New immutable host metadata now correlates managed children without changing
+model input, permission or budget contracts. A fresh native source-package
+campaign (`target/native-trace-binding-20261128-1`) passed four templates and
+thirteen controls in 13,778 ms. It used actual Qwen API decisions, public GitHub
+metadata, exact approval and one response-lost filesystem write, explicitly
+reconciled after restart. No repeat of that uncertain write occurred.
+
+The first independent diagnostic probe and first session probe failed because
+the application diagnostic route rejected generated IDs longer than 64 bytes.
+They remain recorded as failures. After the route fix, the same frozen workflow
+journals passed 28 diagnostic checks using the corrected CLI. Six actual
+Collector exports accepted 38 span observations. A separate fresh native
+two-turn session campaign (`target/native-trace-sessions-20261128-2`) passed 27
+checks in 2,392 ms: the create acknowledgement already had host binding, cold
+CLI matched API with the model key removed, session/child IDs survived an owned
+host restart, and the closed session refused resume with no run change or new
+generation. Two native requests reported 94 input and 14 output tokens total.
+Six session exports accepted 18 span observations. Snapshot exports can repeat
+span IDs and gauges; these counts are neither unique operations nor work totals.
+
+Both use the same verified Qwen3-1.7B weights/server described earlier, explicit
+USD-zero generation prices and zero caps, environment `TASKLOOM_LOCAL_API_KEY`,
+and the actual pinned official Collector release asset v0.140.0 (self-reported
+binary 0.140.1). Hardware/electricity/chat usage remain unmetered. No embeddings
+or paid remote calls ran. Generation and projection executable digests are
+recorded separately because the route fix happened after native workflow work.
+
+Full parent and independent child views have identical actual child spans.
+Child-only parent references assert unknown status and no times, and OTLP omits
+them as context. Gauges bind `taskloom.selected_span_id`; do not sum overlapping
+parent/child scopes. Receiver checks used only newly appended log bytes and
+excluded prompts, answers/quotes, note contents and credential names. Browser
+acceptance verified the same real child through UI inspection and explicit
+two-span export, and repaired long-ID headings at 390×844 without page overflow.
+
+Old unbound runs retain standalone identity when independently inspected and
+resume without backfill; parent inspection still verifies/joins them. This is
+not an in-flight session crash, W3C service propagation, live subscriber,
+multi-user service or task-quality benchmark. P0 quality/comparison and P2 gates
+remain open. Raw evidence and failed probes:
+`acceptance/p1-trace-binding-20261128.json`.

@@ -1,11 +1,13 @@
 //! Recoverable diagnostics derived from validated journals, not model output.
 //! No subscriber, uploader, environment discovery or background task is started
 //! by constructing a snapshot. OTLP network export is separately opt-in.
+mod binding;
 #[cfg(feature = "telemetry")]
 mod export;
 mod projection;
 mod wire;
 
+pub use binding::TraceBinding;
 #[cfg(feature = "telemetry")]
 pub use export::{ExportAttempt, ExportReceipt, OtlpHttpConfig, OtlpHttpExporter};
 pub use projection::*;

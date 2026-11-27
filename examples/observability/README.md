@@ -38,13 +38,18 @@ infer general task quality from Collector protocol acceptance.
 ```powershell
 python examples/benchmarks/native_skills.py target/native-observability --config local-native-otlp.json --taskloom target/debug/taskloom.exe --research-package research-located
 python examples/observability/accept_native.py target/native-observability --taskloom target/debug/taskloom.exe --collector-log target/collector.log
+python examples/observability/accept_sessions.py target/native-session-traces --config local-native-otlp.json --taskloom target/debug/taskloom.exe --collector-log target/collector.log
 ```
 
-The latter command starts no model/service. It removes generation and connector
+`accept_native.py` starts no model/service. It removes generation and connector
 credential environments from CLI subprocesses and reads the saved native run.
 It copies the observed before-approval snapshot into a separate inspection root,
 then explicitly exports before/after and research traces to the configured local
-Collector. Original stores are never rewound. Each export binds current source
+Collector, plus each independently selected child. Fresh native records must
+already contain host bindings; older campaigns are never silently backfilled
+to pass the check. Real child observations must match their parent exactly;
+unknown context-only ancestors are counted separately and never exported as
+invented parent observations. Original stores are never rewound. Each export binds current source
 revisions and destination settings. Receiver verification uses only log bytes
 appended after this probe began, so old output cannot satisfy a new probe.
 
@@ -56,3 +61,13 @@ validation spans. These exports can repeat completed span IDs across snapshots;
 they are separate explicit observations, not automatic network retries or extra
 model calls. See `../../docs/observability.md` for API, privacy, billing, bounds,
 shutdown, migration and current limitations.
+
+`accept_sessions.py` runs two actual zero-priced local native turns, restarting
+its owned Taskloom host between them. It checks the acknowledged child binding,
+cold CLI/API agreement without the generation key, stable parent/child span IDs,
+distinct sibling source keys, and refusal to resume a closed session without
+extra model work. It explicitly exports parent/child snapshots to the same
+running local Collector; it does not claim an in-flight crash or answer quality.
+Both helpers check only receiver log bytes appended during their own probe.
+Metrics include selected scope: parent/child scopes overlap and must not be
+summed. Use a fresh output directory for each campaign; failed probes are kept.

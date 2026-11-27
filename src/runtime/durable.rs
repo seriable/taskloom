@@ -25,6 +25,7 @@ pub struct DurableAgent<'a, 'model> {
     pause: Option<&'a CancelToken>,
     cancel_reason: Option<&'a CancelReason>,
     checkpoint_limit: Option<u64>,
+    trace_binding: Option<super::observability::TraceBinding>,
 }
 
 /// Who cancelled a live run and why. Record it before firing the worker's
@@ -63,12 +64,33 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             pause: None,
             cancel_reason: None,
             checkpoint_limit: None,
+            trace_binding: None,
         }
     }
 
     pub fn with_approvals(mut self, approvals: ApprovalPolicy) -> Self {
         self.approvals = approvals;
         self
+    }
+    /// Freeze host-owned parent correlation for a newly created child. This
+    /// changes no model input or execution grant. Old unbound runs are never
+    /// silently backfilled on resume; existing linked runs cannot be reparented.
+    pub fn with_trace_binding(
+        mut self,
+        binding: super::observability::TraceBinding,
+    ) -> Result<Self, RuntimeError> {
+        binding.validate()?;
+        if self
+            .trace_binding
+            .as_ref()
+            .is_some_and(|old| old != &binding)
+        {
+            return Err(RuntimeError::Configuration(
+                "conflicting host trace bindings".into(),
+            ));
+        }
+        self.trace_binding = Some(binding);
+        Ok(self)
     }
 
     /// A parent may reserve part of its own storage capacity for the run's
@@ -561,6 +583,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             revision: 0,
             initial_message_count: messages.len(),
             config: self.configuration(),
+            trace_binding: self.trace_binding.clone(),
             status: RunStatus::Ready,
             cursor: RunCursor::ModelReady,
             tool_steps: Vec::new(),
@@ -583,6 +606,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         };
         self.agent.validate(&state.report)?;
         validate_history(&state.report.messages)?;
+        if let Some(binding) = &state.trace_binding {
+            binding.validate_state(&state)?;
+        }
         self.event(&mut state, &clock, RunEventKind::Started);
         if self.agent.output_policy.is_some() {
             self.check_capacity(&state, lease, 0)?;
@@ -622,6 +648,17 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         if strict_config && state.config != self.configuration() {
             return Err(RuntimeError::Configuration(
                 "resume configuration or tool definitions differ from the saved run".into(),
+            ));
+        }
+        if strict_config
+            && self
+                .trace_binding
+                .as_ref()
+                .zip(state.trace_binding.as_ref())
+                .is_some_and(|(expected, saved)| expected != saved)
+        {
+            return Err(RuntimeError::Configuration(
+                "host trace binding differs from saved child".into(),
             ));
         }
         if let Some(journal) = lease.load_budget().await? {

@@ -173,7 +173,7 @@ collaboration acceptance. Role prompts/format changed from v2. See
 
 ## P1.3 — Observability and diagnosis
 
-- [ ] Correlated run/workflow/session/model/tool/retrieval spans and metrics.
+- [x] Correlated run/workflow/session/model/tool/retrieval spans and metrics.
 - [x] Configured OpenTelemetry export, default-off external transmission,
   bounded buffers, teardown and failure handling; no prompt/secret export by
   default. Verify against a real local receiver.
@@ -200,15 +200,35 @@ may be newer. Embedding has an independent host ledger and no per-run allocation
 here; generic tool-service billing is unknown, not zero. Fixture/chat ledgers
 and wall time do not become real API billing or inference benchmarks.
 
-The complete unified-trace box stays unchecked: inspecting a child run alone
-currently creates a standalone trace identity. A durable host-owned binding
-across parent and standalone entry points remains to be implemented and tested.
+At that initial increment the complete unified-trace box stayed unchecked:
+inspecting a child run alone created a standalone trace identity. The subsequent
+host-binding increment below closes that specific gap for new managed runs.
 Old journals retain missing wall clocks; sessions have no terminal close event,
 and their open root spans are not exported as completed. These are explicit
 snapshot projections, not an implicit live subscriber or W3C header injector.
 See `observability.md`, `native-evaluation.md` and
 `acceptance/p1-observability-20261128.json` for commands, migration, failed
 prerequisite/harness probes, raw evidence and limitations. P0/P2 remain open.
+
+Later 2026-11-28 host-binding increment: new workflow/session children now persist
+an immutable parent reference before the first checkpoint. Standalone CLI/API/UI
+inspection retains the parent's trace ID and exact child span observations;
+unknown parent context references have no invented outcome/time and are omitted
+separately from actual open spans. Snapshot gauges include selected scope, so
+overlapping parent/child views must not be summed. Legacy unbound runs retain
+their hashes and resume without backfill; only their parent view joins them.
+
+Real local Qwen native workflow approval/restart/response-lost reconciliation and
+two-turn session restart campaigns passed 28 and 27 diagnostic checks respectively.
+All twelve explicit exports were accepted by the actual official Collector,
+with 38 workflow and 18 session span observations (repeated snapshots are not
+unique operations). Native template execution separately passed four templates
+and thirteen controls. Initial probes exposed a real 64-character diagnostic-ID
+limit; the fixed route now admits generated child IDs, with CLI/API regression
+coverage. Browser checks passed linked child inspection/export and a repaired
+390-pixel heading layout. See `acceptance/p1-trace-binding-20261128.json` for
+raw reports, failed probes, version/digest evidence and check limits. This accepts
+the bounded P1 observability package; P0 quality/comparisons and P2 remain open.
 
 ## P2.1 — Product experience
 

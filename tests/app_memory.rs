@@ -203,6 +203,31 @@ async fn http_memory_lifecycle_restarts_and_cli_management_needs_no_model_or_too
         .await
         .unwrap();
     assert!(child.config.tools.is_empty());
+    assert_eq!(
+        child.trace_binding,
+        Some(observability::TraceBinding::session("new", "one"))
+    );
+    // Managed IDs exceed the user-created 64-byte limit. API and cold CLI
+    // diagnostics must admit the same bounded read identities as /runs/{id}.
+    let diagnostic: Value = reqwest::Client::new()
+        .get(format!("{url}/diagnostics/run/{}", child.report.run_id))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let parent = diagnostic_snapshot(&cfg, DiagnosticTarget::Session, "new")
+        .await
+        .unwrap();
+    assert_eq!(diagnostic["snapshot"]["trace_id"], parent.trace_id);
+    assert_ne!(
+        diagnostic["snapshot"]["selected_span_id"],
+        parent.selected_span_id
+    );
     worker.abort();
     host.shutdown(Duration::from_secs(1)).await.unwrap();
     drop(host);
@@ -229,6 +254,23 @@ async fn http_memory_lifecycle_restarts_and_cli_management_needs_no_model_or_too
     let cfg_path = dir.path().join("cli.json");
     std::fs::write(&cfg_path, serde_json::to_vec(&cli_cfg).unwrap()).unwrap();
     let binary = env!("CARGO_BIN_EXE_taskloom");
+    let inspected = std::process::Command::new(binary)
+        .args([
+            "--config",
+            cfg_path.to_str().unwrap(),
+            "diagnostics",
+            "run",
+            &child.report.run_id,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        inspected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&inspected.stderr)
+    );
+    let inspected: Value = serde_json::from_slice(&inspected.stdout).unwrap();
+    assert_eq!(inspected["snapshot"]["trace_id"], parent.trace_id);
     let cli = std::process::Command::new(binary)
         .args(["--config", cfg_path.to_str().unwrap(), "memory"])
         .output()

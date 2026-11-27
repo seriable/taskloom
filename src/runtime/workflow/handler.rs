@@ -275,8 +275,12 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                 .or_else(crate::cancel::current)
                 .unwrap_or_default();
             let agent = self.configured_agent().with_cancel(&child_cancel);
-            let mut durable =
-                DurableAgent::new(&agent, self.store).with_approvals(self.approvals.clone());
+            let mut durable = DurableAgent::new(&agent, self.store)
+                .with_approvals(self.approvals.clone())
+                .with_trace_binding(crate::runtime::observability::TraceBinding::workflow(
+                    &context.workflow_id,
+                    &context.node_id,
+                ))?;
             if let Some(reason) = &self.cancel_reason {
                 durable = durable.with_cancel_reason(reason);
             }

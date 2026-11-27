@@ -181,6 +181,9 @@ impl Application {
                 return Ok(state);
             }
             DurableAgent::new(&self.agent(), &self.runs)
+                .with_trace_binding(crate::runtime::observability::TraceBinding::session(
+                    id, turn,
+                ))?
                 .create(&prepared.run_id, prepared.messages)
                 .await
         }

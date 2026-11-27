@@ -73,7 +73,10 @@ pub async fn diagnostic_snapshot(
     target: DiagnosticTarget,
     id: &str,
 ) -> Result<TraceSnapshot, RuntimeError> {
-    super::valid_id(id)?;
+    match target {
+        DiagnosticTarget::Run => super::valid_read_id(id)?,
+        DiagnosticTarget::Workflow | DiagnosticTarget::Session => super::valid_id(id)?,
+    }
     let runs = FileRunStore::new(config.state_dir.join("runs")).with_max_bytes(16 * 1024 * 1024);
     let namespace = config
         .observability

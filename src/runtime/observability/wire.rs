@@ -11,6 +11,7 @@ pub struct OtlpTracePayload {
     pub omitted_open: usize,
     pub omitted_without_clock: usize,
     pub omitted_invalid_clock: usize,
+    pub omitted_context: usize,
 }
 fn service(name: &str) -> Result<Value, RuntimeError> {
     if name.trim().is_empty() || name.len() > 128 || name.chars().any(char::is_control) {
@@ -45,6 +46,7 @@ fn name(kind: SpanKind) -> &'static str {
 }
 fn outcome(outcome: SpanOutcome) -> &'static str {
     match outcome {
+        SpanOutcome::Unknown => "unknown",
         SpanOutcome::Open => "open",
         SpanOutcome::Ok => "ok",
         SpanOutcome::Error => "error",
@@ -121,6 +123,7 @@ impl TraceSnapshot {
             omitted_open: 0,
             omitted_without_clock: 0,
             omitted_invalid_clock: 0,
+            omitted_context: 0,
         };
         let mut spans = Vec::new();
         let ids = self
@@ -140,6 +143,10 @@ impl TraceSnapshot {
                 return Err(invalid("invalid span or parent identity"));
             }
             let attributes = attributes(span)?;
+            if span.context_only {
+                result.omitted_context += 1;
+                continue;
+            }
             if !span.ended {
                 result.omitted_open += 1;
                 continue;
@@ -176,7 +183,7 @@ impl TraceSnapshot {
     /// process-wide totals nor interval deltas, and parent/child usage is counted
     /// once. Unknown embedding/tool-service costs are omitted rather than zero.
     pub fn otlp_metrics(&self, service_name: &str) -> Result<Value, RuntimeError> {
-        if !valid_id(&self.trace_id, 16) {
+        if !valid_id(&self.trace_id, 16) || !valid_id(&self.selected_span_id, 8) {
             return Err(invalid("invalid trace identity"));
         }
         let Some(time) = self.captured_unix_ms.and_then(|t| t.checked_mul(1_000_000)) else {
@@ -230,7 +237,7 @@ impl TraceSnapshot {
             {
                 continue;
             }
-            metrics.push(json!({"name":format!("taskloom.{field}"),"description":"Per-trace validated journal snapshot; generation excludes embedding and tool services","gauge":{"dataPoints":[{"attributes":[{"key":"taskloom.trace_id","value":{"stringValue":self.trace_id}},{"key":"taskloom.observation.complete","value":{"boolValue":m.saved_run_observations_complete}},{"key":"taskloom.generation.usage_reported","value":{"boolValue":m.generation_usage_reported}}],"timeUnixNano":time.to_string(),"asInt":signed(value)?}]}}));
+            metrics.push(json!({"name":format!("taskloom.{field}"),"description":"Selected-subtree validated journal snapshot; do not sum overlapping parent/child scopes; generation excludes embedding and tool services","gauge":{"dataPoints":[{"attributes":[{"key":"taskloom.trace_id","value":{"stringValue":self.trace_id}},{"key":"taskloom.selected_span_id","value":{"stringValue":self.selected_span_id}},{"key":"taskloom.observation.complete","value":{"boolValue":m.saved_run_observations_complete}},{"key":"taskloom.generation.usage_reported","value":{"boolValue":m.generation_usage_reported}}],"timeUnixNano":time.to_string(),"asInt":signed(value)?}]}}));
         }
         Ok(
             json!({"resourceMetrics":[{"resource":service(service_name)?,"scopeMetrics":[{"scope":{"name":"taskloom.journal","version":"1"},"metrics":metrics}]}]}),

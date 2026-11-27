@@ -104,12 +104,14 @@ pub enum ExportAttempt {
 pub struct ExportReceipt {
     pub source_revision_key: String,
     pub trace_id: String,
+    pub selected_span_id: String,
     pub traces: ExportAttempt,
     pub metrics: ExportAttempt,
     pub spans_sent: usize,
     pub omitted_open: usize,
     pub omitted_without_clock: usize,
     pub omitted_invalid_clock: usize,
+    pub omitted_context: usize,
     pub missing_children: usize,
 }
 
@@ -173,6 +175,7 @@ impl OtlpHttpExporter {
             omitted_open,
             omitted_without_clock,
             omitted_invalid_clock,
+            omitted_context,
         } = snapshot.otlp_traces(&self.config.service_name)?;
         let traces = self.encode(&body)?;
         let metrics = self.encode(&snapshot.otlp_metrics(&self.config.service_name)?)?;
@@ -187,12 +190,14 @@ impl OtlpHttpExporter {
         Ok(ExportReceipt {
             source_revision_key: snapshot.source_revision_key.clone(),
             trace_id: snapshot.trace_id.clone(),
+            selected_span_id: snapshot.selected_span_id.clone(),
             traces,
             metrics,
             spans_sent: exported_spans,
             omitted_open,
             omitted_without_clock,
             omitted_invalid_clock,
+            omitted_context,
             missing_children: snapshot.missing_children,
         })
     }
