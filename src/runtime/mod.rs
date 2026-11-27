@@ -28,7 +28,7 @@ pub mod workflow;
 
 pub use budget::{BudgetJournal, BudgetSnapshot, Reservation, RunBudget};
 pub use context::{ContextCompressor, ContextPolicy, ContextRecord, ExtractiveCompressor};
-pub use durable::DurableAgent;
+pub use durable::{CancelReason, DurableAgent};
 pub use executor::{
     AgentLoop, EventSink, RunEvent, RunEventKind, RunLimits, RunReport, StopReason,
 };

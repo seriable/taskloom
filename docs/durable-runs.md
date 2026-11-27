@@ -77,6 +77,12 @@ The agent's explicit or ambient cancellation token still interrupts active
 work. Cancellation and exhausted limits are terminal; `resume` does not
 silently reactivate them. In-flight tools remain marked uncertain for audit.
 Recording a known result afterward does not reactivate a cancelled run.
+`DurableAgent::cancel` records the operator's actor and note for an unowned
+run. To attribute a cancellation of a live worker the same way, give it a
+`CancelReason` with `with_cancel_reason`, call `record(actor, note)`, then
+fire the cancellation token; the terminal checkpoint's detail reads
+`cancelled by <actor>: <note>`. The application server does this for runs,
+session turns and workflow children.
 
 Step/tool limits and model spending accumulate across invocations. The elapsed
 limit counts cumulative active execution, rounded up to milliseconds; known

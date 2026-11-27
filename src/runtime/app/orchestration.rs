@@ -38,15 +38,27 @@ impl RoleAgents<'_> {
         &'a self,
         runs: &'a FileRunStore,
     ) -> Result<WorkflowTasks<'a>, RuntimeError> {
+        self.tasks_with_cancel_reason(runs, None)
+    }
+    /// Child runs attribute a live cancellation to the recorded operator.
+    pub(super) fn tasks_with_cancel_reason<'a>(
+        &'a self,
+        runs: &'a FileRunStore,
+        cancel_reason: Option<&Arc<CancelReason>>,
+    ) -> Result<WorkflowTasks<'a>, RuntimeError> {
         let mut tasks = WorkflowTasks::new();
         for (role, agent) in &self.agents {
-            tasks.register(AgentWorkflowTask::new(
+            let mut task = AgentWorkflowTask::new(
                 &role.name,
                 agent,
                 runs,
                 &role.system,
                 role.output.clone(),
-            )?)?;
+            )?;
+            if let Some(reason) = cancel_reason {
+                task = task.with_cancel_reason(Arc::clone(reason));
+            }
+            tasks.register(task)?;
         }
         Ok(tasks)
     }
@@ -149,7 +161,7 @@ impl Application {
             let result = std::panic::AssertUnwindSafe(async {
                 let saved = app.workflow(&id).await?;
                 let roles = app.role_agents();
-                let mut tasks = roles.tasks(&app.runs)?;
+                let mut tasks = roles.tasks_with_cancel_reason(&app.runs, Some(&job.cancel_reason))?;
                 restore_peer(&saved, &mut tasks)?;
                 WorkflowRunner::new(&tasks, &app.workflows)
                     .with_limits(saved.limits)
@@ -177,10 +189,13 @@ impl Application {
             }
         }
     }
-    fn signal_parent(&self, key: &str, cancel: bool) -> Result<bool, RuntimeError> {
+    /// `cancel` carries the operator's actor and note; `None` pauses.
+    fn signal_parent(&self, key: &str, cancel: Option<(&str, &str)>) -> Result<bool, RuntimeError> {
         let jobs = self.jobs()?;
         if let Some(job) = jobs.get(key).filter(|j| j.active) {
-            if cancel {
+            if let Some((actor, note)) = cancel {
+                // Record who and why before the worker observes the token.
+                job.cancel_reason.record(actor, note)?;
                 job.cancel.cancel();
             } else {
                 job.pause.cancel();
@@ -192,7 +207,7 @@ impl Application {
     }
     pub fn pause_workflow(&self, id: &str) -> Result<(), RuntimeError> {
         valid_id(id)?;
-        if self.signal_parent(&format!("workflow:{id}"), false)? {
+        if self.signal_parent(&format!("workflow:{id}"), None)? {
             Ok(())
         } else {
             Err(RuntimeError::Conflict(
@@ -208,7 +223,7 @@ impl Application {
     ) -> Result<(), RuntimeError> {
         validate_actor(actor, note)?;
         let state = self.workflow(id).await?;
-        if self.signal_parent(&format!("workflow:{id}"), true)? {
+        if self.signal_parent(&format!("workflow:{id}"), Some((actor, note)))? {
             return Ok(());
         }
         let roles = self.role_agents();
@@ -357,7 +372,9 @@ impl Application {
         tokio::spawn(async move {
             let result = std::panic::AssertUnwindSafe(async {
                 let agent = app.agent().with_cancel(&job.cancel);
-                let durable = DurableAgent::new(&agent, &app.runs).with_pause(&job.pause);
+                let durable = DurableAgent::new(&agent, &app.runs)
+                    .with_pause(&job.pause)
+                    .with_cancel_reason(&job.cancel_reason);
                 SessionManager::new(&app.sessions)
                     .resume_turn(&durable, &id, &turn)
                     .await?;
@@ -382,7 +399,7 @@ impl Application {
     }
     pub fn pause_session(&self, id: &str) -> Result<(), RuntimeError> {
         valid_id(id)?;
-        if self.signal_parent(&format!("session:{id}"), false)? {
+        if self.signal_parent(&format!("session:{id}"), None)? {
             Ok(())
         } else {
             Err(RuntimeError::Conflict(
@@ -398,7 +415,7 @@ impl Application {
     ) -> Result<(), RuntimeError> {
         validate_actor(actor, note)?;
         let run = self.session_child(id).await?;
-        if !self.signal_parent(&format!("session:{id}"), true)? {
+        if !self.signal_parent(&format!("session:{id}"), Some((actor, note)))? {
             DurableAgent::new(&self.agent(), &self.runs)
                 .cancel(&run, actor, note)
                 .await?;

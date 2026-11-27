@@ -22,6 +22,34 @@ pub struct DurableAgent<'a, 'model> {
     store: &'a dyn RunStore,
     approvals: ApprovalPolicy,
     pause: Option<&'a CancelToken>,
+    cancel_reason: Option<&'a CancelReason>,
+}
+
+/// Who cancelled a live run and why. Record it before firing the worker's
+/// cancellation token; the run saves it with its terminal checkpoint, the
+/// same way [`DurableAgent::cancel`] does for an unowned run.
+#[derive(Debug, Default)]
+pub struct CancelReason(std::sync::Mutex<Option<(String, String)>>);
+
+impl CancelReason {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Store the operator's actor and note. The first recorded reason wins.
+    pub fn record(&self, actor: &str, note: &str) -> Result<(), RuntimeError> {
+        validate_actor(actor, note)?;
+        let mut reason = self
+            .0
+            .lock()
+            .map_err(|_| corrupt("cancellation reason lock poisoned"))?;
+        reason.get_or_insert_with(|| (actor.into(), note.into()));
+        Ok(())
+    }
+
+    pub fn get(&self) -> Option<(String, String)> {
+        self.0.lock().ok().and_then(|reason| reason.clone())
+    }
 }
 
 impl<'a, 'model> DurableAgent<'a, 'model> {
@@ -31,6 +59,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             store,
             approvals: ApprovalPolicy::default(),
             pause: None,
+            cancel_reason: None,
         }
     }
 
@@ -43,6 +72,13 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     /// before the next dispatch. Cancellation still interrupts immediately.
     pub fn with_pause(mut self, token: &'a CancelToken) -> Self {
         self.pause = Some(token);
+        self
+    }
+
+    /// Attribute a cancellation of this live worker to an operator. See
+    /// [`CancelReason`].
+    pub fn with_cancel_reason(mut self, reason: &'a CancelReason) -> Self {
+        self.cancel_reason = Some(reason);
         self
     }
 
@@ -1005,6 +1041,13 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         reason: StopReason,
         detail: Option<String>,
     ) -> Result<(), RuntimeError> {
+        let detail = match self.cancel_reason.and_then(CancelReason::get) {
+            Some((actor, note)) if reason == StopReason::Cancelled => {
+                let by = format!("cancelled by {actor}: {note}");
+                Some(detail.map_or(by.clone(), |detail| format!("{by}; {detail}")))
+            }
+            _ => detail,
+        };
         state.status = status;
         state.report.stop_reason = reason;
         state.report.detail = detail;
