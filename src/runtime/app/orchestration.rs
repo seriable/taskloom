@@ -48,13 +48,8 @@ impl RoleAgents<'_> {
     ) -> Result<WorkflowTasks<'a>, RuntimeError> {
         let mut tasks = WorkflowTasks::new();
         for (role, agent) in &self.agents {
-            let mut task = AgentWorkflowTask::new(
-                &role.name,
-                agent,
-                runs,
-                &role.system,
-                role.output.clone(),
-            )?;
+            let mut task =
+                AgentWorkflowTask::new(&role.name, agent, runs, &role.system, role.output.clone())?;
             if let Some(reason) = cancel_reason {
                 task = task.with_cancel_reason(Arc::clone(reason));
             }
@@ -161,7 +156,8 @@ impl Application {
             let result = std::panic::AssertUnwindSafe(async {
                 let saved = app.workflow(&id).await?;
                 let roles = app.role_agents();
-                let mut tasks = roles.tasks_with_cancel_reason(&app.runs, Some(&job.cancel_reason))?;
+                let mut tasks =
+                    roles.tasks_with_cancel_reason(&app.runs, Some(&job.cancel_reason))?;
                 restore_peer(&saved, &mut tasks)?;
                 WorkflowRunner::new(&tasks, &app.workflows)
                     .with_limits(saved.limits)

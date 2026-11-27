@@ -558,7 +558,9 @@ impl<'a> SessionManager<'a> {
                                 step.progress == ToolProgress::Pending && step.attempts == started
                             }))
                     {
-                        return Err(RuntimeError::Conflict("pending tool may have been dispatched".into()));
+                        return Err(RuntimeError::Conflict(
+                            "pending tool may have been dispatched".into(),
+                        ));
                     }
                     let detail = if started == 0 {
                         "not executed: run ended before dispatch"
