@@ -11,8 +11,8 @@ use super::{
     state::fingerprint,
     store::{absolute_root, atomic_write, blocking, read_json, storage},
     types::{pending_calls, validate_history},
-    DurableAgent, Message, RunEventKind, RunState, RunStatus, RuntimeError, StopReason,
-    ToolProgress, ToolResult,
+    DurableAgent, Message, RecoveryDecision, RunEventKind, RunState, RunStatus, RuntimeError,
+    StopReason, ToolProgress, ToolResult,
 };
 
 pub const SESSION_VERSION: u32 = 1;
@@ -156,6 +156,11 @@ pub trait SessionStore: Send + Sync {
         session: &'a Session,
         expected_revision: Option<u64>,
     ) -> BoxFuture<'a, Result<(), RuntimeError>>;
+    /// Maximum serialized session size, if the store has one. New turns are
+    /// refused once a session reaches half of it.
+    fn max_bytes(&self) -> Option<u64> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +188,9 @@ impl FileSessionStore {
 }
 
 impl SessionStore for FileSessionStore {
+    fn max_bytes(&self) -> Option<u64> {
+        Some(self.max_bytes)
+    }
     fn load<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Option<Session>, RuntimeError>> {
         Box::pin(async move {
             if let Some(error) = &self.root_error {
@@ -338,6 +346,17 @@ impl<'a> SessionManager<'a> {
                     )));
                 }
                 return session.input(active);
+            }
+            // Each run starts from the full history and the closed turn is
+            // appended to it; refuse before any work instead of failing to
+            // commit after the run completed.
+            if let Some(max) = self.store.max_bytes() {
+                let size = serde_json::to_vec(&session).map_err(storage)?.len() as u64;
+                if size > max / 2 {
+                    return Err(RuntimeError::StorageLimit(format!(
+                        "session is {size} bytes, over half of the {max}-byte store limit; start a new session (the existing history is kept)"
+                    )));
+                }
             }
             let binding = SessionBinding {
                 turn_id: turn_id.into(),
@@ -520,10 +539,35 @@ impl<'a> SessionManager<'a> {
                     .cloned()
                     .collect::<Vec<_>>();
                 for call in calls {
-                    if state.report.events.iter().any(|event|matches!(&event.kind,RunEventKind::ToolStarted {call_id,..} if call_id==&call.id)) {
-                        return Err(RuntimeError::Conflict("pending tool may have been dispatched".into()));
+                    // A started attempt is closable only when an operator has
+                    // already reconciled it with RetrySafe and the retry (the
+                    // current attempt) was never dispatched.
+                    let started = state.report.events.iter().filter(|event|matches!(&event.kind,RunEventKind::ToolStarted {call_id,..} if call_id==&call.id)).count();
+                    let step = state.tool_steps.iter().find(|step| step.call.id == call.id);
+                    let retried = step.map_or(0, |step| {
+                        step.recoveries
+                            .iter()
+                            .filter(|record| {
+                                matches!(record.decision, RecoveryDecision::RetrySafe { .. })
+                            })
+                            .count()
+                    });
+                    if started > 0
+                        && (started > retried
+                            || !step.is_some_and(|step| {
+                                step.progress == ToolProgress::Pending && step.attempts == started
+                            }))
+                    {
+                        return Err(RuntimeError::Conflict(
+                            "pending tool may have been dispatched".into(),
+                        ));
                     }
-                    messages.push(Message::Tool {result:ToolResult {call_id:call.id,output:json!({"host_error":"not executed: run ended before dispatch","stop_reason":state.report.stop_reason}),is_error:true}});
+                    let detail = if started == 0 {
+                        "not executed: run ended before dispatch"
+                    } else {
+                        "retry not executed: run ended before dispatch; the earlier attempt's outcome is unknown"
+                    };
+                    messages.push(Message::Tool {result:ToolResult {call_id:call.id,output:json!({"host_error":detail,"stop_reason":state.report.stop_reason}),is_error:true}});
                 }
                 messages.push(Message::user(format!(
                     "[Host record: prior run ended with {:?}. Operator: {actor}. Note: {note}]",

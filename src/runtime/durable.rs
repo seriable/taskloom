@@ -22,6 +22,34 @@ pub struct DurableAgent<'a, 'model> {
     store: &'a dyn RunStore,
     approvals: ApprovalPolicy,
     pause: Option<&'a CancelToken>,
+    cancel_reason: Option<&'a CancelReason>,
+}
+
+/// Who cancelled a live run and why. Record it before firing the worker's
+/// cancellation token; the run saves it with its terminal checkpoint, the
+/// same way [`DurableAgent::cancel`] does for an unowned run.
+#[derive(Debug, Default)]
+pub struct CancelReason(std::sync::Mutex<Option<(String, String)>>);
+
+impl CancelReason {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Store the operator's actor and note. The first recorded reason wins.
+    pub fn record(&self, actor: &str, note: &str) -> Result<(), RuntimeError> {
+        validate_actor(actor, note)?;
+        let mut reason = self
+            .0
+            .lock()
+            .map_err(|_| corrupt("cancellation reason lock poisoned"))?;
+        reason.get_or_insert_with(|| (actor.into(), note.into()));
+        Ok(())
+    }
+
+    pub fn get(&self) -> Option<(String, String)> {
+        self.0.lock().ok().and_then(|reason| reason.clone())
+    }
 }
 
 impl<'a, 'model> DurableAgent<'a, 'model> {
@@ -31,6 +59,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             store,
             approvals: ApprovalPolicy::default(),
             pause: None,
+            cancel_reason: None,
         }
     }
 
@@ -43,6 +72,13 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     /// before the next dispatch. Cancellation still interrupts immediately.
     pub fn with_pause(mut self, token: &'a CancelToken) -> Self {
         self.pause = Some(token);
+        self
+    }
+
+    /// Attribute a cancellation of this live worker to an operator. See
+    /// [`CancelReason`].
+    pub fn with_cancel_reason(mut self, reason: &'a CancelReason) -> Self {
+        self.cancel_reason = Some(reason);
         self
     }
 
@@ -83,7 +119,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(actor, note)?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // Cancellation dispatches nothing, so it stays available after a host
+        // upgrade changed the frozen configuration or tool definitions.
+        let (mut state, budget) = self.load_owned(&lease, run_id, false).await?;
         if state.status == RunStatus::Finished {
             return Ok(state);
         }
@@ -182,7 +220,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         run_id: &str,
         lease: Arc<dyn RunLease>,
     ) -> Result<RunState, RuntimeError> {
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        let (mut state, budget) = self.load_owned(&lease, run_id, true).await?;
         if state.status == RunStatus::Finished
             || state.status == RunStatus::WaitingApproval
             || state.status == RunStatus::NeedsRecovery
@@ -253,7 +291,8 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(&decision.actor, &decision.note)?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // A rejection only terminates the run; an approval leads to dispatch.
+        let (mut state, budget) = self.load_owned(&lease, run_id, decision.approved).await?;
         if state.status != RunStatus::WaitingApproval {
             return Err(RuntimeError::Conflict(
                 "run is not awaiting approval".into(),
@@ -327,7 +366,10 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(decision.actor(), decision.note())?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // RecordResult and Abort only record an observation or terminate;
+        // RetrySafe prepares another dispatch and needs the frozen contract.
+        let strict = matches!(decision, RecoveryDecision::RetrySafe { .. });
+        let (mut state, budget) = self.load_owned(&lease, run_id, strict).await?;
         let index = state
             .current_tool_index()
             .ok_or_else(|| RuntimeError::Conflict("run has no uncertain tool".into()))?;
@@ -375,7 +417,23 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 }
                 state.tool_steps[index].progress = ToolProgress::Pending;
             }
-            RecoveryDecision::Abort { .. } => {}
+            RecoveryDecision::Abort { actor, note } => {
+                // Resolve the call with an explicit unknown outcome, so the
+                // protocol is complete and the abort cannot be repeated.
+                complete_tool(
+                    &mut state,
+                    index,
+                    ToolResult {
+                        call_id: call_id.into(),
+                        output: serde_json::json!({
+                            "host_error": "aborted by operator; external outcome unknown",
+                            "actor": actor,
+                            "note": note,
+                        }),
+                        is_error: true,
+                    },
+                )?;
+            }
         }
         let actor = decision.actor().to_string();
         let action = decision.action().to_string();
@@ -500,6 +558,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         &self,
         lease: &Arc<dyn RunLease>,
         run_id: &str,
+        strict_config: bool,
     ) -> Result<(RunState, RunBudget), RuntimeError> {
         let mut state = lease
             .load()
@@ -510,7 +569,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             return Err(corrupt("store returned a checkpoint for a different run"));
         }
         self.agent.validate(&state.report)?;
-        if state.config != self.configuration() {
+        if strict_config && state.config != self.configuration() {
             return Err(RuntimeError::Configuration(
                 "resume configuration or tool definitions differ from the saved run".into(),
             ));
@@ -636,6 +695,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
+        check_capacity(state, lease)?;
         state.report.steps += 1;
         self.event(
             state,
@@ -845,6 +905,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
+        check_capacity(state, lease)?;
         let step = &state.tool_steps[index];
         let call = step.call.clone();
         let effect = step.definition.effect;
@@ -982,6 +1043,13 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         reason: StopReason,
         detail: Option<String>,
     ) -> Result<(), RuntimeError> {
+        let detail = match self.cancel_reason.and_then(CancelReason::get) {
+            Some((actor, note)) if reason == StopReason::Cancelled => {
+                let by = format!("cancelled by {actor}: {note}");
+                Some(detail.map_or(by.clone(), |detail| format!("{by}; {detail}")))
+            }
+            _ => detail,
+        };
         state.status = status;
         state.report.stop_reason = reason;
         state.report.detail = detail;
@@ -1101,6 +1169,25 @@ fn unix_ms() -> Result<u64, RuntimeError> {
         .map_err(|_| corrupt("wall clock exceeds the persistent timestamp range"))
 }
 
+/// Refuse to dispatch when the checkpoint is within a quarter of the store's
+/// byte limit. The headroom lets the dispatched operation, its result and any
+/// later cancel/reconcile/stop checkpoint still be saved; those operator paths
+/// are never blocked by this check.
+fn check_capacity(state: &RunState, lease: &Arc<dyn RunLease>) -> Result<(), RuntimeError> {
+    let Some(max) = lease.max_bytes() else {
+        return Ok(());
+    };
+    let size = serde_json::to_vec(state)
+        .map_err(|e| corrupt(&e.to_string()))?
+        .len() as u64;
+    if size.saturating_add(max / 4) > max {
+        return Err(RuntimeError::StorageLimit(format!(
+            "run checkpoint is {size} bytes, too close to the {max}-byte store limit to dispatch more work; start a new session or run (existing history is kept)"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_actor(actor: &str, note: &str) -> Result<(), RuntimeError> {
     if actor.trim().is_empty() || actor.len() > 256 || note.len() > 4096 {
         return Err(RuntimeError::Configuration("decisions require a nonempty actor (at most 256 bytes) and a note of at most 4096 bytes".into()));
@@ -1120,6 +1207,7 @@ fn error_reason(error: &RuntimeError) -> StopReason {
         RuntimeError::Permission(_) => StopReason::PermissionDenied,
         RuntimeError::Storage(_) | RuntimeError::Conflict(_) => StopReason::StorageError,
         RuntimeError::Context(_) => StopReason::ContextLimit,
+        RuntimeError::StorageLimit(_) => StopReason::StorageLimit,
     }
 }
 

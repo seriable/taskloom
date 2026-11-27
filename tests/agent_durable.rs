@@ -629,7 +629,10 @@ async fn hashed_run_ids_and_monotonic_writes_keep_atomic_complete_checkpoints() 
     let mut newer = state.clone();
     newer.revision += 1;
     lease.save(&newer).await.unwrap();
-    lease.save(&state).await.unwrap();
+    assert!(matches!(
+        lease.save(&state).await,
+        Err(RuntimeError::Conflict(_))
+    ));
     assert_eq!(
         lease.load().await.unwrap().unwrap().revision,
         newer.revision

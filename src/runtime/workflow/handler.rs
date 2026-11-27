@@ -8,8 +8,8 @@ use serde_json::{json, Value};
 use super::graph::{config, valid_name};
 use crate::ledger::Usage;
 use crate::runtime::{
-    AgentLoop, ApprovalPolicy, DurableAgent, Message, RunStatus, RunStore, RuntimeError,
-    StopReason, ToolProgress,
+    AgentLoop, ApprovalPolicy, CancelReason, DurableAgent, Message, RunStatus, RunStore,
+    RuntimeError, StopReason, ToolProgress,
 };
 use crate::CancelToken;
 
@@ -180,6 +180,7 @@ pub struct AgentWorkflowTask<'a, 'model> {
     system: String,
     output: WorkflowOutput,
     validator: Option<jsonschema::Validator>,
+    cancel_reason: Option<std::sync::Arc<CancelReason>>,
 }
 
 impl<'a, 'model> AgentWorkflowTask<'a, 'model> {
@@ -205,10 +206,16 @@ impl<'a, 'model> AgentWorkflowTask<'a, 'model> {
             system: system.into(),
             output,
             validator,
+            cancel_reason: None,
         })
     }
     pub fn with_approvals(mut self, approvals: ApprovalPolicy) -> Self {
         self.approvals = approvals;
+        self
+    }
+    /// Attribute a cancellation of the child run to an operator.
+    pub fn with_cancel_reason(mut self, reason: std::sync::Arc<CancelReason>) -> Self {
+        self.cancel_reason = Some(reason);
         self
     }
 }
@@ -242,8 +249,11 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                 .or_else(crate::cancel::current)
                 .unwrap_or_default();
             let agent = self.agent.clone().with_cancel(&child_cancel);
-            let durable =
+            let mut durable =
                 DurableAgent::new(&agent, self.store).with_approvals(self.approvals.clone());
+            if let Some(reason) = &self.cancel_reason {
+                durable = durable.with_cancel_reason(reason);
+            }
             let run = durable.start_or_resume(
                 &context.run_id,
                 vec![Message::system(&self.system), Message::user(input)],

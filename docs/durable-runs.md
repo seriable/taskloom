@@ -30,6 +30,11 @@ events, tool attempts, approvals and operator recovery records. Definitions,
 schemas, permissions, model settings and limits must match on resume. Bump a
 tool's advertised definition when its implementation contract changes; the
 library cannot detect a code change behind identical metadata.
+After such a bump, `resume`, approval and `RetrySafe` are rejected for older
+runs, because they lead to dispatch under the frozen contract. Operations that
+only terminate or record remain available: `cancel`, an approval rejection,
+and the `RecordResult`/`Abort` reconciliations. Use them to finish paused,
+approval-waiting or recovery runs (and their session turns) after an upgrade.
 Format 2 also binds the exact initial-message boundary and persists context
 projections. Development format-1 jobs require the earlier checkout; they are
 not silently migrated or reset. See [sessions and context](sessions-and-context.md).
@@ -38,7 +43,9 @@ application. Keep their intended contract and currency unit consistent when
 reconstructing a run; they are not authenticated by `RunConfig`.
 
 The file backend uses hashed run ids, a per-run OS lock, flushed temporary
-files, atomic replacement and monotonic revision checks. The lock is held
+files, atomic replacement and monotonic revision checks; saving a checkpoint
+older than the stored revision fails with `Conflict` rather than reporting
+success. The lock is held
 throughout an invocation, including background file writes after an async
 future is dropped. Other workers receive `Conflict`; they cannot execute the
 same run concurrently. Persistent lock files are never unlinked. `inspect`
@@ -53,6 +60,10 @@ result. If persistence fails, no subsequent operation is dispatched. A result
 that exists only in memory is not treated as durably complete. Malformed,
 inconsistent or future-version checkpoints are rejected rather than reset.
 The default maximum file size is 64 MiB, configurable on `FileRunStore`.
+A run stops with `StopReason::StorageLimit` before dispatching a model or tool
+operation when its checkpoint is within a quarter of that limit; operator
+operations (cancel, rejection, reconciliation) are not blocked. See
+[sessions and context](sessions-and-context.md#session-size-limit).
 
 This provides process-crash recovery on a local filesystem, not a distributed
 lease or an atomic transaction with an external service. Power-loss durability
@@ -70,6 +81,12 @@ The agent's explicit or ambient cancellation token still interrupts active
 work. Cancellation and exhausted limits are terminal; `resume` does not
 silently reactivate them. In-flight tools remain marked uncertain for audit.
 Recording a known result afterward does not reactivate a cancelled run.
+`DurableAgent::cancel` records the operator's actor and note for an unowned
+run. To attribute a cancellation of a live worker the same way, give it a
+`CancelReason` with `with_cancel_reason`, call `record(actor, note)`, then
+fire the cancellation token; the terminal checkpoint's detail reads
+`cancelled by <actor>: <note>`. The application server does this for runs,
+session turns and workflow children.
 
 Step/tool limits and model spending accumulate across invocations. The elapsed
 limit counts cumulative active execution, rounded up to milliseconds; known
@@ -106,8 +123,15 @@ reconciliation. Use `reconcile` with a matching call id and an operator record:
   result. It completes that exact call without invoking the tool again.
 - `RetrySafe`: only read-only/idempotent tools are eligible. The same run/call
   ids are reused for tool-side deduplication. It requires fresh approval where
-  the policy demands it and consumes another tool attempt.
-- `Abort`: terminate the run without continuing the uncertain operation.
+  the policy demands it and consumes another tool attempt. If the run
+  finishes before the retry is dispatched (for example, the fresh approval
+  is rejected, a limit is reached or the run is cancelled), the call stays
+  pending and a session turn can still be closed: the earlier attempt was
+  already reconciled, and the host result records that its outcome is unknown.
+- `Abort`: terminate the run without continuing the uncertain operation. The
+  call is resolved with an explicit error result recording the actor, note
+  and an unknown external outcome, so the run can be closed and the abort
+  cannot be repeated.
 
 Non-idempotent operations cannot use `RetrySafe`. The library cannot determine
 whether an email was sent, a remote write committed or spawned work is still

@@ -256,11 +256,17 @@ impl ContextPolicy {
     }
 }
 
+/// The summary takes the place of the newest omitted message: it follows the
+/// current question when older blocks of the current turn were dropped, and
+/// it always precedes the retained recent blocks.
 fn project(messages: &[Message], indices: &[usize], summary: Option<&str>) -> Vec<Message> {
+    let last_omitted = (0..messages.len())
+        .rev()
+        .find(|index| indices.binary_search(index).is_err());
     let mut result = Vec::new();
     let mut inserted = false;
     for index in indices {
-        if !inserted && !matches!(messages[*index], Message::System { .. }) {
+        if !inserted && last_omitted.is_some_and(|omitted| *index > omitted) {
             if let Some(summary) = summary {
                 result.push(Message::user(summary));
             }

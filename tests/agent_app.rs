@@ -374,6 +374,10 @@ async fn active_cancellation_preserves_uncertain_model_spending_and_capacity_is_
         .unwrap();
     let state = idle(&app, "slow").await;
     assert_eq!(state.report.stop_reason, StopReason::Cancelled);
+    assert_eq!(
+        state.report.detail.as_deref(),
+        Some("cancelled by operator: stop active request")
+    );
     assert_eq!(state.report.budget.uncertain_micros, 3);
     assert!(app.runs.inspect("extra").await.unwrap().is_none());
 }

@@ -43,7 +43,11 @@ Only completed runs commit automatically. A failed terminal turn remains
 bound until `abandon_turn` records an authenticated operator/application actor
 and note. Uncertain/in-flight tools must first be reconciled through the
 durable controller. Known observations stay in conversation history; calls
-that were never dispatched receive explicit host error results. A host note
+that were never dispatched receive explicit host error results. This includes
+a call whose earlier attempt was reconciled with `RetrySafe` when the retry
+itself never started; a call whose current attempt may have been dispatched
+is never closed this way. An `Abort` reconciliation resolves the call with an
+error result, after which the turn can be closed. A host note
 records the failed outcome. This prevents an incomplete tool protocol from
 leaking into the following model request, or a new question from silently
 forgetting an uncertain write.
@@ -52,6 +56,29 @@ forgetting an uncertain write.
 client-supplied JSON. The host application authenticates session access and
 operator identity. A session is conversation state, not a cross-turn money
 budget; each durable run keeps its own configured limits.
+
+## Session size limit
+
+Every turn's run starts from the full session history, and each checkpoint
+rewrites the whole run state, so a long session eventually approaches the
+store's byte limit (64 MiB by default for both `FileSessionStore` and
+`FileRunStore`; keep the session limit at least as large as the run limit).
+To avoid a run that completes but can no longer be saved or committed, work is
+refused **before** it starts:
+
+- `begin_turn` (and so `run_turn`) rejects a new turn with
+  `RuntimeError::StorageLimit` once the serialized session exceeds half of the
+  session store's limit. Nothing is bound or dispatched.
+- A durable run stops with `StopReason::StorageLimit` before a model request
+  or tool dispatch when its checkpoint is within a quarter of the run store's
+  limit. Close that turn with `abandon_turn` as for any failed run.
+
+Cancellation, approval rejection, `RecordResult`/`Abort` reconciliation and
+`abandon_turn` are never blocked by these checks, so an operator can still
+close a run near the limit. When the limit is reached, start a new session
+(optionally seeding it with a summary from the old one); the existing session
+and its history are kept unchanged. Custom `SessionStore`/`RunLease`
+implementations opt in by returning their limit from `max_bytes`.
 
 ## Context projection
 
@@ -68,7 +95,10 @@ Recent blocks are retained up to `keep_recent_blocks`; if necessary, fewer
 older blocks are kept to fit the limit. Tool calls/results are never split.
 
 Omitted history is compressed into a bounded, explicitly labeled **user-role
-data** message. It is not elevated into a system instruction. The built-in
+data** message. It is not elevated into a system instruction. The summary
+takes the position of the newest omitted message: when older tool blocks of
+the current turn are dropped, it follows the current question and precedes
+the retained recent blocks, so the chronology stays intact. The built-in
 `ExtractiveCompressor` preserves bounded excerpts of recent omitted entries,
 including tool ids/results. It is lossy: it does not guarantee retention of
 every fact or infer a semantic summary. Keep critical task state in explicit

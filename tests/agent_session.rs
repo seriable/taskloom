@@ -330,22 +330,15 @@ async fn uncertain_effects_must_be_reconciled_before_abandoning_the_session_turn
     assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
     let run_id = unknown.run.report.run_id.clone();
     let call_id = unknown.run.tool_steps[0].call.id.clone();
-    let aborted = durable
-        .reconcile(
-            &run_id,
-            &call_id,
-            RecoveryDecision::Abort {
-                actor: "operator".into(),
-                note: "stop pending verification".into(),
-            },
-        )
+    let cancelled = durable
+        .cancel(&run_id, "operator", "stop pending verification")
         .await
         .unwrap();
     assert!(manager
         .abandon_turn(
             "chat",
             "one",
-            &aborted,
+            &cancelled,
             "operator",
             "cannot ignore uncertainty"
         )
@@ -378,6 +371,376 @@ async fn uncertain_effects_must_be_reconciled_before_abandoning_the_session_turn
         .messages
         .iter()
         .any(|m| matches!(m,Message::Tool {result} if result.output==json!("confirmed saved"))));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn abort_resolves_the_uncertain_tool_so_the_turn_can_be_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = registry(Arc::clone(&count), true);
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    let abort = || RecoveryDecision::Abort {
+        actor: "operator".into(),
+        note: "stop pending verification".into(),
+    };
+    let aborted = durable.reconcile(&run_id, &call_id, abort()).await.unwrap();
+    assert_eq!(aborted.status, RunStatus::Finished);
+    assert_eq!(aborted.report.stop_reason, StopReason::ToolError);
+    assert!(matches!(
+        aborted.tool_steps[0].progress,
+        ToolProgress::Complete { ref result } if result.is_error
+    ));
+    assert!(matches!(
+        durable.reconcile(&run_id, &call_id, abort()).await,
+        Err(RuntimeError::Conflict(_))
+    ));
+    let session = manager
+        .abandon_turn("chat", "one", &aborted, "operator", "outcome unknown")
+        .await
+        .unwrap();
+    session.validate().unwrap();
+    assert!(session
+        .messages
+        .iter()
+        .any(|m| matches!(m, Message::Tool { result }
+        if result.is_error && result.output["host_error"].as_str().unwrap().contains("aborted"))));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn rejected_retry_after_retry_safe_leaves_a_closable_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut tools = ToolRegistry::new();
+    let counter = Arc::clone(&count);
+    tools
+        .register(FnTool::new(
+            ToolDefinition {
+                name: "write".into(),
+                description: "Idempotent effect".into(),
+                input_schema: json!({"type":"object"}),
+                effect: ToolEffect::Idempotent,
+                permissions: BTreeSet::new(),
+            },
+            move |_: Value, _: ToolContext| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    Err::<Value, _>(ToolError("remote result is unknown".into()))
+                }
+            },
+        ))
+        .unwrap();
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    durable
+        .reconcile(
+            &run_id,
+            &call_id,
+            RecoveryDecision::RetrySafe {
+                actor: "operator".into(),
+                note: "idempotent".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let retry = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(retry.run.status, RunStatus::WaitingApproval);
+    let ticket = retry.run.pending_approval().unwrap();
+    let rejected = durable
+        .decide(
+            &ticket.run_id,
+            &ticket.request_id,
+            ApprovalDecision {
+                approved: false,
+                actor: "operator".into(),
+                note: "do not retry".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status, RunStatus::Finished);
+    assert_eq!(rejected.tool_steps[0].progress, ToolProgress::Pending);
+    let session = manager
+        .abandon_turn("chat", "one", &rejected, "operator", "retry rejected")
+        .await
+        .unwrap();
+    session.validate().unwrap();
+    assert!(session.active.is_none());
+    assert!(session.messages.iter().any(|m| matches!(m, Message::Tool { result }
+        if result.is_error && result.output["host_error"].as_str().unwrap().contains("retry not executed"))));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn runs_can_be_cancelled_or_aborted_after_a_tool_definition_bump() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let old_tools = registry(Arc::clone(&count), true);
+    let policy = ToolPolicy::default().allow("write");
+    let old_agent = AgentLoop::new(&model, &old_tools, "test").with_policy(policy.clone());
+    let old = DurableAgent::new(&old_agent, &runs);
+    // A host upgrade bumps the advertised definition of the same tool.
+    let mut new_tools = ToolRegistry::new();
+    new_tools
+        .register(FnTool::new(
+            ToolDefinition {
+                name: "write".into(),
+                description: "Test effect v2".into(),
+                input_schema: json!({"type":"object"}),
+                effect: ToolEffect::NonIdempotent,
+                permissions: BTreeSet::new(),
+            },
+            |_: Value, _: ToolContext| async { Ok(json!(0)) },
+        ))
+        .unwrap();
+    let new_agent = AgentLoop::new(&model, &new_tools, "test").with_policy(policy);
+    let upgraded = DurableAgent::new(&new_agent, &runs);
+
+    // A run waiting for approval: approval and resume stay strict, while
+    // rejection and cancellation can still terminate it.
+    let waiting = manager
+        .run_turn(&old, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap().clone();
+    assert!(matches!(
+        upgraded
+            .decide(&ticket.run_id, &ticket.request_id, approve())
+            .await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    assert!(matches!(
+        upgraded.resume(&ticket.run_id).await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let cancelled = upgraded
+        .cancel(&ticket.run_id, "operator", "host upgraded")
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, RunStatus::Finished);
+    assert_eq!(cancelled.report.stop_reason, StopReason::Cancelled);
+    manager
+        .abandon_turn("chat", "one", &cancelled, "operator", "host upgraded")
+        .await
+        .unwrap();
+
+    // A run needing recovery: RetrySafe stays strict; Abort terminates it.
+    let waiting = manager
+        .run_turn(&old, "chat", "two", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap().clone();
+    old.decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&old, "chat", "two").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    assert!(matches!(
+        upgraded
+            .reconcile(
+                &ticket.run_id,
+                &call_id,
+                RecoveryDecision::RetrySafe {
+                    actor: "operator".into(),
+                    note: "retry".into(),
+                },
+            )
+            .await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let aborted = upgraded
+        .reconcile(
+            &ticket.run_id,
+            &call_id,
+            RecoveryDecision::Abort {
+                actor: "operator".into(),
+                note: "host upgraded".into(),
+            },
+        )
+        .await
+        .unwrap();
+    manager
+        .abandon_turn("chat", "two", &aborted, "operator", "host upgraded")
+        .await
+        .unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn sessions_and_runs_near_the_store_cap_refuse_work_before_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    // A session over half of its store limit refuses a new turn.
+    let small = FileSessionStore::new(dir.path().join("small")).with_max_bytes(4096);
+    let manager = SessionManager::new(&small);
+    manager
+        .create("full", vec!["x".repeat(2500)])
+        .await
+        .unwrap();
+    assert!(matches!(
+        manager.begin_turn("full", "one", "question").await,
+        Err(RuntimeError::StorageLimit(_))
+    ));
+    assert!(manager.load("full").await.unwrap().active.is_none());
+
+    // A run whose checkpoint is near the run store limit stops before the
+    // model request instead of failing to save after completion.
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&store);
+    manager
+        .create("chat", vec!["history ".repeat(20_000)])
+        .await
+        .unwrap();
+    let model = TestModel::default();
+    let tools = ToolRegistry::new();
+    let agent = AgentLoop::new(&model, &tools, "test");
+    let input = manager.begin_turn("chat", "one", "question").await.unwrap();
+    let measure = FileRunStore::new(dir.path().join("measure"));
+    let size = serde_json::to_vec(
+        &DurableAgent::new(&agent, &measure)
+            .create("measure", input.messages.clone())
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+    .len() as u64;
+    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(size + 2000);
+    let durable = DurableAgent::new(&agent, &runs);
+    let refused = manager
+        .run_turn(&durable, "chat", "one", "question")
+        .await
+        .unwrap();
+    assert_eq!(refused.run.status, RunStatus::Finished);
+    assert_eq!(refused.run.report.stop_reason, StopReason::StorageLimit);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    let session = manager
+        .abandon_turn(
+            "chat",
+            "one",
+            &refused.run,
+            "operator",
+            "start a new session",
+        )
+        .await
+        .unwrap();
+    assert!(session.active.is_none());
+}
+
+#[tokio::test]
+async fn abort_and_cancel_are_not_blocked_near_the_store_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&store);
+    manager
+        .create("chat", vec!["history ".repeat(2_000)])
+        .await
+        .unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = registry(Arc::clone(&count), true);
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    // Reopen the same directory with a limit the checkpoint is close to.
+    let size = serde_json::to_vec(&unknown.run).unwrap().len() as u64;
+    let tight = FileRunStore::new(dir.path().join("runs")).with_max_bytes(size + 1500);
+    let near_cap = DurableAgent::new(&agent, &tight);
+    let aborted = near_cap
+        .reconcile(
+            &run_id,
+            &call_id,
+            RecoveryDecision::Abort {
+                actor: "operator".into(),
+                note: "near the cap".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(aborted.status, RunStatus::Finished);
+    assert_eq!(
+        near_cap
+            .cancel(&run_id, "operator", "already finished")
+            .await
+            .unwrap()
+            .status,
+        RunStatus::Finished
+    );
+    manager
+        .abandon_turn("chat", "one", &aborted, "operator", "outcome unknown")
+        .await
+        .unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 

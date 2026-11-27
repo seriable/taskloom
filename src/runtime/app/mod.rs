@@ -43,6 +43,7 @@ pub struct Application {
 #[derive(Clone)]
 struct Job {
     cancel: CancelToken,
+    cancel_reason: Arc<CancelReason>,
     pause: CancelToken,
     active: bool,
     error: Option<String>,
@@ -243,6 +244,7 @@ impl Application {
         }
         let job = Job {
             cancel: CancelToken::new(),
+            cancel_reason: Arc::new(CancelReason::new()),
             pause: CancelToken::new(),
             active: true,
             error: None,
@@ -287,7 +289,9 @@ impl Application {
         let id = id.to_string();
         tokio::spawn(async move {
             let agent = app.agent().with_cancel(&job.cancel);
-            let durable = DurableAgent::new(&agent, &app.runs).with_pause(&job.pause);
+            let durable = DurableAgent::new(&agent, &app.runs)
+                .with_pause(&job.pause)
+                .with_cancel_reason(&job.cancel_reason);
             let result = std::panic::AssertUnwindSafe(durable.resume(&id))
                 .catch_unwind()
                 .await
@@ -328,6 +332,8 @@ impl Application {
         {
             let jobs = self.jobs()?;
             if let Some(job) = jobs.get(&format!("run:{id}")).filter(|job| job.active) {
+                // Record who and why before the worker observes the token.
+                job.cancel_reason.record(actor, note)?;
                 job.cancel.cancel();
                 return Ok(());
             }

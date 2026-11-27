@@ -21,6 +21,11 @@ pub trait RunLease: Send + Sync {
         &'a self,
         snapshot: &'a BudgetSnapshot,
     ) -> BoxFuture<'a, Result<(), RuntimeError>>;
+    /// Maximum serialized checkpoint size, if the store has one. Runs refuse
+    /// to dispatch more work when a checkpoint approaches it.
+    fn max_bytes(&self) -> Option<u64> {
+        None
+    }
 }
 
 pub trait RunStore: Send + Sync {
@@ -181,6 +186,10 @@ fn read_budget(inner: &LeaseInner, path: &Path) -> Result<Option<BudgetSnapshot>
 }
 
 impl RunLease for FileLease {
+    fn max_bytes(&self) -> Option<u64> {
+        Some(self.inner.max_bytes)
+    }
+
     fn load(&self) -> BoxFuture<'_, Result<Option<RunState>, RuntimeError>> {
         let inner = Arc::clone(&self.inner);
         Box::pin(blocking(move || {
@@ -209,7 +218,11 @@ impl RunLease for FileLease {
             let path = inner.root.join(format!("{}.json", inner.key));
             if let Some(previous) = read_state(&path, inner.max_bytes, &inner.run_id)? {
                 if previous.revision > state.revision {
-                    return Ok(());
+                    // A newer checkpoint exists: this writer's state is stale
+                    // and must not be reported as durably saved.
+                    return Err(RuntimeError::Conflict(
+                        "a newer checkpoint revision is already stored".into(),
+                    ));
                 }
                 if previous.revision == state.revision {
                     if serde_json::to_value(previous).map_err(storage)?
