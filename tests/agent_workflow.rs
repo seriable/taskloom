@@ -603,3 +603,31 @@ async fn resume_that_changes_nothing_does_not_grow_the_event_log() {
     assert_eq!(done.status, WorkflowStatus::Completed);
     assert_eq!(*seen.lock().unwrap(), done.events);
 }
+
+#[tokio::test]
+async fn a_stale_workflow_save_is_a_conflict_not_a_silent_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileWorkflowStore::new(dir.path());
+    let mut tasks = WorkflowTasks::new();
+    tasks
+        .register(FnWorkflowTask::new(
+            definition("pure", TaskRecovery::Pure),
+            |_: NodeContext, _: CancelToken| async { Ok(NodeOutcome::pure(json!(7))) },
+        ))
+        .unwrap();
+    let graph = WorkflowDefinition::new([WorkflowNode::new("node", "pure")]);
+    let runner = WorkflowRunner::new(&tasks, &store);
+    let created = runner.create("stale", graph, Value::Null).await.unwrap();
+    let finished = runner.resume("stale").await.unwrap();
+    assert!(finished.revision > created.revision);
+    let lease = WorkflowStore::acquire(&store, "stale").await.unwrap();
+    let error = lease.save(&created).await.unwrap_err();
+    assert!(
+        matches!(error, taskloom::runtime::RuntimeError::Conflict(_)),
+        "{error:?}"
+    );
+    assert_eq!(
+        store.inspect("stale").await.unwrap().unwrap().revision,
+        finished.revision
+    );
+}

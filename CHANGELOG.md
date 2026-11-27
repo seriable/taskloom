@@ -1,5 +1,74 @@
 # Changelog
 
+## Unreleased
+
+Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaking)**.
+
+### Core
+
+- **(breaking)** The registry's whole-call timeout is off by default:
+  `TaskProfile::timeout` is `Option<Duration>`, `timeout_seconds = 0` means
+  none, `TaskEntry::with_timeout` opts in. The previous 120 s default cut off
+  long requests and the fallback chain for every unregistered label.
+- Breaker and concurrency-permit waits are no longer part of the attempt
+  timeout. A batch queueing behind the provider limit is not failed for
+  queueing, and a caller waiting on an open breaker gets the circuit-open error
+  (with `CIRCUIT_OPEN_MARKER`) again. A declared whole-call timeout still covers
+  queueing.
+- **(breaking for stores)** The transport cache namespace keeps only
+  answer-affecting settings (endpoint, explicit namespace, seeds). Tuning
+  timeouts, retries, concurrency or budgets no longer invalidates recordings
+  and cached steps; recordings made with 0.2.0-alpha.1 must be regenerated once.
+- `RequestKey::for_transport` builds the key the runner stores a request
+  under; `Environment::write_answer` documents it.
+- **(breaking)** `ModelError` and `TaskError` are `#[non_exhaustive]`.
+- Temporary files of atomic writes have a recognisable name; stale ones are
+  pruned with the step cache.
+
+### Runtime, sessions and workflows
+
+- A session turn whose RetrySafe retry never started (approval rejected,
+  limit hit, cancelled) can be closed; a call whose current attempt may have
+  been dispatched is still refused.
+- `cancel`, approval rejection, `RecordResult` and `Abort` work after a tool
+  definition bump; `resume`, approval and `RetrySafe` stay strict.
+- `Abort` resolves the uncertain call (error result: aborted by operator,
+  outcome unknown), so the turn can be closed.
+- **(breaking)** New `RuntimeError::StorageLimit` / `StopReason::StorageLimit`
+  (HTTP 507): a turn or dispatch that could not be committed under the store
+  size cap is refused before any work; cancel, reconcile and abandon are never
+  blocked by size. Stores report their cap through `max_bytes()`.
+- A stale checkpoint or workflow save returns `RuntimeError::Conflict` instead
+  of reporting success.
+- The context summary of dropped current-turn blocks follows the current
+  question.
+- Cancelling a live job records the operator's actor and note
+  (`CancelReason`, `DurableAgent::with_cancel_reason`).
+- Workflows: crash recovery runs on every entry point, `reconcile` included;
+  a non-running workflow with `Running` nodes fails validation; a finished
+  child without final text fails its node; a resume that changes nothing adds
+  no events.
+
+### Retrieval, MCP, sandbox and app
+
+- `SearchResult::skipped_oversize` counts ranked hits left out for size.
+- Citations need a minimum quote (`QuotePolicy`: 12 non-space characters,
+  3 words or 6 CJK characters by default); the docs state what a self-hashed
+  chunk id does and does not prove.
+- MCP: remote tool descriptions are framed as untrusted and capped at 2 KiB,
+  or replaced by a host-authored `McpToolBinding::description`; SSE parsing is
+  linear and accepts bare CR; proxies are disabled; a session id first sent
+  after `initialize` is rejected.
+- Web: HTML nesting over 512 is rejected before parsing; extraction is one
+  pass in `spawn_blocking` under the request deadline.
+- Sandbox: the supervisor verifies the code's byte length and SHA-256 before
+  running it (the image digest changes); Docker's own error wins over a broken
+  stdin pipe; `python_sandbox` is offered to top-level runs and sessions only
+  with `sandbox_top_level = true` (workflow roles unchanged).
+- App: `http://` provider URLs only for loopback hosts; Ctrl-C stops accepting
+  requests before shutting workers down; a missing workflow node entry is an
+  error, not a panic. CI builds `app_approval` and runs the offline CLI flow.
+
 ## 0.2.0-alpha.1 — 2026-11-27
 
 - Optional `sandbox` worker contract and Docker Python tool: immutable audited

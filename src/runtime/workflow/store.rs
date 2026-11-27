@@ -149,7 +149,11 @@ impl WorkflowLease for Lease {
             let path = inner.root.join(format!("{}.workflow.json", inner.key));
             if let Some(previous) = read(&path, inner.max, &inner.id)? {
                 if previous.revision > state.revision {
-                    return Ok(());
+                    // A newer workflow revision is stored: this state is stale
+                    // and must not be reported as durably saved.
+                    return Err(RuntimeError::Conflict(
+                        "a newer workflow revision is already stored".into(),
+                    ));
                 }
                 if previous.revision == state.revision {
                     return if serde_json::to_value(previous).map_err(storage)?

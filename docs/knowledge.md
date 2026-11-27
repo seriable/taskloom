@@ -70,7 +70,9 @@ let policy = ToolPolicy::default()
 The tool takes `{ "query": "...", "top_k": 5 }`. Query bytes, hit count and
 the complete serialized result have explicit limits. The default tool output
 limit is 24 KiB. Search drops whole chunks that do not fit rather than modifying
-the original text or inventing offsets. An empty hit list is valid; it is not
+the original text or inventing offsets. The result counts them in
+`skipped_oversize`, so a caller (and the model) knows higher-ranked evidence
+was left out. An empty hit list is valid; it is not
 evidence for an answer. Every result includes corpus revision, exact chunk
 text, title, source and original byte range. A denied tool is not exposed or
 executed. Its read-only effect permits ordinary durable recovery; importing or
