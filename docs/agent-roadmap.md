@@ -66,7 +66,7 @@ remain external checks. Phase 3 is still outstanding.
 
 ## Phase 3: knowledge and application delivery
 
-- [ ] Pluggable document ingestion, chunking, retrieval and source citations.
+- [x] Pluggable document ingestion, chunking, retrieval and source citations.
 - [ ] Service API for run creation, status, events, cancellation and approvals.
 - [ ] CLI for local execution and state inspection.
 - [ ] Basic UI for run trajectories, results and approvals.
@@ -78,6 +78,14 @@ remain external checks. Phase 3 is still outstanding.
 
 Acceptance: a new user can install the project, connect a provider and tools,
 run a cited knowledge task, and inspect/control it through CLI and UI.
+
+Knowledge increment: pluggable loader/chunker/corpus/retriever contracts,
+bounded UTF-8 import and overlap windows, atomic corpus replacement/CAS,
+local lexical retrieval and a permissioned search tool are implemented.
+The offline `agent_research` imports two files and verifies exact quotes and
+source markers against archived evidence. Citation checks establish provenance,
+not semantic truth. See [knowledge and citations](knowledge.md).
+API/CLI/UI and ecosystem integration acceptance is still outstanding.
 
 ## Verification constraints
 

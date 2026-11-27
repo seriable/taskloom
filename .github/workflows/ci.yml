@@ -66,4 +66,5 @@ jobs:
       - run: cargo run --locked --features runtime --example agent_resume
       - run: cargo run --locked --features runtime --example agent_session
       - run: cargo run --locked --features runtime --example agent_peer
+      - run: cargo run --locked --features runtime --example agent_research
       - run: cargo package --locked --all-features

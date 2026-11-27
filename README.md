@@ -21,7 +21,9 @@ available through [DurableAgent](docs/durable-runs.md). [Sessions and context
 compression](docs/sessions-and-context.md) retain full history across bounded
 model turns. [Durable workflows](docs/workflows.md) add parallel/conditional
 DAGs and bounded planner/executor/writer/reviewer collaboration (`agent_peer`).
-Knowledge and application delivery remain in the [roadmap](docs/agent-roadmap.md).
+[Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
+retrieval and exact source citations (`agent_research`). API/CLI/UI delivery
+remains in the [roadmap](docs/agent-roadmap.md).
 
 ## What you get
 

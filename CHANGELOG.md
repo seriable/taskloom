@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Pluggable document loading/chunking/corpus/retrieval, bounded UTF-8 import,
+  source-preserving overlap chunks, atomic local corpus replacement with CAS,
+  deterministic lexical retrieval and a permissioned read-only RAG tool.
+- Citation identity/quotation/marker validation against archived tool evidence
+  and an offline cited research example. Source validation does not imply
+  semantic support or truth; embedding/vector retrieval remains pluggable.
+
 - Checkpointed sequential/parallel/conditional workflows with exact output
   handoff, stable durable agent children, global spending allocations,
   cancellation draining and explicit recovery contracts for custom handlers.

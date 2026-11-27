@@ -71,5 +71,9 @@ required-features = ["runtime"]
 name = "agent_peer"
 required-features = ["runtime"]
 
+[[example]]
+name = "agent_research"
+required-features = ["runtime"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }

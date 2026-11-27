@@ -9,6 +9,7 @@ mod budget;
 mod context;
 mod durable;
 mod executor;
+pub mod rag;
 mod session;
 mod state;
 mod store;
