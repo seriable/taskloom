@@ -227,13 +227,23 @@ pub async fn run(
                 listener.local_addr()?
             );
             let router = super::router(Arc::clone(&app), token)?;
-            let shutdown_app = Arc::clone(&app);
-            axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
-                    let _ = tokio::signal::ctrl_c().await;
-                    let _ = shutdown_app.shutdown(Duration::from_secs(5)).await;
-                })
-                .await?;
+            // Ctrl+C first stops the listener (axum stops accepting as soon as
+            // the graceful-shutdown future completes and closes keep-alive
+            // connections after their current request); only then are workers
+            // signalled, so no new job can start during the shutdown grace.
+            let (stopped, accepting_stopped) = tokio::sync::oneshot::channel::<()>();
+            let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+                let _ = tokio::signal::ctrl_c().await;
+                let _ = stopped.send(());
+            });
+            let workers = async {
+                if accepting_stopped.await.is_ok() {
+                    let _ = app.shutdown(Duration::from_secs(5)).await;
+                }
+            };
+            let server = std::future::IntoFuture::into_future(server);
+            let (served, ()) = tokio::join!(server, workers);
+            served?;
         }
         "run" if args.len() == 3 => {
             app.start(&args[1], &args[2]).await?;
