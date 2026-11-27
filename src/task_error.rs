@@ -37,6 +37,8 @@ impl From<serde_json::Error> for Rejection {
 
 /// How a task failed. Callers branch on the kind, never on message text.
 #[derive(Debug)]
+/// New kinds may be added in minor releases; match with a wildcard arm.
+#[non_exhaustive]
 pub enum TaskError {
     /// Settings missing or unusable (an empty prompt, a refused input).
     /// Retrying does not help.

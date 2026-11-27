@@ -496,17 +496,16 @@ impl Gateway {
         Fut: Future<Output = Result<AttemptOutput<T>, ModelError>>,
         V: FnMut(T) -> Result<U, ModelError>,
     {
-        tokio::time::timeout(
-            ctx.task.timeout,
-            self.execute_models_inner(ctx, models, attempt, validate),
-        )
-        .await
-        .unwrap_or_else(|_| {
+        let work = self.execute_models_inner(ctx, models, attempt, validate);
+        let Some(limit) = ctx.task.timeout else {
+            return work.await;
+        };
+        tokio::time::timeout(limit, work).await.unwrap_or_else(|_| {
             Err(ModelError::Deadline {
-                limit: ctx.task.timeout,
+                limit,
                 detail: format!(
                     "{} exceeded its whole-call timeout of {:?}",
-                    ctx.task.label, ctx.task.timeout
+                    ctx.task.label, limit
                 ),
             })
         })
@@ -587,29 +586,17 @@ impl Gateway {
                 continue;
             }
             for attempt_index in 0..attempts {
-                let attempt_deadline = ctx
-                    .attempt_timeout
-                    .map(|limit| tokio::time::Instant::now() + limit);
-                let admission_error = || {
-                    ModelError::transient(
-                        None,
-                        format!(
-                            "{} exceeded its attempt timeout while waiting for admission",
-                            ctx.task.label
-                        ),
-                    )
-                };
+                // Admission (breaker and concurrency permit) is not part of
+                // the attempt: the breaker wait bounds itself and returns the
+                // circuit-open error, and a queued request waits for its
+                // permit. Only the whole-call timeout, when the task
+                // declares one, covers the queue.
                 // An open breaker is about this model only: the rest of the
                 // fallback chain has breakers of its own, so the call moves on
                 // instead of returning the circuit-open error to the caller.
-                let admission =
-                    self.wait_for_admission(&breaker, &ctx.provider, model, ctx.attempt_timeout);
-                let admission = match attempt_deadline {
-                    Some(deadline) => tokio::time::timeout_at(deadline, admission)
-                        .await
-                        .unwrap_or_else(|_| Err(admission_error())),
-                    None => admission.await,
-                };
+                let admission = self
+                    .wait_for_admission(&breaker, &ctx.provider, model, ctx.attempt_timeout)
+                    .await;
                 let probe = match admission {
                     Ok(probe) => probe,
                     Err(error) => {
@@ -625,25 +612,19 @@ impl Gateway {
                     }
                 };
                 let mut probe_guard = control::ProbeGuard::new(&breaker, probe);
-                let acquire = control.semaphore.clone().acquire_owned();
-                let permit = async {
-                    acquire.await.map_err(|_| {
-                        ModelError::transient(None, "AI gateway provider semaphore closed")
-                    })
-                };
-                let permit = match attempt_deadline {
-                    Some(deadline) => tokio::time::timeout_at(deadline, permit)
-                        .await
-                        .unwrap_or_else(|_| Err(admission_error())),
-                    None => permit.await,
-                };
-                let permit = match permit {
+                let permit = match control.semaphore.clone().acquire_owned().await {
                     Ok(permit) => permit,
-                    Err(error) => {
-                        last_error = Some(error);
+                    Err(_) => {
+                        last_error = Some(ModelError::transient(
+                            None,
+                            "AI gateway provider semaphore closed",
+                        ));
                         break;
                     }
                 };
+                let attempt_deadline = ctx
+                    .attempt_timeout
+                    .map(|limit| tokio::time::Instant::now() + limit);
                 let started = Instant::now();
                 let span = tracing::info_span!(
                     "gen_ai.request",

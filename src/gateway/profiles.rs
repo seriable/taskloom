@@ -15,7 +15,9 @@ pub const DEFAULT_INPUT_BUDGET_TOKENS: usize = 16_000;
 /// Default ceiling of any single task budget.
 pub const HARD_INPUT_BUDGET_TOKENS: usize = 32_000;
 pub const DEFAULT_OUTPUT_TOKENS: usize = 4_096;
-pub const DEFAULT_TASK_TIMEOUT_SECONDS: u64 = 120;
+/// Default whole-call limit of a task entry: 0, none. A task opts in with
+/// [`TaskEntry::with_timeout`].
+pub const DEFAULT_TASK_TIMEOUT_SECONDS: u64 = 0;
 pub const DEFAULT_PROVIDER_CONCURRENCY: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -367,8 +369,10 @@ pub struct TaskProfile {
     pub label: String,
     pub input_budget_tokens: usize,
     pub output_tokens: usize,
-    /// Whole-task limit, including queueing, retries and model fallbacks.
-    pub timeout: Duration,
+    /// Whole-call limit, including queueing, retries and model fallbacks;
+    /// `None` (the default) sets none, so only the attempt timeout and the
+    /// task's own deadline apply.
+    pub timeout: Option<Duration>,
     pub allow_fallback: bool,
     /// When false, an over-budget request is logged and counted but still
     /// sent as long as it fits the model window.
@@ -394,6 +398,7 @@ pub struct TaskEntry {
     pub prefix: Cow<'static, str>,
     pub input_budget_tokens: usize,
     pub output_tokens: usize,
+    /// Whole-call limit in seconds; 0 (the default) sets none.
     pub timeout_seconds: u64,
     pub allow_fallback: bool,
     pub enforce_input_budget: bool,
@@ -416,6 +421,14 @@ impl TaskEntry {
             enforce_input_budget: true,
             temperature,
         }
+    }
+
+    /// The same entry with a whole-call limit of `seconds` (0: none). The
+    /// limit covers queueing, backoff, retries and the fallback chain, so set
+    /// it above the attempt timeout times the attempts you expect.
+    pub const fn with_timeout(mut self, seconds: u64) -> Self {
+        self.timeout_seconds = seconds;
+        self
     }
 
     /// A text task whose over-budget requests are only observed.
@@ -489,7 +502,8 @@ impl TaskRegistry {
                 label: label.to_string(),
                 input_budget_tokens: entry.input_budget_tokens.min(self.hard_input_budget_tokens),
                 output_tokens: entry.output_tokens,
-                timeout: Duration::from_secs(entry.timeout_seconds),
+                timeout: (entry.timeout_seconds > 0)
+                    .then(|| Duration::from_secs(entry.timeout_seconds)),
                 allow_fallback: entry.allow_fallback,
                 enforce_input_budget: entry.enforce_input_budget,
                 temperature: entry.temperature,
@@ -499,7 +513,7 @@ impl TaskRegistry {
                 label: label.to_string(),
                 input_budget_tokens: DEFAULT_INPUT_BUDGET_TOKENS,
                 output_tokens: DEFAULT_OUTPUT_TOKENS,
-                timeout: Duration::from_secs(DEFAULT_TASK_TIMEOUT_SECONDS),
+                timeout: None,
                 allow_fallback: true,
                 enforce_input_budget: false,
                 temperature: 0.2,

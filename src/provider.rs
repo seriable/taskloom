@@ -395,22 +395,21 @@ impl<P: Provider> GatewayTransport<P> {
 
 impl<P: Provider> Transport for GatewayTransport<P> {
     fn cache_namespace(&self) -> Option<String> {
+        // Only what changes the answer: the endpoint and its protocol
+        // settings, the caller's own namespace and sampling seeds. Timeouts,
+        // retry counts, concurrency and budgets do not, so tuning them keeps
+        // recordings and cached steps valid.
         let settings = format!(
-            "taskloom-store-v2|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}",
+            "taskloom-store-v3|{}|{}|{}",
             self.provider.cache_namespace(),
             self.cache_namespace,
-            self.gateway.config().models,
-            self.estimator,
-            self.transient_attempts,
-            self.attempt_timeout,
-            self.idle_timeout,
             self.seeds,
         );
         Some(hex::encode(Sha256::digest(settings.as_bytes())))
     }
 
     fn task_timeout(&self, label: &str) -> Option<Duration> {
-        Some(self.gateway.task_profile(label).timeout)
+        self.gateway.task_profile(label).timeout
     }
 
     fn send<'a>(&'a self, request: Request<'a>) -> BoxFuture<'a, Result<Answer, TaskError>> {

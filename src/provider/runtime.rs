@@ -9,8 +9,12 @@ impl<P: Provider> Model for GatewayTransport<P> {
         budget: &'a RunBudget,
     ) -> BoxFuture<'a, Result<ModelOutput, RuntimeError>> {
         Box::pin(async move {
-            let timeout = self.gateway.task_profile(&request.label).timeout;
-            match tokio::time::timeout(timeout, self.agent_request(request, budget)).await {
+            let work = self.agent_request(request, budget);
+            let outcome = match self.gateway.task_profile(&request.label).timeout {
+                Some(limit) => tokio::time::timeout(limit, work).await.map_err(|_| limit),
+                None => Ok(work.await),
+            };
+            match outcome {
                 Ok(Ok(output)) => Ok(output),
                 Ok(Err(_)) if budget.journal_failure().is_some() => {
                     Err(RuntimeError::Storage(budget.journal_failure().unwrap()))
@@ -19,7 +23,7 @@ impl<P: Provider> Model for GatewayTransport<P> {
                     Some(detail) => Err(RuntimeError::Budget(detail)),
                     None => Err(RuntimeError::Model(error.into())),
                 },
-                Err(_) => Err(RuntimeError::Model(TaskError::Deadline(timeout))),
+                Err(limit) => Err(RuntimeError::Model(TaskError::Deadline(limit))),
             }
         })
     }

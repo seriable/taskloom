@@ -281,9 +281,10 @@ async fn registry_timeout_and_task_deadline_use_the_shorter_limit() {
     }
 }
 
-#[tokio::test(start_paused = true)]
-async fn attempt_timeout_includes_provider_permit_wait() {
-    let gateway = gateway();
+/// Holds the only permit of a provider with a request that never answers.
+async fn occupy_single_permit(
+    gateway: &Arc<Gateway>,
+) -> (taskloom::gateway::CallContext, tokio::task::JoinHandle<()>) {
     gateway.install_provider_control(
         "https://queued.test",
         1,
@@ -304,18 +305,52 @@ async fn attempt_timeout_includes_provider_permit_wait() {
     let first_context = ctx.clone();
     let first = tokio::spawn(async move {
         let mut ready = Some(ready);
-        first_gateway
+        let _ = first_gateway
             .execute(&first_context, |_| {
                 if let Some(ready) = ready.take() {
                     ready.send(()).unwrap();
                 }
                 std::future::pending::<Result<AttemptOutput<()>, ModelError>>()
             })
-            .await
+            .await;
     });
     waiting.await.unwrap();
+    (ctx, first)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_queued_request_waits_for_its_permit_and_the_attempt_timeout_starts_after() {
+    let gateway = gateway();
+    let (ctx, first) = occupy_single_permit(&gateway).await;
     let mut queued = ctx;
+    // Far shorter than the queueing: the attempt timeout must not cover it.
     queued.attempt_timeout = Some(Duration::from_millis(20));
+    queued.transient_attempts = 1;
+    let sent = AtomicUsize::new(0);
+    let call = gateway.execute(&queued, |_| {
+        sent.fetch_add(1, Ordering::SeqCst);
+        async { Ok(AttemptOutput::new((), None)) }
+    });
+    tokio::pin!(call);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(60), &mut call)
+            .await
+            .is_err(),
+        "a queued request keeps waiting for its permit"
+    );
+    assert_eq!(sent.load(Ordering::SeqCst), 0);
+    first.abort();
+    let _ = first.await;
+    assert!(call.await.is_ok());
+    assert_eq!(sent.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_whole_call_timeout_covers_the_permit_wait() {
+    let gateway = gateway();
+    let (ctx, first) = occupy_single_permit(&gateway).await;
+    let mut queued = ctx;
+    queued.task.timeout = Some(Duration::from_millis(20));
     queued.transient_attempts = 1;
     let sent = AtomicUsize::new(0);
     let started = tokio::time::Instant::now();
@@ -325,7 +360,9 @@ async fn attempt_timeout_includes_provider_permit_wait() {
             async { Ok(AttemptOutput::new((), None)) }
         })
         .await;
-    assert!(matches!(result, Err(ModelError::Transient { .. })));
+    assert!(
+        matches!(result, Err(ModelError::Deadline { limit, .. }) if limit == Duration::from_millis(20))
+    );
     assert_eq!(sent.load(Ordering::SeqCst), 0);
     assert_eq!(started.elapsed(), Duration::from_millis(20));
     first.abort();
@@ -345,7 +382,7 @@ async fn whole_call_timeout_covers_retry_backoff() {
         100,
         TokenEstimator::default(),
     );
-    ctx.task.timeout = Duration::from_millis(50);
+    ctx.task.timeout = Some(Duration::from_millis(50));
     ctx.transient_attempts = 100;
     let calls = AtomicUsize::new(0);
     let started = tokio::time::Instant::now();

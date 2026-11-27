@@ -17,6 +17,8 @@ pub const CONTEXT_OVERFLOW_MARKER: &str = "context_overflow";
 pub const CIRCUIT_OPEN_MARKER: &str = "ai_gateway_circuit_open";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// New kinds may be added in minor releases; match with a wildcard arm.
+#[non_exhaustive]
 pub enum ModelError {
     /// The complete logical call exhausted its time limit. Not retried.
     Deadline {

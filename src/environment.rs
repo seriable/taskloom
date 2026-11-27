@@ -216,6 +216,10 @@ impl Environment {
 
     /// Writes `answer` as the recording (or cache entry) of a request under
     /// `dir` — for tests that prepare a replay directory or a warm cache.
+    /// The runner looks requests up under the transport's namespace, so build
+    /// `key` with [`RequestKey::for_transport`] (or apply
+    /// [`RequestKey::in_namespace`]) when the transport has one, as
+    /// `GatewayTransport` does.
     pub async fn write_answer(dir: &Path, key: &RequestKey, answer: &Answer) {
         write(&key.file_in(dir), answer).await;
     }
@@ -234,12 +238,15 @@ impl Environment {
             };
             for file in files.flatten() {
                 // The persistent directory lock must not be unlinked while
-                // another process can still hold it.
-                if file
-                    .path()
-                    .extension()
-                    .is_none_or(|extension| extension != "json")
-                {
+                // another process can still hold it. Entries and temporary
+                // files left by a crash (older than the maximum age, so not
+                // being written) are pruned.
+                let name = file.file_name();
+                let name = name.to_string_lossy();
+                let entry = name.ends_with(".json");
+                let leftover =
+                    name.starts_with(TEMPORARY_PREFIX) && name.ends_with(TEMPORARY_SUFFIX);
+                if !entry && !leftover {
                     continue;
                 }
                 let stale = file
@@ -274,6 +281,21 @@ impl RequestKey {
         hasher.update(self.hash.as_bytes());
         self.hash = hex::encode(hasher.finalize());
         self
+    }
+
+    /// The key the runner stores `request` under with `transport`:
+    /// [`RequestKey::for_request`] in the transport's
+    /// [`cache_namespace`](crate::Transport::cache_namespace), if it has one.
+    pub fn for_transport(
+        request: &Request<'_>,
+        protocol: Protocol,
+        transport: &dyn crate::Transport,
+    ) -> Self {
+        let key = Self::for_request(request, protocol);
+        match transport.cache_namespace() {
+            Some(namespace) => key.in_namespace(&namespace),
+            None => key,
+        }
     }
 
     /// The key of `request` sent under `protocol` (and the current retry
@@ -425,6 +447,10 @@ impl RecordedRequest {
     }
 }
 
+/// Names of the temporary files an atomic write renames into place.
+const TEMPORARY_PREFIX: &str = ".taskloom-";
+const TEMPORARY_SUFFIX: &str = ".tmp";
+
 async fn write(file: &Path, answer: &Answer) {
     warn_on_store_error(file, write_record(file, answer, None, None).await);
 }
@@ -472,7 +498,10 @@ async fn write_record(
             .write(true)
             .open(file.parent().unwrap().join(".taskloom-store.lock"))?;
         fs2::FileExt::lock_exclusive(&lock)?;
-        let mut temporary = tempfile::NamedTempFile::new_in(file.parent().unwrap())?;
+        let mut temporary = tempfile::Builder::new()
+            .prefix(TEMPORARY_PREFIX)
+            .suffix(TEMPORARY_SUFFIX)
+            .tempfile_in(file.parent().unwrap())?;
         temporary.write_all(&bytes)?;
         temporary.as_file().sync_all()?;
         for retry in 0..10 {

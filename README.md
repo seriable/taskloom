@@ -170,13 +170,22 @@ let gateway = Gateway::new(GatewayConfig {
 The gateway wraps *any* transport through an attempt closure
 (`Gateway::execute`), so you can put your own HTTP client behind it.
 
-The registry's `TaskProfile::timeout` is a total task limit (default 120 s),
-covering queueing, backoff, protocol retries, repairs and model chains.
-`TaskSpec::deadline` can shorten it; the shorter limit wins. `AttemptTimeout`
-limits each attempt, including its circuit-breaker and concurrency-permit waits.
-An expired total limit stops the task with `TaskError::Deadline` and never
-starts another fallback. Direct gateway calls use `ModelError::Deadline`.
-For long-running tasks, increase the task entry's `timeout_seconds` explicitly.
+Time limits, from narrow to wide:
+
+- `AttemptTimeout` (or `CallContext::attempt_timeout`) limits one request
+  once it holds a concurrency permit. Waiting for the circuit breaker or for a
+  permit is not part of it, so a batch that queues behind the provider's
+  concurrency limit is not failed for queueing.
+- `TaskSpec::deadline` limits the whole task: protocol turns, repairs and the
+  model chain.
+- A task entry's whole-call limit (`TaskEntry::with_timeout(seconds)`) also
+  covers queueing, backoff, retries and the gateway's fallback chain. It is
+  **off by default** (`timeout_seconds = 0`); set it above the attempt timeout
+  times the attempts you expect. When both it and `TaskSpec::deadline` are set,
+  the shorter wins.
+
+An expired task limit stops the task with `TaskError::Deadline` and never
+starts another fallback; direct gateway calls get `ModelError::Deadline`.
 
 ## Providers
 
