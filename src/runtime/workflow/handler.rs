@@ -281,10 +281,17 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                     outcome.status = NodeOutcomeStatus::Failed;
                     return Ok(outcome);
                 }
-                let text = state
-                    .report
-                    .final_text()
-                    .ok_or_else(|| config("completed agent has no final text"))?;
+                // A finished child never changes again: re-entering it cannot
+                // produce output, so this is a terminal node failure rather
+                // than a recoverable wait that burns dispatches.
+                let Some(text) = state.report.final_text() else {
+                    outcome.status = NodeOutcomeStatus::Failed;
+                    outcome.detail = Some(format!(
+                        "child run {} finished without final text",
+                        context.run_id
+                    ));
+                    return Ok(outcome);
+                };
                 let decoded = match &self.output {
                     WorkflowOutput::Text => Ok(Value::String(text.into())),
                     WorkflowOutput::Json { .. } => serde_json::from_str::<Value>(text)

@@ -96,64 +96,69 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
 
     pub async fn resume(&self, id: &str) -> Result<WorkflowState, RuntimeError> {
         let lease = self.store.acquire(id).await?;
-        let mut state = self.load(&lease, id).await?;
-        if state.status.is_terminal() {
-            return Ok(state);
-        }
-        if state.status == WorkflowStatus::Running {
-            let started = state
-                .invocation_started_unix_ms
-                .ok_or_else(|| invalid("running workflow has no wall clock"))?;
-            let gap = unix_ms()?.checked_sub(started).ok_or_else(|| {
-                invalid("wall clock moved backwards during workflow interruption")
-            })?;
-            state.elapsed_ms = state
-                .elapsed_ms
-                .max(state.invocation_base_elapsed_ms.saturating_add(gap));
-            let clock = Clock::new(state.elapsed_ms);
-            for index in 0..state.nodes.len() {
-                if state.nodes[index].status != NodeStatus::Running {
-                    continue;
-                }
-                let task = self.task_definition(&state, index)?;
-                if task.recovery == TaskRecovery::Manual {
-                    mark_unknown(
-                        &mut state.nodes[index],
-                        &task,
-                        "worker stopped during a task with unverified effects",
-                    );
-                    let node = state.nodes[index].id.clone();
-                    self.event(
-                        &mut state,
-                        &clock,
-                        WorkflowEventKind::NodeUncertain { node },
-                    );
-                } else {
-                    state.nodes[index].status = NodeStatus::Pending;
-                    let node = state.nodes[index].id.clone();
-                    self.event(&mut state, &clock, WorkflowEventKind::Recovered { node });
-                }
-            }
-            state.status = if state
+        let state = self.load(&lease, id).await?;
+        if state.status.is_terminal()
+            || state
                 .nodes
                 .iter()
                 .any(|node| node.status == NodeStatus::Uncertain)
-            {
-                WorkflowStatus::NeedsRecovery
-            } else {
-                WorkflowStatus::Paused
-            };
-            state.invocation_started_unix_ms = None;
-            self.save(&mut state, &lease, &clock).await?;
-        }
-        if state
-            .nodes
-            .iter()
-            .any(|node| node.status == NodeStatus::Uncertain)
         {
             return Ok(state);
         }
         self.execute(state, lease).await
+    }
+
+    /// A stored `Running` status means the previous owner died: its lease is
+    /// gone but its invocation never stopped. Charge the wall-clock gap and
+    /// classify every node it left running before any other transition.
+    async fn recover_crash(
+        &self,
+        state: &mut WorkflowState,
+        lease: &Arc<dyn WorkflowLease>,
+    ) -> Result<(), RuntimeError> {
+        if state.status != WorkflowStatus::Running {
+            return Ok(());
+        }
+        let started = state
+            .invocation_started_unix_ms
+            .ok_or_else(|| invalid("running workflow has no wall clock"))?;
+        let gap = unix_ms()?
+            .checked_sub(started)
+            .ok_or_else(|| invalid("wall clock moved backwards during workflow interruption"))?;
+        state.elapsed_ms = state
+            .elapsed_ms
+            .max(state.invocation_base_elapsed_ms.saturating_add(gap));
+        let clock = Clock::new(state.elapsed_ms);
+        for index in 0..state.nodes.len() {
+            if state.nodes[index].status != NodeStatus::Running {
+                continue;
+            }
+            let task = self.task_definition(state, index)?;
+            if task.recovery == TaskRecovery::Manual {
+                mark_unknown(
+                    &mut state.nodes[index],
+                    &task,
+                    "worker stopped during a task with unverified effects",
+                );
+                let node = state.nodes[index].id.clone();
+                self.event(state, &clock, WorkflowEventKind::NodeUncertain { node });
+            } else {
+                state.nodes[index].status = NodeStatus::Pending;
+                let node = state.nodes[index].id.clone();
+                self.event(state, &clock, WorkflowEventKind::Recovered { node });
+            }
+        }
+        state.status = if state
+            .nodes
+            .iter()
+            .any(|node| node.status == NodeStatus::Uncertain)
+        {
+            WorkflowStatus::NeedsRecovery
+        } else {
+            WorkflowStatus::Paused
+        };
+        state.invocation_started_unix_ms = None;
+        self.save(state, lease, &clock).await
     }
 
     pub async fn reconcile(
@@ -351,7 +356,7 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
         lease: &Arc<dyn WorkflowLease>,
         id: &str,
     ) -> Result<WorkflowState, RuntimeError> {
-        let state = lease
+        let mut state = lease
             .load()
             .await?
             .ok_or_else(|| RuntimeError::Conflict("workflow does not exist".into()))?;
@@ -364,6 +369,7 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
                 "workflow identity, limits or registered task configuration changed",
             ));
         }
+        self.recover_crash(&mut state, lease).await?;
         Ok(state)
     }
 
@@ -373,6 +379,7 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
         lease: Arc<dyn WorkflowLease>,
     ) -> Result<WorkflowState, RuntimeError> {
         let clock = Clock::new(state.elapsed_ms);
+        let prior = state.status;
         state.status = WorkflowStatus::Running;
         state.invocation_base_elapsed_ms = state.elapsed_ms;
         state.invocation_started_unix_ms = Some(unix_ms()?);
@@ -411,7 +418,8 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
             if let Some(status) = interrupt {
                 workers.cancel();
                 self.drain(&mut state, &lease, &clock, &mut pending).await?;
-                self.stop(&mut state, &lease, &clock, status, None).await?;
+                self.finish(&mut state, &lease, &clock, status, prior)
+                    .await?;
                 return Ok(state);
             }
             let pausing = self.pause.is_some_and(CancelToken::is_cancelled);
@@ -562,12 +570,12 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
                     .iter()
                     .all(|node| matches!(node.status, NodeStatus::Complete | NodeStatus::Skipped))
                 {
-                    self.stop(&mut state, &lease, &clock, WorkflowStatus::Completed, None)
+                    self.finish(&mut state, &lease, &clock, WorkflowStatus::Completed, prior)
                         .await?;
                     return Ok(state);
                 }
                 if pausing {
-                    self.stop(&mut state, &lease, &clock, WorkflowStatus::Paused, None)
+                    self.finish(&mut state, &lease, &clock, WorkflowStatus::Paused, prior)
                         .await?;
                     return Ok(state);
                 }
@@ -591,7 +599,8 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
                         "workflow cannot make progress despite an acyclic definition",
                     ));
                 };
-                self.stop(&mut state, &lease, &clock, status, None).await?;
+                self.finish(&mut state, &lease, &clock, status, prior)
+                    .await?;
                 return Ok(state);
             }
             let remaining = clock.remaining(state.limits.max_duration);
@@ -831,7 +840,19 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
             kind,
         };
         tracing::debug!(workflow=%state.id,sequence=event.sequence,kind=?event.kind,"workflow event");
-        if let Some(sink) = self.events {
+        // `Resumed` reaches the sink together with the first event after it,
+        // so a resume that changes nothing leaves no trace (see `finish`).
+        if let Some(sink) = self
+            .events
+            .filter(|_| event.kind != WorkflowEventKind::Resumed)
+        {
+            if let Some(resumed) = state
+                .events
+                .last()
+                .filter(|last| last.kind == WorkflowEventKind::Resumed)
+            {
+                sink(resumed);
+            }
             sink(&event);
         }
         state.events.push(event);
@@ -849,6 +870,32 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
             .ok_or_else(|| invalid("workflow revision overflow"))?;
         state.validate()?;
         lease.save(state).await
+    }
+    /// Stop an `execute` invocation. If it recorded nothing after its
+    /// `Resumed` event and leaves the status unchanged, drop that event
+    /// instead of logging a `Resumed`/`Stopped` pair, so idle resumes do not
+    /// grow the persisted event log.
+    async fn finish(
+        &self,
+        state: &mut WorkflowState,
+        lease: &Arc<dyn WorkflowLease>,
+        clock: &Clock,
+        status: WorkflowStatus,
+        prior: WorkflowStatus,
+    ) -> Result<(), RuntimeError> {
+        if status != prior
+            || state
+                .events
+                .last()
+                .is_none_or(|last| last.kind != WorkflowEventKind::Resumed)
+        {
+            return self.stop(state, lease, clock, status, None).await;
+        }
+        state.events.pop();
+        state.status = status;
+        state.detail = None;
+        state.invocation_started_unix_ms = None;
+        self.save(state, lease, clock).await
     }
     async fn stop(
         &self,
