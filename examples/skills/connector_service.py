@@ -15,6 +15,7 @@ import re
 import socket
 import sys
 import threading
+import time
 import urllib.request
 import uuid
 
@@ -32,6 +33,11 @@ class Service:
         self.repository = args.repository
         self.note_identity = hashlib.sha256(str(self.root).encode()).hexdigest()[:16]
         self.fail = args.fail_after_append_once
+        self.hold_seconds = args.hold_after_append_once_seconds
+        if not 0 <= self.hold_seconds <= 30:
+            raise ValueError('append hold must be between zero and 30 seconds')
+        if self.fail and self.hold_seconds:
+            raise ValueError('choose either response loss or response hold for one fault trial')
         self.mutex = threading.Lock()
         self.github_calls = 0
         self.github_observations = []
@@ -160,6 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                     notes = service.notes()
                     result = {'entries': len(notes), 'latest': notes[-5:]}
             elif params['name'] == 'notes_append' and set(arguments) == {'text'} and isinstance(arguments['text'], str) and 1 <= len(arguments['text']) <= 2048:
+                hold_reply_seconds = 0
                 with service.mutex:
                     notes = service.notes()
                     if len(notes) >= 100:
@@ -169,6 +176,13 @@ class Handler(BaseHTTPRequestHandler):
                         stream.flush()
                         os.fsync(stream.fileno())
                     result = {'saved': True, 'entries': len(notes) + 1}
+                    hold_marker = service.root / 'held-after-append'
+                    if service.hold_seconds and not hold_marker.exists():
+                        with hold_marker.open('xb') as stream:
+                            stream.write(b'append fsynced; response held for owned caller process-death acceptance\n')
+                            stream.flush()
+                            os.fsync(stream.fileno())
+                        hold_reply_seconds = service.hold_seconds
                     marker = service.root / 'fault-injected'
                     if service.fail and not marker.exists():
                         with marker.open('xb') as stream:
@@ -179,6 +193,10 @@ class Handler(BaseHTTPRequestHandler):
                         self.connection.shutdown(socket.SHUT_RDWR)
                         self.connection.close()
                         return
+                # Hold only this caller's reply, never the session/notes lock:
+                # a second host must still initialize and inspect real state.
+                if hold_reply_seconds:
+                    time.sleep(hold_reply_seconds)
             else:
                 raise ValueError('unknown tool or invalid arguments')
             response = {'content': [{'type': 'text', 'text': json.dumps(result)}], 'structuredContent': result, 'isError': False}
@@ -204,6 +222,8 @@ def main():
     parser.add_argument('--port', type=int, default=18084)
     parser.add_argument('--ready-file', type=Path)
     parser.add_argument('--fail-after-append-once', action='store_true')
+    parser.add_argument('--hold-after-append-once-seconds', type=float, default=0,
+                        help='explicit 0..30 second fault-test hold after first fsynced append; default disabled')
     args = parser.parse_args()
     service = Service(args)
     server = ExampleServer(('127.0.0.1', args.port), Handler)

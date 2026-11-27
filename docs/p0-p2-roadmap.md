@@ -35,7 +35,7 @@ trial is a controlled integration baseline, not an independent API benchmark.
   cost/uncertainty, wall time and failure reasons retained.
 - [ ] Actual DAG/PEER lifecycle acceptance, including process interruption,
   approval occupancy, cancellation and no repeated uncertain writes.
-- [ ] Comparable adapters/results for the applicable capabilities of DeerFlow,
+- [x] Comparable adapters/results for the applicable capabilities of DeerFlow,
   agentUniverse and LangGraph under the same model, task and spending rules.
   Unsupported cases remain visible with reasons; manually assisted latency or
   cost must never enter native-API rankings.
@@ -95,6 +95,31 @@ raw requests/usage, environment-guard differences and limits are retained in
 `acceptance/p0-deerflow-20261128.json`. This supplies a qualified actual result,
 not general DeerFlow inability or Taskloom leadership. Complex LangGraph,
 broader long/recovery/repair and quality gates remain open, so P0.1 stays open.
+
+Later complex LangGraph increment: actual StateGraph parallel joins, dynamic
+Send fan-out and conditional native review completed all three corresponding
+V5 tasks, scoring 2/3. PEER failed reservation/source coverage; submitted-draft
+audit observed real initial rejection and passed the declared corrected-output
+gate. All three cases had overlapping analyst role lifecycles. Distribution
+control hashes, dependency versions, actual native requests/usage and failed
+outputs are retained. The applicable framework-comparison gate now has actual
+qualified DeerFlow, agentUniverse and LangGraph results, including explicit
+adapter omissions and conditioning differences. These outcomes are not an
+overall ranking or independent semantic/factual-quality evidence. See
+`collaboration-comparison.md` and `acceptance/p0-langgraph-complex-20261128.json`.
+
+Later workflow crash increment: a real fsynced approved MCP append was interrupted
+by killing its actual Taskloom host before the held reply. A second process
+could not steal the live workflow lease; restart retained the same uncertain
+call, and reentry made no new model/tool attempt. Explicit actual note-status
+observation and labelled operator reconciliation allowed the native append role
+and separate tool-less auditor to finish with one external effect. The final
+probe passed nine controls; the first mutex/timing fault-harness failure and its
+incomplete native-usage qualification remain visible. This is one active append
+role at death, not simultaneous generation death or distributed-worker service
+acceptance. Broader PEER lifecycle/long-task/native tool-error-repair and quality
+gates stay open. See `workflow-recovery-acceptance.md` and
+`acceptance/p0-workflow-crash-20261128.json`.
 
 ## P0.2 — Default research retrieval
 
@@ -266,7 +291,7 @@ preview now exist through SDK/CLI/API, with exact-plan launch binding and
 additive routes. All nine short native Qwen3-4B integration controls passed;
 the all-feature suite has 330 passing tests and six explicit ignored checks.
 This does not provide a visual editor/wizard or multi-user/database service.
-Every P2 box remains unchecked. See `workflow-design.md` and
+At that foundation, every P2 box remained unchecked. See `workflow-design.md` and
 `acceptance/p2-planning-20261128.json` for migration and deferred checks.
 
 - [x] Model/tool/retrieval configuration wizard with validation and safe secret

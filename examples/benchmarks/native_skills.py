@@ -53,7 +53,7 @@ def cli(executable, config, *args, environment=None):
     return json.loads(result.stdout)
 
 
-def operator_status(endpoint, token):
+def operator_status(endpoint, token, timeout_seconds=10):
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *unused):
             return None
@@ -63,7 +63,7 @@ def operator_status(endpoint, token):
                    'Accept': 'application/json, text/event-stream'}
         if session:
             headers.update({'Mcp-Session-Id': session, 'MCP-Protocol-Version': '2025-06-18'})
-        with opener.open(urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers=headers), timeout=10) as response:
+        with opener.open(urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers=headers), timeout=timeout_seconds) as response:
             raw = response.read(65536)
             return (json.loads(raw) if raw else None), response.headers.get('Mcp-Session-Id')
     _, session = request({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-06-18', 'capabilities': {}, 'clientInfo': {'name': 'explicit-harness-operator', 'version': '1'}}})
