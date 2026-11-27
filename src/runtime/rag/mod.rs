@@ -5,6 +5,7 @@ mod hybrid;
 #[cfg(feature = "research")]
 mod pdf;
 mod retrieval;
+pub(crate) use retrieval::terms as memory_terms;
 #[cfg(feature = "research")]
 mod web;
 

@@ -292,3 +292,25 @@ failed campaigns, the process-control result, artifact/source digests and check
 boundaries. All local API prices were explicitly zero, with
 `TASKLOOM_LOCAL_API_KEY` as the dummy credential environment; hardware,
 electricity and chat usage remain outside the fee record. P0-P2 is unfinished.
+
+## Native reviewed-memory lifecycle (2026-11-28)
+
+The memory campaign uses the same verified local Qwen generation model. Native
+output proposed an English preference and Rust 1.86 project fact, then a French
+language update with exact User-source quotations. The harness operator accepted
+only declared reference values; the model did not activate its own memories.
+An actual new-session answer used the recalled runtime. Conflict/replacement,
+restart, CLI edit, erasure, old-extraction replay and retained source history
+passed the final campaign. Another owner was checked while Alice's records
+were still live. All twelve declared lifecycle checks passed in 9,182 ms.
+
+The first preliminary campaign checked the other owner after erasure, which
+was weak isolation evidence; it is retained and superseded by the second and
+final third campaigns' live-record checks. The final binary also reserves
+administrative erasure capacity. All proposals, controller actions and native
+follow-up outputs remain separate in the artifacts. This is a visible synthetic
+integration case, not broad semantic-memory quality or multi-user service
+authorization. For example, the French proposal retained the language but did
+not separately retain the source's `concise` style preference. No full-preference
+coverage is inferred. See `long-term-memory.md` and
+`acceptance/p1-memory-20261128.json` for commands, transcripts and limits.

@@ -1,6 +1,7 @@
 //! Optional local application host: shared durable control, HTTP API and CLI.
 pub mod cli;
 mod config;
+mod memory;
 mod orchestration;
 pub mod retrieval;
 mod service;
@@ -21,6 +22,7 @@ use super::rag::{
 use super::*;
 use crate::CancelToken;
 pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppResearch, AppRole};
+pub use memory::{AppMemory, MemoryEdit, MemoryExtract, MemoryForget, MemoryReview};
 pub use orchestration::AppWorkflowRequest;
 pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
 pub use service::{router, serve};
@@ -31,6 +33,7 @@ pub struct Application {
     pub corpus: Arc<FileCorpusStore>,
     pub workflows: workflow::FileWorkflowStore,
     pub sessions: FileSessionStore,
+    pub memory: super::memory::FileMemoryStore,
     web: Option<Arc<WebClient>>,
     search: Option<Arc<WebSearch>>,
     pdf: Option<PdfLoader>,
@@ -99,6 +102,7 @@ impl Application {
         let runs = FileRunStore::new(config.state_dir.join("runs"));
         let workflows = workflow::FileWorkflowStore::new(config.state_dir.join("workflows"));
         let sessions = FileSessionStore::new(config.state_dir.join("sessions"));
+        let memory = super::memory::FileMemoryStore::new(config.state_dir.join("memory"));
         if config.knowledge {
             tools.register(RagTool::new(
                 "knowledge_search",
@@ -179,6 +183,7 @@ impl Application {
             corpus,
             workflows,
             sessions,
+            memory,
             web,
             search,
             pdf,

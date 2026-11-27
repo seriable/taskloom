@@ -70,6 +70,13 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/sessions", get(sessions).post(create_session))
         .route("/sessions/{id}", get(session))
         .route("/sessions/{id}/turns", post(start_turn))
+        .route("/sessions/{id}/memory-turns", post(start_memory_turn))
+        .route("/memory", get(memory_snapshot))
+        .route("/memory/recall", post(memory_recall))
+        .route("/memory/extract", post(memory_extract))
+        .route("/memory/review", post(memory_review))
+        .route("/memory/edit", post(memory_edit))
+        .route("/memory/forget", post(memory_forget))
         .route("/sessions/{id}/resume", post(resume_session))
         .route("/sessions/{id}/pause", post(pause_session))
         .route("/sessions/{id}/cancel", post(cancel_session))
@@ -385,6 +392,73 @@ async fn start_turn(
 async fn resume_session(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
     app.resume_session(&id).await?;
     Ok(Json(json!({"accepted":true})))
+}
+async fn start_memory_turn(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Json(input): Json<Turn>,
+) -> ApiResult {
+    let state = app
+        .start_session_turn_with_memory(&id, &input.turn_id, &input.prompt)
+        .await?;
+    Ok(Json(
+        json!({"run_id":state.report.run_id,"revision":state.revision}),
+    ))
+}
+async fn memory_snapshot(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.memory_snapshot().await?).map_err(super::super::store::storage)?,
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemoryQuery {
+    text: String,
+}
+async fn memory_recall(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<MemoryQuery>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.recall_memory(&input.text).await?)
+            .map_err(super::super::store::storage)?,
+    ))
+}
+async fn memory_extract(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<super::MemoryExtract>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.extract_memory(input).await?)
+            .map_err(super::super::store::storage)?,
+    ))
+}
+async fn memory_review(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<super::MemoryReview>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.review_memory(input).await?)
+            .map_err(super::super::store::storage)?,
+    ))
+}
+async fn memory_edit(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<super::MemoryEdit>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.edit_memory(input).await?)
+            .map_err(super::super::store::storage)?,
+    ))
+}
+async fn memory_forget(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<super::MemoryForget>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.forget_memory(input).await?)
+            .map_err(super::super::store::storage)?,
+    ))
 }
 async fn pause_session(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
     app.pause_session(&id)?;

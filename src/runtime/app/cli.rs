@@ -26,6 +26,11 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   import-web ID TITLE URL            ingest a host-granted webpage\n\
   web-search QUERY                   query configured Brave-compatible search\n\
   knowledge | search QUERY          inspect/query local corpus\n\
+  memory | memory-recall QUERY      export scoped memory / bounded recall (no model call)\n\
+  memory-review FILE.json           review a candidate, explicit revision and replacement\n\
+  memory-edit FILE.json             edit active memory with operator provenance\n\
+  memory-forget FILE.json           erase all versions of a memory slot\n\
+  memory-extract FILE.json          explicit metered extraction from a closed session turn\n\
   index-status                      inspect index/config/embedding spending\n\
   index-build REV BINDING            explicit full build/update; may incur embedding charges\n\
   benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
@@ -120,6 +125,100 @@ pub async fn run(
     // Inspection/import do not initialize a model or contact MCP services.
     let runs = super::super::FileRunStore::new(config.state_dir.join("runs"));
     let corpus = super::super::rag::FileCorpusStore::new(config.state_dir.join("knowledge"));
+    if args[0].starts_with("memory") {
+        use super::super::memory::*;
+        let memory = config
+            .memory
+            .as_ref()
+            .ok_or("long-term memory is not enabled by the host")?;
+        let access = memory.access()?;
+        let store = FileMemoryStore::new(config.state_dir.join("memory"));
+        let manager = MemoryManager::new(&store);
+        match args[0].as_str() {
+            "memory" if args.len() == 1 => output(&manager.snapshot(&access).await?)?,
+            "memory-recall" if args.len() == 2 => {
+                output(&manager.recall(&access, &args[1], &memory.recall).await?)?
+            }
+            "memory-review" if args.len() == 2 => {
+                let input: super::MemoryReview = decision_file(&args[1]).await?;
+                output(
+                    &manager
+                        .review(
+                            &access,
+                            input.expected_revision,
+                            &input.id,
+                            MemoryReviewDecision {
+                                accept: input.accept,
+                                replace: input.replace,
+                                note: input.note,
+                            },
+                        )
+                        .await?,
+                )?;
+            }
+            "memory-edit" if args.len() == 2 => {
+                let input: super::MemoryEdit = decision_file(&args[1]).await?;
+                output(
+                    &manager
+                        .edit(
+                            &access,
+                            input.expected_revision,
+                            &input.id,
+                            &input.value,
+                            &input.note,
+                        )
+                        .await?,
+                )?;
+            }
+            "memory-forget" if args.len() == 2 => {
+                let input: super::MemoryForget = decision_file(&args[1]).await?;
+                output(
+                    &manager
+                        .forget(&access, input.expected_revision, input.kind, &input.key)
+                        .await?,
+                )?;
+            }
+            "memory-extract" if args.len() == 2 => {
+                access.require_curator()?;
+                let input: super::MemoryExtract = decision_file(&args[1]).await?;
+                // Load no MCP/tool credentials for this tool-less operation.
+                let sessions =
+                    super::super::FileSessionStore::new(config.state_dir.join("sessions"));
+                let session = super::super::SessionManager::new(&sessions)
+                    .load(&input.session_id)
+                    .await?;
+                let model = config.model()?;
+                let tools = super::super::ToolRegistry::new();
+                let agent = super::super::AgentLoop::new(model.as_ref(), &tools, &config.model)
+                    .with_label(config.label()?)
+                    .with_limits(config.limits.clone())
+                    .with_context(config.context.clone())
+                    .with_output_tokens(config.output_tokens);
+                let extracted = manager
+                    .extract_from_turn(
+                        &access,
+                        &session,
+                        &MemoryExtractionRequest {
+                            expected_revision: input.expected_revision,
+                            turn_id: input.turn_id,
+                            request_id: input.request_id,
+                        },
+                        &agent,
+                        &runs,
+                    )
+                    .await?;
+                output(&extracted)?;
+                if !extracted.proposals_recorded {
+                    return Err(
+                        "memory extraction did not complete; inspect the retained run outcome"
+                            .into(),
+                    );
+                }
+            }
+            _ => return Err(HELP.into()),
+        }
+        return Ok(());
+    }
     match args[0].as_str() {
         "list" if args.len() == 1 => {
             output(&super::list_persisted(&runs).await?)?;
@@ -295,6 +394,29 @@ pub async fn run(
 fn output(value: &impl Serialize) -> Result<(), serde_json::Error> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+async fn decision_file<T: serde::de::DeserializeOwned>(
+    path: &str,
+) -> Result<T, Box<dyn std::error::Error>> {
+    // Bound file I/O itself rather than allocating an arbitrary local file.
+    let path = PathBuf::from(path);
+    let bytes = super::super::store::blocking(move || {
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(path)
+            .map_err(super::super::store::storage)?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(super::super::store::storage)?;
+        if bytes.len() > 1024 * 1024 {
+            return Err(super::config::config_error(
+                "memory request file exceeds 1 MiB",
+            ));
+        }
+        Ok(bytes)
+    })
+    .await?;
+    Ok(serde_json::from_slice(&bytes)?)
 }
 async fn wait(app: &Application, id: &str) -> Result<(), Box<dyn std::error::Error>> {
     loop {

@@ -21,6 +21,11 @@ available through [DurableAgent](docs/durable-runs.md). [Sessions and context
 compression](docs/sessions-and-context.md) retain full history across bounded
 model turns. [Durable workflows](docs/workflows.md) add parallel/conditional
 DAGs and bounded planner/executor/writer/reviewer collaboration (`agent_peer`).
+[Reviewed long-term memory](docs/long-term-memory.md) adds scoped facts and
+preferences, explicit native extraction, operator conflict review and erasure,
+with bounded recall into new sessions. [Final-output contracts](docs/final-output.md)
+validate JSON or exact citation provenance before success and bound repairs
+within the original model budget and narrowed permissions.
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
 retrieval and exact source citations (`agent_research`). See the
 [roadmap](docs/agent-roadmap.md) for acceptance checks and external validation.

@@ -263,7 +263,7 @@ fn terms_for_chunk(text: &str) -> (BTreeMap<String, usize>, usize) {
     let length = counts.values().sum();
     (counts, length)
 }
-fn terms(text: &str) -> BTreeMap<String, usize> {
+pub(crate) fn terms(text: &str) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     let mut word = String::new();
     let flush = |word: &mut String, counts: &mut BTreeMap<String, usize>| {

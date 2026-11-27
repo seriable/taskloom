@@ -16,6 +16,7 @@ mod durable;
 mod executor;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod memory;
 mod output;
 pub mod rag;
 #[cfg(feature = "sandbox")]

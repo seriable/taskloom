@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Opt-in cross-session memory: scoped file snapshots, source-linked native
+  extraction candidates, operator review/conflict replacement, versioned edits,
+  export and erasure with anti-resurrection bindings. SDK/API/CLI and explicit
+  memory-aware session turns retain ordinary history and host-owned tool grants.
+  Small local Qwen campaigns passed their declared lifecycle checks; this
+  is not general semantic-recall quality or multi-user service authorization.
+  See `docs/long-term-memory.md` for limits and migration.
 - Opt-in host final-output contracts validate exact JSON/schema or citations
   before a durable run can complete. Bounded repair freezes the policy, keeps
   the original budget and narrows tools to permitted read-only retrieval (none

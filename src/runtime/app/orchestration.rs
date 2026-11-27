@@ -180,7 +180,7 @@ impl Application {
             app.finish_job(&format!("workflow:{id}"), result);
         });
     }
-    fn finish_job(&self, key: &str, result: Result<(), RuntimeError>) {
+    pub(super) fn finish_job(&self, key: &str, result: Result<(), RuntimeError>) {
         if let Ok(mut jobs) = self.jobs() {
             if let Some(job) = jobs.get_mut(key) {
                 job.active = false;
@@ -368,7 +368,7 @@ impl Application {
         self.spawn_session(id, &binding.turn_id, job);
         Ok(())
     }
-    fn spawn_session(self: &Arc<Self>, id: &str, turn: &str, job: Job) {
+    pub(super) fn spawn_session(self: &Arc<Self>, id: &str, turn: &str, job: Job) {
         let app = Arc::clone(self);
         let id = id.to_owned();
         let turn = turn.to_owned();

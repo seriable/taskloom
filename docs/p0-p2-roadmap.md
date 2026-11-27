@@ -106,11 +106,26 @@ does not establish general semantic relevance or answer abstention.
 
 ## P1.1 — Cross-session memory
 
-- [ ] Versioned, source-linked fact/preference records with scoped ownership.
-- [ ] Extraction, bounded retrieval and explicit injection into new sessions.
-- [ ] Conflict/update policy, user edit/delete/export and deterministic recovery.
-- [ ] Tenant/project isolation, prompt-injection tests and evidence explaining
+- [x] Versioned, source-linked fact/preference records with scoped ownership.
+- [x] Extraction, bounded retrieval and explicit injection into new sessions.
+- [x] Conflict/update policy, user edit/delete/export and deterministic recovery.
+- [x] Tenant/project isolation, prompt-injection tests and evidence explaining
   each retained or superseded fact; ordinary history is preserved separately.
+
+2026-11-28 memory increment: an opt-in local memory store, trusted host access
+objects, explicit tool-less metered extraction, pending candidates, operator
+review, exact-slot conflict replacement, source-linked versioned edits and
+erasure/tombstones are integrated through SDK/API/CLI. Explicit memory-aware
+session turns freeze bounded recalled User data; they never grant tools or
+turn recalled records into fresh source testimony. Runtime/HTTP/CLI tests and
+actual local Qwen campaigns cover the declared lifecycle. The final native
+campaign checked another owner while the first owner's records were still
+live. This proves memory-namespace behavior in the single-operator host, not
+multi-user authorization of all runtime state. Recall remains lexical plus
+reviewed preferences, source extraction is from closed User turns, semantic
+slot aliases require operator review, and broad extraction/factual-quality
+benchmarks remain open. P2's service identity/database gates remain unchecked.
+See `long-term-memory.md` and `acceptance/p1-memory-20261128.json`.
 
 ## P1.2 — Skills, templates and connectors
 
