@@ -1,8 +1,11 @@
-# v0.2.0-alpha.1 candidate notes
+# v0.2.0-alpha.1 preview notes
 
-Status: local release candidate preparation. This file does not establish that
-a new public tag/release, hosted CI run or crates.io package exists. The
-[delivery checklist](preview-delivery-roadmap.md) records actual publication.
+Published prerelease:
+<https://github.com/seriable/taskloom/releases/tag/v0.2.0-alpha.1>.
+Its source is `43f337d45b0dadc8b54256ff04e3afe95d7dd874`; source/Cargo archives
+and SHA-256 checksums are attached. Anonymous access/download verification passed.
+The [delivery checklist](preview-delivery-roadmap.md) separately records the
+account-level hosted CI blocker. No crates.io publication is claimed.
 
 ## Changes
 
@@ -51,7 +54,8 @@ a trusted host parser and is separate from code isolation. Service/infrastructur
 charges are separate from generation budgets.
 
 GitHub currently reports an account billing lock preventing hosted jobs from
-starting. Git pushes from this environment have also hit connection failures.
-Neither configured CI nor local checks establish a successful hosted run. The
+starting. Direct Git pushes failed, while API publication preserved the original
+Git object hashes and succeeded. Neither publication nor local checks establish
+a successful hosted run. The
 published v0.1.0 tag predates all new framework capabilities; no crates.io upload
 is part of this preview delivery.

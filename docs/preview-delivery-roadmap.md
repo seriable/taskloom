@@ -21,8 +21,9 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
       two imports, completed run, verified quotes and unchanged completed resume.
 - [x] Verify `0.2.0-alpha.1` package compilation, required runtime assets and
       a separate fresh release installation with correct version/quote/reentry checks.
-- [ ] Updated public source, preview release/tag and installable distribution.
-- [ ] Published instructions distinguish the old tag from new capabilities.
+- [x] Public development branch, `v0.2.0-alpha.1` tag/release and source/archive
+      assets published; GitHub-reported asset SHA-256 values match local files.
+- [x] Published instructions pin the new preview and distinguish `v0.1.0`.
 
 ## 3. Multi-agent operator experience
 
@@ -64,5 +65,15 @@ GitHub reports: "The job was not started because your account is locked due to
 a billing issue." Matrix cancellation follows that account-level failure;
 it is not evidence of a Rust test failure. Account billing/Actions availability
 needs the repository owner's intervention. Local checks cannot make that hosted
-run green. Git remote read access works; remote HEAD remains `d4b70f6`.
-None of the unexecuted external checks is recorded as passing.
+run green. A fresh run for the preview source at `43f337d` confirms the same
+billing lock: <https://github.com/seriable/taskloom/actions/runs/45946774361>.
+
+Direct Git HTTPS push failed with connection/reset errors. The authenticated
+GitHub API remained available, so each original tree, commit and annotated tag
+was recreated with its **unchanged SHA** before publishing the development ref.
+The public preview is
+<https://github.com/seriable/taskloom/releases/tag/v0.2.0-alpha.1>, targeting
+`43f337d45b0dadc8b54256ff04e3afe95d7dd874`. Source ZIP, Cargo source package and
+checksums are public; unauthenticated API access and source download/hash checks
+passed. This is publication verification, not a hosted CI success. None of the
+unexecuted external checks is recorded as passing.
