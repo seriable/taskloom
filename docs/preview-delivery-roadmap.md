@@ -15,8 +15,12 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
 
 ## 2. Open-source delivery
 
-- [ ] Inspect hosted CI and resolve actionable failures.
-- [ ] New-user clean-install verification of the release candidate.
+- [x] Inspect hosted CI and distinguish account lock from code/test failure.
+- [ ] Restore hosted Actions availability and verify actual jobs (owner billing issue).
+- [x] New-user release-profile installation into an isolated prefix, fresh config,
+      two imports, completed run, verified quotes and unchanged completed resume.
+- [x] Verify `0.2.0-alpha.1` package compilation, required runtime assets and
+      a separate fresh release installation with correct version/quote/reentry checks.
 - [ ] Updated public source, preview release/tag and installable distribution.
 - [ ] Published instructions distinguish the old tag from new capabilities.
 

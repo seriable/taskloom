@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0-alpha.1 (unreleased candidate)
 
 - Optional `sandbox` worker contract and Docker Python tool: immutable audited
   image/local engine, no host mounts/network/credentials, bounded resources and
