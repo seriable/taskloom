@@ -351,3 +351,64 @@ and chat usage remain unmetered. There is no competitor/latency ranking here.
 Twelve lifecycle/control checks passed, but the retained citation failure is
 not relabelled as success. See `skill-packages.md` and
 `acceptance/p1-skills-20261128.json` for source/artifact pins and transcripts.
+
+## Exact-locator contracts and native follow-up (2026-11-28)
+
+`FinalOutputPolicy::LocatedCitedReport` introduces an explicit alternative
+model input contract; it does not correct failed full-ID output. Models return
+exact retrieved document/revision/UTF-8-byte-offset locators, body quotes and
+ordinal markers. The host rejects missing, ambiguous or fabricated evidence,
+retains the original model JSON and separately derives canonical citations for
+parent handoffs and report views. See `final-output.md` for migration.
+
+Two visible source-template probes used research-brief 1.1.0. The first failed:
+the model supplied a chunk hash as document ID, omitted markers and prefixed
+quotes with the source URI. The second clarified the role's guidance and used
+JSON-formatted locator diagnostics. It passed **4/4 templates and 13 control
+checks** in 13,120 ms: eight native requests, 4,803 input / 232 output tokens,
+four model tool attempts, one real public GitHub read and one persisted note.
+The research answer restated both approval rules from the actual source;
+raw ordinal-form output and canonical handoff matched the explicit mappings.
+With model/connector credential environments removed and the model server
+stopped, CLI report verification reproduced the native API view exactly.
+The first failed probe took 35,265 ms with ten requests, 7,205 input / 433 output
+tokens. Both pins and source snapshots are retained. These were unreleased
+authoring probes with different content digests, not two published objects
+silently substituted under one installed pin. Historical 1.0.0 evidence remains
+unchanged. This accepts the bounded examples; it is not general model quality.
+
+The new `collaboration-v3.json` explicitly switches analyst/writer contracts and
+prompts to locators. The remaining task documents, requests and spending rules
+are visible in the versioned suite. Run it with:
+
+```powershell
+python examples/benchmarks/native_collaboration.py target/native-collaboration-v3 --suite examples/benchmarks/collaboration-v3.json --config local-provider.json --taskloom target/debug/taskloom.exe --verifier target/debug/examples/benchmark_citations.exe
+```
+
+The retained v3 campaign still scored **0/3**. Two analysts overlapped in every
+case, with five validated analysis outputs. The DAG writer and final PEER
+writer did not retrieve their own evidence, and another PEER analyst emitted
+invalid JSON; the host refused successful completion. Required reviewer rework
+was not exercised. The campaign recorded 24 native model requests, six tool
+attempts, eleven rejected outputs, eight admitted repairs and five validations;
+29,797 input / 5,551 output tokens and 176,060 ms total case wall time. No
+completed final report or end-to-end research success is claimed.
+
+A disclosed current-session inspection of the two DAG analyst answers found
+that they faithfully restated the approval and recovery source rules. Other
+validated analysts mixed relevant budget/recovery paraphrases with goal
+restatements or broader explanations; exact provenance did not establish complete
+assigned-task coverage or every causal interpretation. This is a visible,
+session-assisted source-support assessment, not blinded independent quality
+scoring, a native reviewer verdict or a competitor comparison.
+
+All model prices remained explicitly USD 0 under the configured loopback API,
+using `TASKLOOM_LOCAL_API_KEY`; template generation cap was zero micro-USD and
+collaboration workflow admission cap one micro-USD (each role zero). Public
+GitHub access was explicitly zero-priced with a twenty-request service cap;
+embedding was unused. Hardware/electricity and chat usage remain unmetered.
+The model is the same verified Qwen3-1.7B / Transformers 5.20.2 deployment.
+Changed prompts/format prohibit treating v2/v3 as a same-conditions score
+comparison. Source/artifact hashes, raw native journals, failed probes and
+inspection limits are in `acceptance/p0-locators-20261128.json`. The P0 complex
+task/quality gates, wider competitor trials and P0-P2 Goal remain unfinished.

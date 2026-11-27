@@ -23,6 +23,7 @@ struct CitationModel {
     calls: AtomicUsize,
     requests: Mutex<Vec<ModelRequest>>,
     mode: Mode,
+    located: bool,
 }
 impl CitationModel {
     fn new(mode: Mode) -> Self {
@@ -30,6 +31,13 @@ impl CitationModel {
             calls: AtomicUsize::new(0),
             requests: Mutex::new(Vec::new()),
             mode,
+            located: false,
+        }
+    }
+    fn located(mode: Mode) -> Self {
+        Self {
+            located: true,
+            ..Self::new(mode)
         }
     }
 }
@@ -73,8 +81,20 @@ impl Model for CitationModel {
             } else if let Some(evidence) = evidence {
                 let chunk = &evidence.hits[0].chunk;
                 let valid = repair && !matches!(self.mode, Mode::Reject);
-                AssistantTurn::text(json!({"text":if valid { format!("Check the operation [[{}]].",chunk.id) } else { "No marker in this invalid draft.".into() },
-                    "citations":[{"chunk_id":chunk.id,"quote":chunk.text}]}).to_string())
+                let text = if valid {
+                    format!(
+                        "Check the operation [[{}]].",
+                        if self.located { "1" } else { &chunk.id }
+                    )
+                } else {
+                    "No marker in this invalid draft.".into()
+                };
+                let citation = if self.located {
+                    json!({"document_id":chunk.document_id,"corpus_revision":evidence.corpus_revision,"start":chunk.start,"quote":chunk.text})
+                } else {
+                    json!({"chunk_id":chunk.id,"quote":chunk.text})
+                };
+                AssistantTurn::text(json!({"text":text,"citations":[citation]}).to_string())
             } else {
                 AssistantTurn::text("not a report")
             };
@@ -540,4 +560,221 @@ async fn citation_contract_rejects_missing_required_documents_and_effectful_read
     assert_eq!(report.stop_reason, StopReason::ConfigurationError);
     assert_eq!(model.calls.load(Ordering::SeqCst), before);
     assert_eq!(writes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn located_contract_survives_pause_and_restart_without_mutating_model_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let model = CitationModel::located(Mode::Correct);
+    let policy = FinalOutputPolicy::located_cited_report(1);
+    let base = agent(&model, &tools, 1).with_output_policy(policy.clone());
+    let pause = CancelToken::new();
+    let sink = |event: &RunEvent| {
+        if matches!(
+            event.kind,
+            RunEventKind::OutputRejected { repair: true, .. }
+        ) {
+            pause.cancel();
+        }
+    };
+    let paused = base.clone().with_events(&sink);
+    let store = FileRunStore::new(dir.path().join("runs"));
+    let state = DurableAgent::new(&paused, &store)
+        .with_pause(&pause)
+        .start("located", vec![Message::user("research")])
+        .await
+        .unwrap();
+    assert_eq!(state.status, RunStatus::Paused);
+    state.validate().unwrap();
+    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    // A format switch changes the frozen contract, even with equal limits.
+    let legacy = base
+        .clone()
+        .with_output_policy(FinalOutputPolicy::cited_report(1));
+    assert!(matches!(
+        DurableAgent::new(&legacy, &store).resume("located").await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let done = DurableAgent::new(&base, &store)
+        .resume("located")
+        .await
+        .unwrap();
+    done.validate().unwrap();
+    assert_eq!(done.report.stop_reason, StopReason::Completed);
+    assert_eq!(done.report.budget.committed_micros, 30);
+    let raw: LocatedReport = serde_json::from_str(done.report.final_text().unwrap()).unwrap();
+    assert_eq!(raw.text, "Check the operation [[1]].");
+    let resolved = policy.resolve_located(&done.report).unwrap();
+    assert_eq!(resolved.original, raw);
+    assert!(resolved
+        .verified
+        .report
+        .text
+        .contains(&resolved.mappings[0].chunk_id));
+    assert_eq!(model.requests.lock().unwrap()[2].tools.len(), 1);
+    assert_eq!(
+        DurableAgent::new(&base, &store)
+            .resume("located")
+            .await
+            .unwrap()
+            .revision,
+        done.revision
+    );
+    assert_eq!(model.calls.load(Ordering::SeqCst), 3);
+    #[cfg(feature = "app")]
+    {
+        let view = taskloom::runtime::app::verify_report_with_provenance(&done).unwrap();
+        assert_eq!(
+            view["rendering"]["original"],
+            serde_json::to_value(raw).unwrap()
+        );
+        assert_eq!(view["rendering"]["model_transcript_unchanged"], true);
+        assert_eq!(
+            view["report"],
+            policy.validated_value(&done.report).unwrap()
+        );
+        let mut corrupt = done.clone();
+        corrupt
+            .report
+            .events
+            .retain(|e| !matches!(e.kind, RunEventKind::OutputValidated { .. }));
+        assert!(taskloom::runtime::app::verify_report_with_provenance(&corrupt).is_err());
+    }
+}
+
+#[tokio::test]
+async fn located_contract_requires_actual_tool_execution_and_denies_repair_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let tools = tools(dir.path(), writes.clone()).await;
+    let model = CitationModel::located(Mode::Correct);
+    let policy = FinalOutputPolicy::located_cited_report(1);
+    let report = agent(&model, &tools, 1)
+        .with_output_policy(policy.clone())
+        .run("actual", vec![Message::user("research")])
+        .await;
+    assert_eq!(report.stop_reason, StopReason::Completed);
+    let mut history = report.clone();
+    history.events.clear();
+    assert!(policy
+        .resolve_located(&history)
+        .unwrap_err()
+        .contains("no citation evidence"));
+    let mut failed = report.clone();
+    for event in &mut failed.events {
+        if let RunEventKind::ToolFinished { is_error, .. } = &mut event.kind {
+            *is_error = true;
+        }
+    }
+    assert!(policy.resolve_located(&failed).is_err());
+    let escape = CitationModel::located(Mode::Escape);
+    let denied = agent(&escape, &tools, 1)
+        .with_output_policy(policy.clone())
+        .run("escape-located", vec![Message::user("research")])
+        .await;
+    assert_eq!(denied.stop_reason, StopReason::PermissionDenied);
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    let capped = agent(&model, &tools, 1)
+        .with_output_policy(policy)
+        .with_limits(RunLimits {
+            max_cost_micros: Some(20),
+            ..Default::default()
+        })
+        .run("located-cap", vec![Message::user("research")])
+        .await;
+    assert_eq!(capped.stop_reason, StopReason::Budget);
+    assert_eq!(capped.budget.committed_micros, 20);
+}
+
+#[tokio::test]
+async fn located_workflow_exposes_canonical_output_and_retains_raw_child_transcript() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let model = CitationModel::located(Mode::Correct);
+    let agent = agent(&model, &tools, 1);
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let workflows = FileWorkflowStore::new(dir.path().join("workflows"));
+    let policy = FinalOutputPolicy::located_cited_report(1);
+    let mut tasks = WorkflowTasks::new();
+    tasks
+        .register(
+            AgentWorkflowTask::new(
+                "analyst",
+                &agent,
+                &runs,
+                "located JSON",
+                WorkflowOutput::Validated {
+                    policy: policy.clone(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    let runner = WorkflowRunner::new(&tasks, &workflows).with_limits(WorkflowLimits {
+        max_cost_micros: Some(100),
+        ..Default::default()
+    });
+    let done = runner
+        .start(
+            "located-wf",
+            WorkflowDefinition::new(vec![WorkflowNode::new("draft", "analyst")]),
+            Value::Null,
+        )
+        .await
+        .unwrap();
+    assert_eq!(done.status, WorkflowStatus::Completed);
+    let child = runs
+        .inspect(&done.node("draft").unwrap().child.as_ref().unwrap().run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    child.validate().unwrap();
+    let resolved = policy.resolve_located(&child.report).unwrap();
+    assert_eq!(
+        done.output("draft"),
+        Some(&serde_json::to_value(&resolved.verified.report).unwrap())
+    );
+    assert_eq!(resolved.original.text, "Check the operation [[1]].");
+    assert_ne!(
+        serde_json::to_value(resolved.original).unwrap(),
+        done.output("draft").unwrap().clone()
+    );
+    assert_eq!(
+        runner.resume("located-wf").await.unwrap().revision,
+        done.revision
+    );
+    assert_eq!(model.calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn located_coverage_and_reader_effects_remain_host_owned() {
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools(dir.path(), Arc::new(AtomicUsize::new(0))).await;
+    let model = CitationModel::located(Mode::Correct);
+    let policy = FinalOutputPolicy::LocatedCitedReport {
+        retrieval_tools: BTreeSet::from(["knowledge_search".into()]),
+        min_sources: 1,
+        required_documents: BTreeSet::from(["missing".into()]),
+        max_repairs: 1,
+    };
+    let report = agent(&model, &tools, 1)
+        .with_output_policy(policy)
+        .run("located-coverage", vec![Message::user("research")])
+        .await;
+    assert_eq!(report.stop_reason, StopReason::ProtocolError);
+    assert!(report.detail.unwrap().contains("citation coverage"));
+    let before = model.calls.load(Ordering::SeqCst);
+    let policy = FinalOutputPolicy::LocatedCitedReport {
+        retrieval_tools: BTreeSet::from(["save".into()]),
+        min_sources: 1,
+        required_documents: Default::default(),
+        max_repairs: 1,
+    };
+    let report = agent(&model, &tools, 1)
+        .with_output_policy(policy)
+        .run("located-effect", vec![Message::user("research")])
+        .await;
+    assert_eq!(report.stop_reason, StopReason::ConfigurationError);
+    assert_eq!(model.calls.load(Ordering::SeqCst), before);
 }

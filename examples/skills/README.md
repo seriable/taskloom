@@ -23,3 +23,19 @@ response-loss mode must be reconciled against actual persisted records.
 The native campaign is reproducible with an explicitly zero-priced loopback
 model configuration; it records failed research/citation output as failed.
 These packages do not claim model effectiveness or competitor superiority.
+
+`research-located/` contains `research-brief` **1.1.0**. Its new, opt-in
+`located_cited_report` contract uses exact document/revision/byte-offset locators
+and ordinal markers; the host derives canonical citations while retaining the
+original model output. Version 1.0.0 in `research-brief/` keeps its strict full-ID
+contract. Install/activate 1.1.0 explicitly; existing runs cannot switch formats.
+See `../../docs/final-output.md` for verification and migration details.
+
+```powershell
+python examples/skills/pack.py examples/skills/research-located target/research-located.tar
+python examples/benchmarks/native_skills.py target/native-skills-located --config target/native-generation-config.json --taskloom target/debug/taskloom.exe --research-package research-located
+```
+
+The runner's default remains 1.0.0. Campaigns using 1.1.0 have changed prompts
+and output contracts; their outcomes are not a controlled same-conditions score
+improvement over historical failures.

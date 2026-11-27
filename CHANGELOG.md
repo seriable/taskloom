@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Opt-in exact-locator citation contracts retain model JSON and resolve only
+  unambiguous retrieved document/revision/UTF-8-byte-offset references. Workflow
+  handoffs receive verified canonical citations; report API/CLI expose original
+  text and explicit mappings. Legacy full-ID citations remain strict. The
+  versioned research-brief 1.1.0 source example uses the new format; historical
+  failures remain recorded. See `docs/final-output.md` for migration and limits.
 - Data-only versioned skills: bounded USTAR validation, immutable content pins,
   exact dependencies, tool/credential declarations and separate host grants.
   CLI install/inspect/retire and mounted API templates preserve durable package

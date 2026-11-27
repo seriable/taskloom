@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    rag::{CitedReport, SearchResult},
+    rag::{CitedReport, LocatedReport, ResolvedLocatedReport, SearchResult, VerifiedReport},
     state::fingerprint,
     Message, RunEventKind, RunReport, RuntimeError, ToolDefinition, ToolPolicy,
 };
@@ -23,6 +23,19 @@ pub enum FinalOutputPolicy {
     /// this run. Sources do not become instructions or grants. A successful
     /// check establishes exact quotes/IDs/markers, not truth or claim support.
     CitedReport {
+        #[serde(default = "knowledge_tool")]
+        retrieval_tools: BTreeSet<String>,
+        #[serde(default = "one_source")]
+        min_sources: usize,
+        #[serde(default)]
+        required_documents: BTreeSet<String>,
+        #[serde(default)]
+        max_repairs: usize,
+    },
+    /// A separate model contract with `[[1]]` markers and exact retrieved
+    /// document/revision/start locators. Canonical rendering is host-derived;
+    /// the original assistant message is never rewritten.
+    LocatedCitedReport {
         #[serde(default = "knowledge_tool")]
         retrieval_tools: BTreeSet<String>,
         #[serde(default = "one_source")]
@@ -53,11 +66,30 @@ impl FinalOutputPolicy {
             max_repairs,
         }
     }
+    pub fn located_cited_report(max_repairs: usize) -> Self {
+        Self::LocatedCitedReport {
+            retrieval_tools: knowledge_tool(),
+            min_sources: 1,
+            required_documents: BTreeSet::new(),
+            max_repairs,
+        }
+    }
+    pub fn citation_tools(&self) -> Option<&BTreeSet<String>> {
+        match self {
+            Self::CitedReport {
+                retrieval_tools, ..
+            }
+            | Self::LocatedCitedReport {
+                retrieval_tools, ..
+            } => Some(retrieval_tools),
+            Self::JsonSchema { .. } => None,
+        }
+    }
     pub fn max_repairs(&self) -> usize {
         match self {
-            Self::CitedReport { max_repairs, .. } | Self::JsonSchema { max_repairs, .. } => {
-                *max_repairs
-            }
+            Self::CitedReport { max_repairs, .. }
+            | Self::LocatedCitedReport { max_repairs, .. }
+            | Self::JsonSchema { max_repairs, .. } => *max_repairs,
         }
     }
     pub fn identity(&self) -> Result<String, RuntimeError> {
@@ -71,6 +103,12 @@ impl FinalOutputPolicy {
         }
         match self {
             Self::CitedReport {
+                retrieval_tools,
+                min_sources,
+                required_documents,
+                ..
+            }
+            | Self::LocatedCitedReport {
                 retrieval_tools,
                 min_sources,
                 required_documents,
@@ -118,6 +156,9 @@ impl FinalOutputPolicy {
         policy.allowed_tools.retain(|name| match self {
             Self::CitedReport {
                 retrieval_tools, ..
+            }
+            | Self::LocatedCitedReport {
+                retrieval_tools, ..
             } => retrieval_tools.contains(name),
             Self::JsonSchema { .. } => false,
         });
@@ -128,6 +169,9 @@ impl FinalOutputPolicy {
             .iter()
             .filter(|tool| match self {
                 Self::CitedReport {
+                    retrieval_tools, ..
+                }
+                | Self::LocatedCitedReport {
                     retrieval_tools, ..
                 } => retrieval_tools.contains(&tool.name),
                 Self::JsonSchema { .. } => false,
@@ -149,85 +193,130 @@ impl FinalOutputPolicy {
                     .validate(&value)
                     .map_err(|e| format!("final JSON schema check failed: {e}"))
             }
-            Self::CitedReport {
-                retrieval_tools,
-                min_sources,
-                required_documents,
-                ..
-            } => {
-                let cited: CitedReport = serde_json::from_str(text).map_err(|e| {
-                    format!(
-                        "final answer must be exact CitedReport JSON, without Markdown fences: {e}"
-                    )
-                })?;
-                let eligible = report
-                    .events
-                    .iter()
-                    .filter_map(|event| match &event.kind {
-                        RunEventKind::ToolStarted { call_id, name }
-                            if retrieval_tools.contains(name) =>
-                        {
-                            Some(call_id.as_str())
-                        }
-                        _ => None,
-                    })
-                    .collect::<BTreeSet<_>>();
-                let completed = report
-                    .events
-                    .iter()
-                    .filter_map(|event| match &event.kind {
-                        RunEventKind::ToolFinished {
-                            call_id,
-                            is_error: false,
-                        } => Some(call_id.as_str()),
-                        _ => None,
-                    })
-                    .collect::<BTreeSet<_>>();
-                let mut evidence = Vec::new();
-                for message in &report.messages {
-                    if let Message::Tool { result } = message {
-                        if !result.is_error
-                            && eligible.contains(result.call_id.as_str())
-                            && completed.contains(result.call_id.as_str())
-                        {
-                            evidence.push(
-                                serde_json::from_value::<SearchResult>(result.output.clone())
-                                    .map_err(|_| {
-                                        "configured citation tool did not return a SearchResult"
-                                            .to_string()
-                                    })?,
-                            );
-                        }
-                    }
-                }
-                if evidence.is_empty() {
-                    return Err("no citation evidence was retrieved by an executed tool in this run; search the configured knowledge first".into());
-                }
-                // Expose a bounded diagnostic of actual evidence identities;
-                // never rewrite generated IDs, quotes or claims on its behalf.
-                let available = evidence
-                    .iter()
-                    .flat_map(|result| &result.hits)
-                    .map(|hit| hit.chunk.id.as_str())
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .take(6)
-                    .collect::<Vec<_>>();
-                let verified = SearchResult::verify_all(&evidence, cited).map_err(|e| format!("exact citation verification failed: {e}. Available retrieved chunk IDs (up to six): {available:?}. Use exact returned IDs and body quotes; include [[chunk_id]] in text for every citation. Claim support is not verified by this check."))?;
-                if verified.sources.len() < *min_sources
-                    || required_documents.iter().any(|id| {
-                        !verified
-                            .sources
-                            .iter()
-                            .any(|source| &source.document_id == id)
-                    })
-                {
-                    return Err(format!("citation coverage requires at least {min_sources} source chunks and all documents {required_documents:?}"));
-                }
-                Ok(())
+            Self::CitedReport { .. } | Self::LocatedCitedReport { .. } => {
+                self.verified_citations(report).map(|_| ())
             }
         }
     }
+    fn coverage(&self, verified: &VerifiedReport) -> Result<(), String> {
+        let (min_sources, required_documents) = match self {
+            Self::CitedReport {
+                min_sources,
+                required_documents,
+                ..
+            }
+            | Self::LocatedCitedReport {
+                min_sources,
+                required_documents,
+                ..
+            } => (min_sources, required_documents),
+            _ => return Err("output contract is not a citation contract".into()),
+        };
+        if verified.sources.len() < *min_sources
+            || required_documents
+                .iter()
+                .any(|id| !verified.sources.iter().any(|s| &s.document_id == id))
+        {
+            return Err(format!("citation coverage requires at least {min_sources} source chunks and all documents {required_documents:?}"));
+        }
+        Ok(())
+    }
+    pub fn resolve_located(&self, report: &RunReport) -> Result<ResolvedLocatedReport, String> {
+        if !matches!(self, Self::LocatedCitedReport { .. }) {
+            return Err("output contract is not a located report".into());
+        }
+        let evidence = executed_evidence(report, self.citation_tools().unwrap())?;
+        let located: LocatedReport = serde_json::from_str(final_text(report)?).map_err(|e| {
+            format!("final answer must be exact LocatedReport JSON, without fences: {e}")
+        })?;
+        let available=serde_json::Value::Array(evidence.iter().flat_map(|r|r.hits.iter().map(move|h|serde_json::json!({"document_id":h.chunk.document_id,"corpus_revision":r.corpus_revision,"start":h.chunk.start}))).take(6).collect());
+        let resolved=SearchResult::verify_located_all(&evidence,located).map_err(|e|format!("exact source-locator verification failed: {e}. Available locators (up to six): {available}. Put [[1]], [[2]], ... IN text for citation-array order. Copy quote only from chunk.text, without a source/title prefix. This does not verify claim support."))?;
+        self.coverage(&resolved.verified)?;
+        Ok(resolved)
+    }
+    pub fn verified_citations(&self, report: &RunReport) -> Result<VerifiedReport, String> {
+        if matches!(self, Self::LocatedCitedReport { .. }) {
+            return Ok(self.resolve_located(report)?.verified);
+        }
+        let tools = self
+            .citation_tools()
+            .ok_or("output contract is not a citation contract")?;
+        let evidence = executed_evidence(report, tools)?;
+        let cited: CitedReport = serde_json::from_str(final_text(report)?).map_err(|e| {
+            format!("final answer must be exact CitedReport JSON, without Markdown fences: {e}")
+        })?;
+        let available = evidence
+            .iter()
+            .flat_map(|r| r.hits.iter().map(|h| h.chunk.id.as_str()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .take(6)
+            .collect::<Vec<_>>();
+        let verified=SearchResult::verify_all(&evidence,cited).map_err(|e|format!("exact citation verification failed: {e}. Available retrieved chunk IDs (up to six): {available:?}. Use exact returned IDs and body quotes; include [[chunk_id]] in text for every citation. Claim support is not verified by this check."))?;
+        self.coverage(&verified)?;
+        Ok(verified)
+    }
+    /// The workflow value is a verified rendering for the located contract.
+    /// The immutable child transcript still holds the original model JSON.
+    pub fn validated_value(&self, report: &RunReport) -> Result<Value, String> {
+        if matches!(self, Self::LocatedCitedReport { .. }) {
+            serde_json::to_value(self.resolve_located(report)?.verified.report)
+                .map_err(|e| e.to_string())
+        } else {
+            self.check(report)?;
+            serde_json::from_str(final_text(report)?).map_err(|e| e.to_string())
+        }
+    }
+}
+fn final_text(report: &RunReport) -> Result<&str, String> {
+    match report.messages.last() {
+        Some(Message::Assistant { turn }) if turn.tool_calls.is_empty() => Ok(&turn.content),
+        _ => Err("no final assistant answer".into()),
+    }
+}
+fn executed_evidence(
+    report: &RunReport,
+    tools: &BTreeSet<String>,
+) -> Result<Vec<SearchResult>, String> {
+    let eligible = report
+        .events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            RunEventKind::ToolStarted { call_id, name } if tools.contains(name) => {
+                Some(call_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let completed = report
+        .events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            RunEventKind::ToolFinished {
+                call_id,
+                is_error: false,
+            } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut evidence = Vec::new();
+    for message in &report.messages {
+        if let Message::Tool { result } = message {
+            if !result.is_error
+                && eligible.contains(result.call_id.as_str())
+                && completed.contains(result.call_id.as_str())
+            {
+                evidence.push(
+                    serde_json::from_value::<SearchResult>(result.output.clone())
+                        .map_err(|_| "configured citation tool did not return a SearchResult")?,
+                );
+            }
+        }
+    }
+    if evidence.is_empty() {
+        return Err("no citation evidence was retrieved by an executed tool in this run; search the configured knowledge first".into());
+    }
+    Ok(evidence)
 }
 pub(super) fn rejected_count(report: &RunReport) -> usize {
     report

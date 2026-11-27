@@ -134,7 +134,7 @@ See `long-term-memory.md` and `acceptance/p1-memory-20261128.json`.
 - [x] Host validation and grants before activation. Skill content cannot execute
   host commands, reveal secrets or enlarge permissions on its own.
 - [x] Frozen package identity in durable runs; explicit upgrade/removal behavior.
-- [ ] Useful task templates and working connector examples with reproducible
+- [x] Useful task templates and working connector examples with reproducible
   installation, execution and failure/recovery acceptance.
 
 2026-11-28 skill increment: inert USTAR imports, immutable version/digest objects,
@@ -152,6 +152,24 @@ Retirement affects new activation; loaded processes keep frozen snapshots and
 recovery still requires original host contracts. These are data packages and
 single-operator examples, not a package registry trust service or P2 multi-user
 authorization. See `skill-packages.md` and `acceptance/p1-skills-20261128.json`.
+
+Later 2026-11-28 locator increment: an explicit research-brief 1.1.0 source
+version uses exact retrieved document/revision/byte-offset locators and ordinal
+markers, with host-derived canonical handoff and original model JSON retained.
+The first native probe still failed; the second, with clarified role guidance,
+passed all four declared templates and thirteen control checks. This accepts
+the bounded template/connector examples, not general research quality. Old
+1.0.0 failures and the first 1.1.0 probe remain visible; changed prompts/format
+are not a same-conditions comparison. See `final-output.md` and
+`acceptance/p0-locators-20261128.json`. P0 collaboration/research-quality and all
+P1.3/P2 gates remain subject to their own acceptance.
+
+The accompanying native collaboration v3 campaign still scored 0/3. Five
+analysis outputs validated and two analysts overlapped in each case, but missing
+writer-owned retrieval and invalid model JSON prevented completion; required
+reviewer rework was not reached. This is retained failure evidence, not complex
+collaboration acceptance. Role prompts/format changed from v2. See
+`native-evaluation.md` for token/cost/time accounting and source-support limits.
 
 ## P1.3 — Observability and diagnosis
 

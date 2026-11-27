@@ -271,7 +271,7 @@ pub async fn run(
         "report" if args.len() == 2 => {
             use super::super::RunStore;
             let state = runs.inspect(&args[1]).await?.ok_or("run does not exist")?;
-            output(&super::verify_report(&state)?)?;
+            output(&super::verify_report_with_provenance(&state)?)?;
             return Ok(());
         }
         "inspect" | "events" if args.len() == 2 => {

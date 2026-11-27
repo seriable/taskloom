@@ -330,10 +330,9 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                 };
                 let decoded = match &self.output {
                     WorkflowOutput::Text => Ok(Value::String(text.into())),
-                    WorkflowOutput::Json { .. } | WorkflowOutput::Validated { .. } => {
-                        serde_json::from_str::<Value>(text)
-                            .map_err(|error| format!("invalid JSON role output: {error}"))
-                    }
+                    WorkflowOutput::Json { .. } => serde_json::from_str::<Value>(text)
+                        .map_err(|error| format!("invalid JSON role output: {error}")),
+                    WorkflowOutput::Validated { policy } => policy.validated_value(&state.report),
                 };
                 match decoded.and_then(|value| {
                     if let Some(validator) = &self.validator {

@@ -1,8 +1,9 @@
 # Bounded final-output validation
 
 An opt-in host contract prevents a malformed final answer from completing a
-run. `AgentLoop::with_output_policy` accepts `FinalOutputPolicy::CitedReport`
-or `FinalOutputPolicy::JsonSchema`. The typed `AgentTask` API is unchanged.
+run. `AgentLoop::with_output_policy` accepts `FinalOutputPolicy::CitedReport`,
+`FinalOutputPolicy::LocatedCitedReport` or `FinalOutputPolicy::JsonSchema`.
+The typed `AgentTask` API is unchanged.
 The default remains no final-output contract.
 
 For top-level application runs and session turns, add this to the host config:
@@ -60,6 +61,68 @@ retrieved chunk IDs. All other returned evidence remains in the transcript.
 Exact provenance **does not establish claim support, factual accuracy or overall
 research quality**. A model reviewer cannot override the host citation contract.
 
+## Exact source locators (opt-in)
+
+Models that cannot reliably copy long chunk hashes can use a distinct input
+contract, `{"type":"located_cited_report","max_repairs":2}`. It accepts the
+same retrieval-tool, minimum-source and required-document settings. The model
+must return exact `LocatedReport` JSON, for example:
+
+```json
+{
+  "text": "Changing the approved arguments requires a new decision [[1]].",
+  "citations": [{
+    "document_id": "approval",
+    "corpus_revision": 1,
+    "start": 0,
+    "quote": "Changing the payload requires a new decision."
+  }]
+}
+```
+
+Set the role/system prompt to request this format as well. Selecting a policy
+only configures validation; it does not rewrite the application's default
+full-ID prompt or an existing retrieval tool description. The versioned skill
+example supplies matching guidance explicitly.
+
+The locator values must come from an actual successful retrieval in this run:
+the result's `corpus_revision`, and a hit's `chunk.document_id` and `chunk.start`.
+`start` is a UTF-8 **byte** offset. Neither revision 1 nor offset 0 is a default.
+`[[1]]` refers to citation-array entry one; ordinals must be positive canonical
+decimal integers, and every entry must appear in the text. Unknown fields,
+stale revisions, wrong offsets, ambiguous sources, duplicate chunks, invented
+quotes and full-hash markers fail validation. No source is chosen merely
+because its quote happens to match. Repeated identical evidence is permitted;
+different chunks at the same document/revision/start are an error.
+Hosts using multiple independent corpora should namespace document IDs or select
+a dedicated reader; the locator contract never guesses between colliding stores.
+
+`SearchResult::verify_located_all` resolves only exact, unambiguous retrieved
+locators. It derives a canonical `CitedReport` by replacing ordinal markers with
+verified hashes, then applies the existing exact-quote/provenance checker.
+`ResolvedLocatedReport` retains the original input, explicit ordinal-to-hash
+mappings and verified report. Claim prose and quotes remain unchanged. This
+does not evaluate entailment or truth, and an empty or irrelevant finding can
+still fail a separate quality rubric despite valid provenance.
+
+The durable child journal and `RunReport::final_text()` retain the **original**
+model JSON. `WorkflowOutput::Validated` hands the parent the canonical report.
+The application's report API and CLI add `rendering` with the original report,
+mappings and `model_transcript_unchanged:true`; the ordinary `report`/`sources`
+fields contain the verified rendering. SDK callers can explicitly obtain both
+using `FinalOutputPolicy::resolve_located`. `verified_citations` and
+`validated_value` provide the verified report and workflow value respectively.
+They require executed evidence, but callers verifying arbitrary persisted state
+must first validate its journal; the application does this automatically.
+
+This format changes the model contract and must be selected for **new runs**.
+Old `CitedReport` runs keep their strict full-ID contract and are never repaired
+or migrated into locators. Resume rejects switching formats. Rust exhaustive
+matches on `FinalOutputPolicy` need to handle the new variant. Tool definitions,
+default prompts, default features and legacy serialized policy hashes are
+unchanged. `examples/skills/research-located` is the explicitly versioned
+`research-brief` **1.1.0** example; `research-brief` 1.0.0 remains intact.
+
 The JSON variant uses `{"type":"json_schema","schema":{...},"max_repairs":1}`.
 It checks exact JSON and the schema, not application semantics. Its schema is
 limited to 128 KiB; external schema retrieval is unavailable in the runtime's
@@ -110,3 +173,5 @@ budget, storage, permission, coverage, checkpoint compatibility, restart and
 workflow handoff with explicitly labelled model fixtures. Native-model results
 are recorded separately in `native-evaluation.md`; these fixtures are not
 evidence of real model effectiveness.
+`--test located_reports` additionally covers multilingual offsets, ambiguous
+locators, malformed ordinals, source tampering and strict format separation.

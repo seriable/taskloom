@@ -204,3 +204,25 @@ package retirement. The cited research template's model failure is retained;
 neither package installation nor passing connector cases establishes general
 research quality. See `acceptance/p1-skills-20261128.json` for transcripts,
 failures, prices, checks and source/artifact identities. P0-P2 is unfinished.
+
+An explicit new source version, `examples/skills/research-located`, publishes
+the **research-brief 1.1.0** manifest with `located_cited_report`. It depends on
+the unchanged evidence-base 1.0.0. Its first native probe still failed due to
+wrong document identity, absent ordinal markers and source-prefixed quotations;
+the host rejected these outputs. A second probe with clarified role guidance
+and JSON-formatted locator feedback passed all four templates and thirteen
+control checks. The research answer quoted the actual approval document and
+retained its original ordinal-form model JSON alongside explicit host mappings.
+Prompts, package digest and output format changed; this is a new acceptance
+campaign, not a controlled score improvement over 1.0.0.
+
+```powershell
+python examples/benchmarks/native_skills.py target/native-skills-located --config local-provider.json --taskloom target/debug/taskloom.exe --research-package research-located
+```
+
+Version 1.0.0's source and failed evidence are unchanged. Select 1.1.0 for new
+runs only, keeping the original package/configuration for any old recovery.
+The declared bounded source examples now have native execution evidence;
+general research quality, larger collaboration, registry trust and multi-user
+authorization are separate gates. See `final-output.md` and
+`acceptance/p0-locators-20261128.json` for exact conditions and retained failures.

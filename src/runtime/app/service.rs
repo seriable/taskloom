@@ -268,10 +268,9 @@ async fn reconcile(
     ))
 }
 async fn report(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
-    Ok(Json(
-        serde_json::to_value(app.verified_report(&id).await?)
-            .map_err(super::super::store::storage)?,
-    ))
+    Ok(Json(super::verify_report_with_provenance(
+        &app.inspect(&id).await?,
+    )?))
 }
 async fn roles(State(app): State<Arc<Application>>) -> ApiResult {
     Ok(Json(

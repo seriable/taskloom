@@ -2,6 +2,7 @@
 //! Retrieved text is untrusted data, never tool permission or system policy.
 mod corpus;
 mod hybrid;
+mod located;
 #[cfg(feature = "research")]
 mod pdf;
 mod retrieval;
@@ -21,6 +22,9 @@ pub use corpus::{CorpusSnapshot, CorpusStore, FileCorpusStore, CORPUS_VERSION};
 pub use hybrid::{
     EmbeddingBatch, EmbeddingIndex, EmbeddingModel, HybridRetriever, ProviderEmbeddingModel,
     VectorRetriever,
+};
+pub use located::{
+    LocatedCitation, LocatedReport, ResolvedCitation, ResolvedLocatedReport, SourceLocator,
 };
 #[cfg(feature = "research")]
 pub use pdf::{PdfConfig, PdfLoader};

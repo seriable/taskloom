@@ -78,6 +78,8 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--taskloom', type=Path, required=True)
     parser.add_argument('--repository', default='seriable/taskloom')
+    parser.add_argument('--research-package', choices=['research-brief', 'research-located'], default='research-brief',
+                        help='explicit versioned input contract; previous trials are not migrated')
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding='utf-8'))
     if (urlsplit(config['provider']['base_url']).hostname not in {'localhost', '127.0.0.1', '::1'}
@@ -121,11 +123,12 @@ def main():
         install_environment = dict(os.environ)
         install_environment.pop(config['provider']['key_env'], None)
         install_environment.pop('TASKLOOM_EXAMPLE_CONNECTOR_TOKEN', None)
-        for revision, name in enumerate(['evidence-base', 'research-brief', 'connector-notes']):
+        report['research_source_directory'] = args.research_package
+        for revision, name in enumerate(['evidence-base', args.research_package, 'connector-notes']):
             archive = root / (name + '.tar')
             pack.pack(source / name, archive)
             installed = cli(executable, config_path, 'skill-install', archive, revision, environment=install_environment)
-            pins[name] = installed['package']
+            pins[installed['package']['name']] = installed['package']
             if installed['activated'] is not False:
                 raise RuntimeError('installation unexpectedly activated a package')
         report['installed'] = pins
@@ -162,6 +165,17 @@ def main():
             report['cases']['research'] = {'state': research, 'child': child(api, research)}
             if research['status'] != 'completed':
                 report['failures'].append('native cited research template did not complete')
+            elif args.research_package == 'research-located':
+                research_child = report['cases']['research']['child']
+                view = api('/runs/' + research_child['report']['run_id'] + '/report')
+                report['cases']['research']['verified_view'] = view
+                output = next(n.get('output') for n in research['nodes'] if n['id'] == 'result')
+                raw = json.loads(research_child['report']['messages'][-1]['turn']['content'])
+                report['checks']['located_original_preserved_canonical_handoff'] = (
+                    view.get('rendering', {}).get('type') == 'verified_source_locators'
+                    and view['rendering']['original'] == raw and view['report'] == output
+                    and view['rendering']['model_transcript_unchanged'] is True
+                    and view['sources'][0]['document_id'] == 'approval')
             repository = start(api, 'repo-info', 'connect', 'repository-summary', {'goal': 'Use repo_metadata to summarize the repository pinned by the host. Report its actual name and license.'})
             repository_child = child(api, repository)
             report['cases']['repository'] = {'state': repository, 'child': repository_child}

@@ -359,10 +359,7 @@ impl<'a> AgentLoop<'a> {
                     "output repairs require an explicit run model-spend cap".into(),
                 ));
             }
-            if let super::FinalOutputPolicy::CitedReport {
-                retrieval_tools, ..
-            } = policy
-            {
+            if let Some(retrieval_tools) = policy.citation_tools() {
                 for name in retrieval_tools {
                     if !self
                         .tools

@@ -432,10 +432,18 @@ impl Application {
 
 /// Verify archived source evidence without opening provider/MCP connections.
 pub fn verify_report(state: &RunState) -> Result<super::rag::VerifiedReport, RuntimeError> {
+    state.validate()?;
     let text = state
         .report
         .final_text()
         .ok_or_else(|| config::config_error("run has no completed report"))?;
+    if let Some(policy) = &state.config.output_policy {
+        if policy.citation_tools().is_some() {
+            return policy
+                .verified_citations(&state.report)
+                .map_err(|e| config::config_error(&e));
+        }
+    }
     let report: CitedReport = serde_json::from_str(text)
         .map_err(|_| config::config_error("final answer is not a CitedReport"))?;
     let eligible = state
@@ -461,6 +469,20 @@ pub fn verify_report(state: &RunState) -> Result<super::rag::VerifiedReport, Run
         return Err(config::config_error("run has no saved knowledge evidence"));
     }
     SearchResult::verify_all(&evidence, report)
+}
+/// Add explicit rendering provenance for located reports. Legacy reports keep
+/// their existing JSON shape; model text is never replaced in the run journal.
+pub fn verify_report_with_provenance(state: &RunState) -> Result<serde_json::Value, RuntimeError> {
+    let mut value = serde_json::to_value(verify_report(state)?).map_err(super::store::storage)?;
+    if let Some(policy) = &state.config.output_policy {
+        if matches!(policy, FinalOutputPolicy::LocatedCitedReport { .. }) {
+            let resolved = policy
+                .resolve_located(&state.report)
+                .map_err(|e| config::config_error(&e))?;
+            value["rendering"] = json!({"type":"verified_source_locators","original":resolved.original,"mappings":resolved.mappings,"model_transcript_unchanged":true});
+        }
+    }
+    Ok(value)
 }
 /// Bounded local listing without opening provider/MCP connections.
 pub async fn list_persisted(runs: &FileRunStore) -> Result<Vec<RunSummary>, RuntimeError> {

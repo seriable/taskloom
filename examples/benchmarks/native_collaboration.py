@@ -153,7 +153,7 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] not in {1, 2} or not suite["cases"]:
+    if suite["version"] not in {1, 2, 3} or not suite["cases"]:
         raise ValueError("unsupported suite")
     ids = [case["id"] for case in suite["cases"]]
     if len(set(ids)) != len(ids) or any(not 1 <= len(value) <= 64 or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in value) for value in ids):
