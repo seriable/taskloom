@@ -43,7 +43,10 @@ Only completed runs commit automatically. A failed terminal turn remains
 bound until `abandon_turn` records an authenticated operator/application actor
 and note. Uncertain/in-flight tools must first be reconciled through the
 durable controller. Known observations stay in conversation history; calls
-that were never dispatched receive explicit host error results. An `Abort` reconciliation resolves the call with an
+that were never dispatched receive explicit host error results. This includes
+a call whose earlier attempt was reconciled with `RetrySafe` when the retry
+itself never started; a call whose current attempt may have been dispatched
+is never closed this way. An `Abort` reconciliation resolves the call with an
 error result, after which the turn can be closed. A host note
 records the failed outcome. This prevents an incomplete tool protocol from
 leaking into the following model request, or a new question from silently

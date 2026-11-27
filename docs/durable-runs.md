@@ -106,7 +106,11 @@ reconciliation. Use `reconcile` with a matching call id and an operator record:
   result. It completes that exact call without invoking the tool again.
 - `RetrySafe`: only read-only/idempotent tools are eligible. The same run/call
   ids are reused for tool-side deduplication. It requires fresh approval where
-  the policy demands it and consumes another tool attempt.
+  the policy demands it and consumes another tool attempt. If the run
+  finishes before the retry is dispatched (for example, the fresh approval
+  is rejected, a limit is reached or the run is cancelled), the call stays
+  pending and a session turn can still be closed: the earlier attempt was
+  already reconciled, and the host result records that its outcome is unknown.
 - `Abort`: terminate the run without continuing the uncertain operation. The
   call is resolved with an explicit error result recording the actor, note
   and an unknown external outcome, so the run can be closed and the abort

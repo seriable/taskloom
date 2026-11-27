@@ -429,6 +429,79 @@ async fn abort_resolves_the_uncertain_tool_so_the_turn_can_be_closed() {
 }
 
 #[tokio::test]
+async fn rejected_retry_after_retry_safe_leaves_a_closable_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let mut tools = ToolRegistry::new();
+    let counter = Arc::clone(&count);
+    tools.register(FnTool::new(ToolDefinition {name:"write".into(),description:"Idempotent effect".into(),input_schema:json!({"type":"object"}),effect:ToolEffect::Idempotent,permissions:BTreeSet::new()},move |_:Value,_:ToolContext| {
+        let counter=Arc::clone(&counter);
+        async move {counter.fetch_add(1,Ordering::SeqCst);Err::<Value,_>(ToolError("remote result is unknown".into()))}
+    })).unwrap();
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    durable
+        .reconcile(
+            &run_id,
+            &call_id,
+            RecoveryDecision::RetrySafe {
+                actor: "operator".into(),
+                note: "idempotent".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let retry = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(retry.run.status, RunStatus::WaitingApproval);
+    let ticket = retry.run.pending_approval().unwrap();
+    let rejected = durable
+        .decide(
+            &ticket.run_id,
+            &ticket.request_id,
+            ApprovalDecision {
+                approved: false,
+                actor: "operator".into(),
+                note: "do not retry".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rejected.status, RunStatus::Finished);
+    assert_eq!(rejected.tool_steps[0].progress, ToolProgress::Pending);
+    let session = manager
+        .abandon_turn("chat", "one", &rejected, "operator", "retry rejected")
+        .await
+        .unwrap();
+    session.validate().unwrap();
+    assert!(session.active.is_none());
+    assert!(session.messages.iter().any(|m| matches!(m, Message::Tool { result }
+        if result.is_error && result.output["host_error"].as_str().unwrap().contains("retry not executed"))));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn never_dispatched_calls_get_explicit_error_results_when_a_failed_turn_is_closed() {
     let dir = tempfile::tempdir().unwrap();
     let store = FileSessionStore::new(dir.path().join("sessions"));
