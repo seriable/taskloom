@@ -32,7 +32,8 @@ examples exercise live repository metadata and approved, recoverable note writes
 The development checkout also includes [journal diagnostics](docs/observability.md),
 local trace/retrieval/evaluation views and explicit default-off OTLP export.
 Parent trace projections have actual Collector acceptance; persistent trace
-identity across standalone child entry points remains open work.
+identity is bound for new managed children and retained across standalone
+inspection. Legacy journals keep their original unbound format.
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
 retrieval and exact source citations (`agent_research`). See the
 [roadmap](docs/agent-roadmap.md) for acceptance checks and external validation.
@@ -42,6 +43,12 @@ The optional [`app` host](docs/application.md) adds an installable CLI,
 bearer-authenticated local API and operator UI. Install from this development
 checkout with `cargo install --path . --locked --features app`, then run
 `taskloom init taskloom.json`. These features are not in the `v0.1.0` tag.
+The opt-in [`database` stores](docs/sql-storage.md) persist SDK runtime,
+knowledge and reviewed-memory state in SQLite/PostgreSQL. The separate
+[project-scoped JSON service](docs/multi-user-service.md) uses SQL identities,
+roles and live token revocation; its project Applications still use file
+journals. Durable service quotas/queues/workers and broader quality acceptance
+remain tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
 The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool
 increments. [Task benchmarks](docs/task-benchmarks.md) provide versioned outcome

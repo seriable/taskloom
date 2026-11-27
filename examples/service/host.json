@@ -1,0 +1,7 @@
+{
+  "listen": "127.0.0.1:18083",
+  "projects": [
+    { "tenant": "team-a", "project": "main", "config": "project-a.json" },
+    { "tenant": "team-b", "project": "main", "config": "project-b.json" }
+  ]
+}

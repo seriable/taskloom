@@ -1,0 +1,13 @@
+{
+  "state_dir": "../../target/service-project-a",
+  "provider": { "type": "offline" },
+  "knowledge": false,
+  "limits": {
+    "max_steps": 4,
+    "max_tool_calls": 0,
+    "max_duration": { "secs": 30, "nanos": 0 },
+    "tool_timeout": { "secs": 5, "nanos": 0 },
+    "max_tool_result_bytes": 65536,
+    "max_cost_micros": 0
+  }
+}

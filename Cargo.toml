@@ -112,6 +112,11 @@ name = "database_native"
 path = "examples/database/native.rs"
 required-features = ["database", "openai"]
 
+[[example]]
+name = "multiuser_host"
+path = "examples/service/host.rs"
+required-features = ["database", "app"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }
 

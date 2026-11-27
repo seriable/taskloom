@@ -1,7 +1,12 @@
 //! Opt-in SQLite/PostgreSQL runtime journals with namespace-bound keys and
 //! renewable, database-clock leases. This SDK module does not authenticate an
 //! HTTP caller, install a task queue, or select a database in the local app.
+mod identity;
 mod knowledge;
+pub use identity::{
+    ApiToken, AuthenticatedActor, IdentityEvent, IdentitySnapshot, IssuedToken, ProjectMembership,
+    ProjectPermission, ProjectRole, ServiceTokenRecord, ServiceUser, SqlIdentityStore,
+};
 pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
 use std::path::Path;
 use std::sync::{
@@ -259,6 +264,11 @@ impl SqlDatabase {
     }
     pub fn memory(&self, namespace: DatabaseNamespace) -> SqlMemoryStore {
         SqlMemoryStore::new(self.clone(), namespace)
+    }
+    /// Trusted host identity administration; HTTP handlers must expose only
+    /// authenticated, scoped operations rather than this raw store.
+    pub fn identities(&self) -> SqlIdentityStore {
+        SqlIdentityStore::new(self.clone())
     }
     async fn schema(&self) -> Result<(), RuntimeError> {
         let value: Option<i64> =

@@ -3,6 +3,8 @@ pub mod cli;
 mod config;
 mod diagnostics;
 mod memory;
+#[cfg(feature = "database")]
+pub mod multiuser;
 mod orchestration;
 mod planning;
 pub mod retrieval;

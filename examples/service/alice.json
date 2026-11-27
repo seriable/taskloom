@@ -1,0 +1,7 @@
+{
+  "id": "alice",
+  "enabled": true,
+  "memberships": [
+    { "tenant": "team-a", "project": "main", "role": "runner" }
+  ]
+}

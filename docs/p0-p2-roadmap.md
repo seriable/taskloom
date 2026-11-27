@@ -362,6 +362,19 @@ ledgers, Application/CLI/UI backend selection, multi-user identity/RBAC, quotas
 and queue/worker/load integration remain unfinished; no P2.2 box is checked.
 See `acceptance/p2-sql-knowledge-20261128.json`.
 
+Later identity/service increment: SQL host-managed users, project roles,
+high-entropy hashed API tokens, database-clock expiry, live revocation and CAS
+administration now protect an explicitly scoped JSON service router. Each
+request checks current membership and binds decision actors from authenticated
+context. Real SQLite/PostgreSQL HTTP checks cover approvals, actual fsynced
+effects, lost-result recovery, isolation and parent-specific control routes.
+Separate service/admin processes passed ten authority/restart controls per
+backend with an explicitly offline model. Project Applications still use file
+journals, private-memory service endpoints are unavailable, and SQL Application
+selection, global quotas, queue/workers and operational/load acceptance remain
+unfinished. All P2.2 boxes remain open. See `multi-user-service.md` and
+`acceptance/p2-multiuser-20261128.json`.
+
 - [ ] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
 - [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.
