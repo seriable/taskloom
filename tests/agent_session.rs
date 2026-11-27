@@ -587,6 +587,115 @@ async fn runs_can_be_cancelled_or_aborted_after_a_tool_definition_bump() {
 }
 
 #[tokio::test]
+async fn sessions_and_runs_near_the_store_cap_refuse_work_before_dispatch() {
+    let dir = tempfile::tempdir().unwrap();
+    // A session over half of its store limit refuses a new turn.
+    let small = FileSessionStore::new(dir.path().join("small")).with_max_bytes(4096);
+    let manager = SessionManager::new(&small);
+    manager.create("full", vec!["x".repeat(2500)]).await.unwrap();
+    assert!(matches!(
+        manager.begin_turn("full", "one", "question").await,
+        Err(RuntimeError::StorageLimit(_))
+    ));
+    assert!(manager.load("full").await.unwrap().active.is_none());
+
+    // A run whose checkpoint is near the run store limit stops before the
+    // model request instead of failing to save after completion.
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&store);
+    manager
+        .create("chat", vec!["history ".repeat(20_000)])
+        .await
+        .unwrap();
+    let model = TestModel::default();
+    let tools = ToolRegistry::new();
+    let agent = AgentLoop::new(&model, &tools, "test");
+    let input = manager.begin_turn("chat", "one", "question").await.unwrap();
+    let measure = FileRunStore::new(dir.path().join("measure"));
+    let size = serde_json::to_vec(
+        &DurableAgent::new(&agent, &measure)
+            .create("measure", input.messages.clone())
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+    .len() as u64;
+    let runs = FileRunStore::new(dir.path().join("runs")).with_max_bytes(size + 2000);
+    let durable = DurableAgent::new(&agent, &runs);
+    let refused = manager
+        .run_turn(&durable, "chat", "one", "question")
+        .await
+        .unwrap();
+    assert_eq!(refused.run.status, RunStatus::Finished);
+    assert_eq!(refused.run.report.stop_reason, StopReason::StorageLimit);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 0);
+    let session = manager
+        .abandon_turn("chat", "one", &refused.run, "operator", "start a new session")
+        .await
+        .unwrap();
+    assert!(session.active.is_none());
+}
+
+#[tokio::test]
+async fn abort_and_cancel_are_not_blocked_near_the_store_cap() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let manager = SessionManager::new(&store);
+    manager
+        .create("chat", vec!["history ".repeat(2_000)])
+        .await
+        .unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = registry(Arc::clone(&count), true);
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    // Reopen the same directory with a limit the checkpoint is close to.
+    let size = serde_json::to_vec(&unknown.run).unwrap().len() as u64;
+    let tight = FileRunStore::new(dir.path().join("runs")).with_max_bytes(size + 1500);
+    let near_cap = DurableAgent::new(&agent, &tight);
+    let aborted = near_cap
+        .reconcile(
+            &run_id,
+            &call_id,
+            RecoveryDecision::Abort {
+                actor: "operator".into(),
+                note: "near the cap".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(aborted.status, RunStatus::Finished);
+    assert_eq!(
+        near_cap.cancel(&run_id, "operator", "already finished").await.unwrap().status,
+        RunStatus::Finished
+    );
+    manager
+        .abandon_turn("chat", "one", &aborted, "operator", "outcome unknown")
+        .await
+        .unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn never_dispatched_calls_get_explicit_error_results_when_a_failed_turn_is_closed() {
     let dir = tempfile::tempdir().unwrap();
     let store = FileSessionStore::new(dir.path().join("sessions"));

@@ -59,6 +59,7 @@ pub enum StopReason {
     Uncertain,
     StorageError,
     ContextLimit,
+    StorageLimit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -287,6 +288,7 @@ impl<'a> AgentLoop<'a> {
                         StopReason::StorageError
                     }
                     RuntimeError::Context(_) => StopReason::ContextLimit,
+                    RuntimeError::StorageLimit(_) => StopReason::StorageLimit,
                 };
                 report.detail = Some(error.to_string());
             }

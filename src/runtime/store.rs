@@ -21,6 +21,11 @@ pub trait RunLease: Send + Sync {
         &'a self,
         snapshot: &'a BudgetSnapshot,
     ) -> BoxFuture<'a, Result<(), RuntimeError>>;
+    /// Maximum serialized checkpoint size, if the store has one. Runs refuse
+    /// to dispatch more work when a checkpoint approaches it.
+    fn max_bytes(&self) -> Option<u64> {
+        None
+    }
 }
 
 pub trait RunStore: Send + Sync {
@@ -181,6 +186,10 @@ fn read_budget(inner: &LeaseInner, path: &Path) -> Result<Option<BudgetSnapshot>
 }
 
 impl RunLease for FileLease {
+    fn max_bytes(&self) -> Option<u64> {
+        Some(self.inner.max_bytes)
+    }
+
     fn load(&self) -> BoxFuture<'_, Result<Option<RunState>, RuntimeError>> {
         let inner = Arc::clone(&self.inner);
         Box::pin(blocking(move || {

@@ -28,6 +28,7 @@ impl IntoResponse for ApiError {
             RuntimeError::Configuration(_) | RuntimeError::Protocol(_) => StatusCode::BAD_REQUEST,
             RuntimeError::Permission(_) => StatusCode::FORBIDDEN,
             RuntimeError::Conflict(_) => StatusCode::CONFLICT,
+            RuntimeError::StorageLimit(_) => StatusCode::INSUFFICIENT_STORAGE,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(json!({"error":self.0.to_string()}))).into_response()

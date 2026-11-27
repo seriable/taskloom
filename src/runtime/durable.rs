@@ -695,6 +695,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
+        check_capacity(state, lease)?;
         state.report.steps += 1;
         self.event(
             state,
@@ -904,6 +905,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
+        check_capacity(state, lease)?;
         let step = &state.tool_steps[index];
         let call = step.call.clone();
         let effect = step.definition.effect;
@@ -1167,6 +1169,25 @@ fn unix_ms() -> Result<u64, RuntimeError> {
         .map_err(|_| corrupt("wall clock exceeds the persistent timestamp range"))
 }
 
+/// Refuse to dispatch when the checkpoint is within a quarter of the store's
+/// byte limit. The headroom lets the dispatched operation, its result and any
+/// later cancel/reconcile/stop checkpoint still be saved; those operator paths
+/// are never blocked by this check.
+fn check_capacity(state: &RunState, lease: &Arc<dyn RunLease>) -> Result<(), RuntimeError> {
+    let Some(max) = lease.max_bytes() else {
+        return Ok(());
+    };
+    let size = serde_json::to_vec(state)
+        .map_err(|e| corrupt(&e.to_string()))?
+        .len() as u64;
+    if size.saturating_add(max / 4) > max {
+        return Err(RuntimeError::StorageLimit(format!(
+            "run checkpoint is {size} bytes, too close to the {max}-byte store limit to dispatch more work; start a new session or run (existing history is kept)"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_actor(actor: &str, note: &str) -> Result<(), RuntimeError> {
     if actor.trim().is_empty() || actor.len() > 256 || note.len() > 4096 {
         return Err(RuntimeError::Configuration("decisions require a nonempty actor (at most 256 bytes) and a note of at most 4096 bytes".into()));
@@ -1186,6 +1207,7 @@ fn error_reason(error: &RuntimeError) -> StopReason {
         RuntimeError::Permission(_) => StopReason::PermissionDenied,
         RuntimeError::Storage(_) | RuntimeError::Conflict(_) => StopReason::StorageError,
         RuntimeError::Context(_) => StopReason::ContextLimit,
+        RuntimeError::StorageLimit(_) => StopReason::StorageLimit,
     }
 }
 

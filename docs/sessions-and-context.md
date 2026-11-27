@@ -57,6 +57,29 @@ client-supplied JSON. The host application authenticates session access and
 operator identity. A session is conversation state, not a cross-turn money
 budget; each durable run keeps its own configured limits.
 
+## Session size limit
+
+Every turn's run starts from the full session history, and each checkpoint
+rewrites the whole run state, so a long session eventually approaches the
+store's byte limit (64 MiB by default for both `FileSessionStore` and
+`FileRunStore`; keep the session limit at least as large as the run limit).
+To avoid a run that completes but can no longer be saved or committed, work is
+refused **before** it starts:
+
+- `begin_turn` (and so `run_turn`) rejects a new turn with
+  `RuntimeError::StorageLimit` once the serialized session exceeds half of the
+  session store's limit. Nothing is bound or dispatched.
+- A durable run stops with `StopReason::StorageLimit` before a model request
+  or tool dispatch when its checkpoint is within a quarter of the run store's
+  limit. Close that turn with `abandon_turn` as for any failed run.
+
+Cancellation, approval rejection, `RecordResult`/`Abort` reconciliation and
+`abandon_turn` are never blocked by these checks, so an operator can still
+close a run near the limit. When the limit is reached, start a new session
+(optionally seeding it with a summary from the old one); the existing session
+and its history are kept unchanged. Custom `SessionStore`/`RunLease`
+implementations opt in by returning their limit from `max_bytes`.
+
 ## Context projection
 
 Opt in using `AgentLoop::with_context(ContextPolicy { .. })`. The default

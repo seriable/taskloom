@@ -156,6 +156,11 @@ pub trait SessionStore: Send + Sync {
         session: &'a Session,
         expected_revision: Option<u64>,
     ) -> BoxFuture<'a, Result<(), RuntimeError>>;
+    /// Maximum serialized session size, if the store has one. New turns are
+    /// refused once a session reaches half of it.
+    fn max_bytes(&self) -> Option<u64> {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -183,6 +188,9 @@ impl FileSessionStore {
 }
 
 impl SessionStore for FileSessionStore {
+    fn max_bytes(&self) -> Option<u64> {
+        Some(self.max_bytes)
+    }
     fn load<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Option<Session>, RuntimeError>> {
         Box::pin(async move {
             if let Some(error) = &self.root_error {
@@ -338,6 +346,17 @@ impl<'a> SessionManager<'a> {
                     )));
                 }
                 return session.input(active);
+            }
+            // Each run starts from the full history and the closed turn is
+            // appended to it; refuse before any work instead of failing to
+            // commit after the run completed.
+            if let Some(max) = self.store.max_bytes() {
+                let size = serde_json::to_vec(&session).map_err(storage)?.len() as u64;
+                if size > max / 2 {
+                    return Err(RuntimeError::StorageLimit(format!(
+                        "session is {size} bytes, over half of the {max}-byte store limit; start a new session (the existing history is kept)"
+                    )));
+                }
             }
             let binding = SessionBinding {
                 turn_id: turn_id.into(),

@@ -60,6 +60,10 @@ result. If persistence fails, no subsequent operation is dispatched. A result
 that exists only in memory is not treated as durably complete. Malformed,
 inconsistent or future-version checkpoints are rejected rather than reset.
 The default maximum file size is 64 MiB, configurable on `FileRunStore`.
+A run stops with `StopReason::StorageLimit` before dispatching a model or tool
+operation when its checkpoint is within a quarter of that limit; operator
+operations (cancel, rejection, reconciliation) are not blocked. See
+[sessions and context](sessions-and-context.md#session-size-limit).
 
 This provides process-crash recovery on a local filesystem, not a distributed
 lease or an atomic transaction with an external service. Power-loss durability

@@ -143,6 +143,9 @@ pub enum RuntimeError {
     Storage(String),
     Conflict(String),
     Context(String),
+    /// Persisted run or session state is too close to the store's byte limit
+    /// to start more work safely. Start a new session or run.
+    StorageLimit(String),
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -156,7 +159,8 @@ impl std::fmt::Display for RuntimeError {
             | Self::Permission(detail)
             | Self::Storage(detail)
             | Self::Conflict(detail)
-            | Self::Context(detail) => f.write_str(detail),
+            | Self::Context(detail)
+            | Self::StorageLimit(detail) => f.write_str(detail),
         }
     }
 }
