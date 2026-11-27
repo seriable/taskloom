@@ -79,6 +79,9 @@ The prices above illustrate configuration; replace them with your provider's
 actual contract. Export `OPENAI_API_KEY` in the host environment. Anthropic uses
 `type: "anthropic"`, a base URL such as `https://api.anthropic.com`, and
 `key_env: "ANTHROPIC_API_KEY"`. Set the appropriate model ID.
+`base_url` must use `https://`. Plain `http://` is accepted only for loopback
+hosts (`localhost`, `127.0.0.0/8`, `[::1]`), such as a local model server,
+because the API key would otherwise cross the network in cleartext.
 
 The top-level config has defaults, so a short configuration can omit unchanged
 fields. Nested `limits` and `context` values use their full generated objects;
@@ -278,8 +281,11 @@ but cannot dispatch more work. Pending approvals are rejected and audited on
 direct persisted cancellation. Cancelling a crashed model retains uncertain
 reserved spending without sending another request.
 
-`serve` handles Ctrl+C by signalling local workers, waiting up to five seconds
-and closing configured MCP sessions. Interrupted effects remain subject to
+`serve` handles Ctrl+C by first stopping the listener: no new connections
+are accepted, and keep-alive connections close after their current request.
+Only then does it signal local workers, wait up to five seconds and close
+configured MCP sessions. A request that was already being handled when Ctrl+C
+arrived can still finish. Interrupted effects remain subject to
 reconciliation. A direct CLI process killed during execution leaves its existing
 checkpoints for explicit recovery. Worker panics release local scheduling state;
 their last durable state is recovered explicitly rather than silently retried.
@@ -316,8 +322,16 @@ Add entries to `mcp` in configuration:
 These explicit host bindings populate the registry/policy. Discovery alone
 does not register other remote tools. Read [MCP's contracts and supported
 protocols](mcp.md) before assigning effect metadata. Use `non_idempotent` for
-unverified effects. The offline demo only searches local knowledge; select a
+unverified effects. A binding may set `"description"` to replace the remote
+server's tool description with host-authored text; otherwise the remote text
+is shown to the model framed as untrusted and capped at 2 KiB. The offline demo
+only searches local knowledge; select a
 real provider or a custom model host to use arbitrary MCP tools.
+
+A configured `sandbox` registers `python_sandbox` for workflow roles that list
+it in `tools`. Top-level runs and session turns receive it only with the
+explicit opt-in `"sandbox_top_level": true` (default `false`; it requires a
+`sandbox` section). See [sandbox configuration](sandbox.md).
 
 Custom hosts can inject a `Model`, `ToolRegistry` and `ToolPolicy` using
 `Application::with_model`; version their model/tool contracts and configuration

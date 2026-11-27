@@ -513,3 +513,107 @@ async fn graceful_application_pause_finishes_model_then_stops_before_tool_dispat
     assert_eq!(count.load(Ordering::SeqCst), 1);
     assert_eq!(done.report.steps, 2);
 }
+
+struct ToolNames(Arc<std::sync::Mutex<Vec<Vec<String>>>>);
+impl Model for ToolNames {
+    fn generate<'a>(
+        &'a self,
+        request: &'a ModelRequest,
+        budget: &'a RunBudget,
+    ) -> BoxFuture<'a, Result<ModelOutput, RuntimeError>> {
+        Box::pin(async move {
+            budget.reserve_before_dispatch(0).await?.settle(0);
+            self.0
+                .lock()
+                .unwrap()
+                .push(request.tools.iter().map(|t| t.name.clone()).collect());
+            Ok(ModelOutput {
+                turn: AssistantTurn::text("done"),
+                model: request.model.clone(),
+            })
+        })
+    }
+}
+#[tokio::test]
+async fn sandbox_tool_requires_opt_in_for_top_level_runs_but_not_roles() {
+    for top_level in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = AppConfig {
+            state_dir: dir.path().into(),
+            knowledge: false,
+            sandbox: Some(taskloom::runtime::sandbox::DockerSandboxConfig {
+                executable: std::env::current_exe().unwrap(),
+                endpoint: "unix:///var/run/docker.sock".into(),
+                image: format!("sha256:{}", "a".repeat(64)),
+                platform: "linux/amd64".into(),
+                memory_mib: 128,
+                cpu_millis: 500,
+                timeout_ms: 1000,
+                max_output_bytes: 4096,
+            }),
+            sandbox_top_level: top_level,
+            // A workflow role may still list the tool without the opt-in.
+            roles: vec![AppRole {
+                name: "coder".into(),
+                system: "coder".into(),
+                output: taskloom::runtime::workflow::WorkflowOutput::Text,
+                tools: BTreeSet::from(["python_sandbox".into()]),
+            }],
+            ..Default::default()
+        };
+        let app = Application::with_model(
+            config,
+            Arc::new(ToolNames(Arc::clone(&seen))),
+            ToolRegistry::new(),
+            ToolPolicy::default(),
+        )
+        .await
+        .unwrap();
+        app.start("top", "hello").await.unwrap();
+        idle(&app, "top").await;
+        let offered = seen.lock().unwrap().concat();
+        assert_eq!(
+            offered.iter().any(|name| name == "python_sandbox"),
+            top_level,
+            "{offered:?}"
+        );
+    }
+    let invalid = AppConfig {
+        sandbox_top_level: true,
+        ..Default::default()
+    };
+    assert!(invalid.validate().is_err());
+}
+
+#[test]
+fn provider_api_keys_never_use_cleartext_http_to_remote_hosts() {
+    let with = |base_url: &str| AppConfig {
+        provider: AppProvider::Openai {
+            base_url: base_url.into(),
+            key_env: "UNUSED_KEY".into(),
+            namespace: "test".into(),
+        },
+        ..Default::default()
+    };
+    for ok in [
+        "https://api.example.com/v1",
+        "http://localhost:8080/v1",
+        "http://LOCALHOST/v1",
+        "http://127.0.0.1:1/v1",
+        "http://127.8.9.10/v1",
+        "http://[::1]:8080/v1",
+    ] {
+        assert!(with(ok).validate().is_ok(), "{ok}");
+    }
+    for bad in [
+        "http://api.example.com/v1",
+        "http://10.0.0.5/v1",
+        "http://192.168.1.2:8080/v1",
+        "http://[::ffff:127.0.0.1]/v1",
+        "http://localhost.example.com/v1",
+    ] {
+        let error = with(bad).validate().unwrap_err().to_string();
+        assert!(error.contains("https"), "{bad}: {error}");
+    }
+}

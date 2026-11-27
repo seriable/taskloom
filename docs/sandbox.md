@@ -2,7 +2,8 @@
 
 The optional `sandbox` feature exposes `CodeSandbox`, `DockerSandbox` and
 `SandboxTool`. `app` includes the feature but registers no execution tool until
-the host supplies `sandbox` configuration. A missing Docker engine, missing
+the host supplies `sandbox` configuration. Even then, only workflow roles that
+list the tool receive it, unless `sandbox_top_level` is set. A missing Docker engine, missing
 image or failed container never falls back to host Python or a host shell.
 
 ## Isolation contract
@@ -127,7 +128,12 @@ byte limit is enforced. Container/infrastructure charges are not generation
 
 The registered tool is `python_sandbox`, permission `sandbox:python`, with a
 single argument `{"code":"..."}`. A workflow executor role must explicitly
-allow this name. The tool is conservatively NonIdempotent, so default durable
+allow this name. Top-level runs (`POST /api/runs`, CLI `run`) and session
+turns are not offered the tool unless the top-level config also sets
+`"sandbox_top_level": true` next to `sandbox`. The default is `false`, and
+setting it without a `sandbox` section is a configuration error. Tool
+permissions are frozen per run, so toggling the flag affects reentry of
+existing top-level runs like any other tool-policy change. The tool is conservatively NonIdempotent, so default durable
 approval requires review of the exact code and worker binding before dispatch.
 A decision never implicitly executes code: resume the run/parent separately.
 Changed image/limits/engine contracts invalidate pending reentry. PEER planning,

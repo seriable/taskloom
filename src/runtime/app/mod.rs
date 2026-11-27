@@ -127,6 +127,8 @@ impl Application {
         if let Some(config) = &config.sandbox {
             let sandbox = super::sandbox::DockerSandbox::new(config.clone())?;
             tools.register(super::sandbox::SandboxTool(Arc::new(sandbox)))?;
+            // Allowed here so workflow roles can list it; `agent()` withholds
+            // it from top-level runs and sessions unless sandbox_top_level.
             policy = policy.allow("python_sandbox").grant("sandbox:python");
         }
         if let Some(web) = &web {
@@ -188,9 +190,15 @@ impl Application {
         roles.tasks(&app.runs)?;
         Ok(app)
     }
+    /// Top-level runs and session turns. Workflow roles replace this policy
+    /// with their own role-filtered copy of the full application policy.
     fn agent(&self) -> AgentLoop<'_> {
+        let mut policy = self.policy.clone();
+        if self.config.sandbox.is_some() && !self.config.sandbox_top_level {
+            policy.allowed_tools.remove("python_sandbox");
+        }
         AgentLoop::new(self.model.as_ref(), &self.tools, &self.config.model)
-            .with_policy(self.policy.clone())
+            .with_policy(policy)
             .with_limits(self.config.limits.clone())
             .with_context(self.config.context.clone())
             .with_output_tokens(self.config.output_tokens)
