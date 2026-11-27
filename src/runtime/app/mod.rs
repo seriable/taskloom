@@ -1,6 +1,7 @@
 //! Optional local application host: shared durable control, HTTP API and CLI.
 pub mod cli;
 mod config;
+mod orchestration;
 mod service;
 
 use std::collections::BTreeMap;
@@ -15,13 +16,16 @@ use super::mcp::{McpClient, McpHttpConfig};
 use super::rag::{Citation, CitedReport, FileCorpusStore, LexicalRetriever, RagTool, SearchResult};
 use super::*;
 use crate::CancelToken;
-pub use config::{AppConfig, AppMcpEndpoint, AppProvider};
+pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppRole};
+pub use orchestration::AppWorkflowRequest;
 pub use service::{router, serve};
 
 pub struct Application {
     pub config: AppConfig,
     pub runs: FileRunStore,
     pub corpus: Arc<FileCorpusStore>,
+    pub workflows: workflow::FileWorkflowStore,
+    pub sessions: FileSessionStore,
     model: Arc<dyn Model>,
     tools: ToolRegistry,
     policy: ToolPolicy,
@@ -70,6 +74,8 @@ impl Application {
         let label = config.label()?;
         let corpus = Arc::new(FileCorpusStore::new(config.state_dir.join("knowledge")));
         let runs = FileRunStore::new(config.state_dir.join("runs"));
+        let workflows = workflow::FileWorkflowStore::new(config.state_dir.join("workflows"));
+        let sessions = FileSessionStore::new(config.state_dir.join("sessions"));
         if config.knowledge {
             tools.register(RagTool::new(
                 "knowledge_search",
@@ -97,10 +103,22 @@ impl Application {
             }
             clients.push(client);
         }
+        for role in &config.roles {
+            for name in &role.tools {
+                if !tools.definition(name).is_some_and(|d| policy.permits(d)) {
+                    return Err(RuntimeError::Permission(format!(
+                        "role {} requests unavailable tool {name}",
+                        role.name
+                    )));
+                }
+            }
+        }
         let app = Arc::new(Self {
             config,
             runs,
             corpus,
+            workflows,
+            sessions,
             model,
             tools,
             policy,
@@ -108,6 +126,9 @@ impl Application {
             jobs: Mutex::new(BTreeMap::new()),
             label,
         });
+        // Validate output schemas before the server begins accepting requests.
+        let roles = app.role_agents();
+        roles.tasks(&app.runs)?;
         Ok(app)
     }
     fn agent(&self) -> AgentLoop<'_> {
@@ -124,7 +145,10 @@ impl Application {
             .map_err(|_| RuntimeError::Storage("application job controller panicked".into()))
     }
     pub fn job(&self, id: &str) -> Result<JobStatus, RuntimeError> {
-        Ok(self.jobs()?.get(id).map_or(
+        self.job_key(&format!("run:{id}"))
+    }
+    fn job_key(&self, key: &str) -> Result<JobStatus, RuntimeError> {
+        Ok(self.jobs()?.get(key).map_or(
             JobStatus {
                 active: false,
                 error: None,
@@ -137,6 +161,9 @@ impl Application {
     }
     fn admit(&self, id: &str) -> Result<Job, RuntimeError> {
         valid_id(id)?;
+        self.admit_key(&format!("run:{id}"))
+    }
+    fn admit_key(&self, id: &str) -> Result<Job, RuntimeError> {
         let mut jobs = self.jobs()?;
         if jobs.get(id).is_some_and(|job| job.active) {
             return Err(RuntimeError::Conflict(
@@ -184,7 +211,7 @@ impl Application {
                 Ok(state)
             }
             Err(error) => {
-                self.jobs()?.remove(id);
+                self.jobs()?.remove(&format!("run:{id}"));
                 Err(error)
             }
         }
@@ -213,7 +240,7 @@ impl Application {
                     ))
                 });
             if let Ok(mut jobs) = app.jobs() {
-                if let Some(job) = jobs.get_mut(&id) {
+                if let Some(job) = jobs.get_mut(&format!("run:{id}")) {
                     job.active = false;
                     job.error = result.err().map(|e| e.to_string());
                 }
@@ -221,7 +248,7 @@ impl Application {
         });
     }
     pub async fn inspect(&self, id: &str) -> Result<RunState, RuntimeError> {
-        valid_id(id)?;
+        valid_read_id(id)?;
         self.runs
             .inspect(id)
             .await?
@@ -230,7 +257,7 @@ impl Application {
     pub fn pause(&self, id: &str) -> Result<(), RuntimeError> {
         let jobs = self.jobs()?;
         let job = jobs
-            .get(id)
+            .get(&format!("run:{id}"))
             .filter(|job| job.active)
             .ok_or_else(|| RuntimeError::Conflict("run has no active local worker".into()))?;
         job.pause.cancel();
@@ -243,7 +270,7 @@ impl Application {
         }
         {
             let jobs = self.jobs()?;
-            if let Some(job) = jobs.get(id).filter(|job| job.active) {
+            if let Some(job) = jobs.get(&format!("run:{id}")).filter(|job| job.active) {
                 job.cancel.cancel();
                 return Ok(());
             }
@@ -259,6 +286,7 @@ impl Application {
         ticket: &str,
         decision: ApprovalDecision,
     ) -> Result<RunState, RuntimeError> {
+        valid_id(id)?;
         DurableAgent::new(&self.agent(), &self.runs)
             .decide(id, ticket, decision)
             .await
@@ -269,6 +297,7 @@ impl Application {
         call_id: &str,
         decision: RecoveryDecision,
     ) -> Result<RunState, RuntimeError> {
+        valid_id(id)?;
         DurableAgent::new(&self.agent(), &self.runs)
             .reconcile(id, call_id, decision)
             .await
@@ -390,15 +419,21 @@ pub async fn list_persisted(runs: &FileRunStore) -> Result<Vec<RunSummary>, Runt
     Ok(summaries)
 }
 fn valid_id(id: &str) -> Result<(), RuntimeError> {
+    valid_identifier(id, 64)
+}
+fn valid_read_id(id: &str) -> Result<(), RuntimeError> {
+    valid_identifier(id, 128)
+}
+fn valid_identifier(id: &str, max: usize) -> Result<(), RuntimeError> {
     if id.is_empty()
-        || id.len() > 64
+        || id.len() > max
         || !id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
     {
-        Err(config::config_error(
-            "run ID must contain 1..=64 ASCII letters, digits, hyphens or underscores",
-        ))
+        Err(config::config_error(&format!(
+            "ID must contain 1..={max} ASCII letters, digits, hyphens or underscores"
+        )))
     } else {
         Ok(())
     }

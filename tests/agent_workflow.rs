@@ -19,6 +19,42 @@ fn definition(name: &str, recovery: TaskRecovery) -> TaskDefinition {
 }
 
 #[tokio::test]
+async fn create_persists_validated_ready_state_without_dispatch_and_releases_lease() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileWorkflowStore::new(dir.path());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = calls.clone();
+    let mut tasks = WorkflowTasks::new();
+    tasks
+        .register(FnWorkflowTask::new(
+            definition("pure", TaskRecovery::Pure),
+            move |_: NodeContext, _: CancelToken| {
+                let seen = seen.clone();
+                async move {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Ok(NodeOutcome::pure(json!(7)))
+                }
+            },
+        ))
+        .unwrap();
+    let graph = WorkflowDefinition::new([WorkflowNode::new("node", "pure")]);
+    let runner = WorkflowRunner::new(&tasks, &store);
+    let state = runner
+        .create("created", graph.clone(), Value::Null)
+        .await
+        .unwrap();
+    assert_eq!(state.status, WorkflowStatus::Ready);
+    assert_eq!(state.revision, 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(runner.create("created", graph, Value::Null).await.is_err());
+    assert_eq!(
+        runner.resume("created").await.unwrap().status,
+        WorkflowStatus::Completed
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn parallel_branches_join_exact_outputs_and_skip_false_conditions() {
     let dir = tempfile::tempdir().unwrap();
     let store = FileWorkflowStore::new(dir.path());

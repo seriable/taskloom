@@ -15,7 +15,7 @@ use super::super::rag::{
     self, CorpusStore, Document, LexicalRetriever, RetrievalQuery, WindowChunker,
 };
 use super::super::{ApprovalDecision, RecoveryDecision, RuntimeError};
-use super::{config::config_error, Application};
+use super::{config::config_error, AppWorkflowRequest, Application};
 
 type ApiResult = Result<Json<Value>, ApiError>;
 pub struct ApiError(RuntimeError);
@@ -53,6 +53,30 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/runs/{id}/approvals/{ticket}", post(decide))
         .route("/runs/{id}/reconcile/{call}", post(reconcile))
         .route("/runs/{id}/report", get(report))
+        .route("/roles", get(roles))
+        .route("/workflows", get(workflows).post(start_workflow))
+        .route("/workflows/{id}", get(workflow))
+        .route("/workflows/{id}/events", get(workflow_events))
+        .route("/workflows/{id}/resume", post(resume_workflow))
+        .route("/workflows/{id}/pause", post(pause_workflow))
+        .route("/workflows/{id}/cancel", post(cancel_workflow))
+        .route(
+            "/workflows/{id}/nodes/{node}/approvals/{ticket}",
+            post(decide_workflow),
+        )
+        .route(
+            "/workflows/{id}/nodes/{node}/reconcile/{call}",
+            post(reconcile_workflow),
+        )
+        .route("/sessions", get(sessions).post(create_session))
+        .route("/sessions/{id}", get(session))
+        .route("/sessions/{id}/turns", post(start_turn))
+        .route("/sessions/{id}/resume", post(resume_session))
+        .route("/sessions/{id}/pause", post(pause_session))
+        .route("/sessions/{id}/cancel", post(cancel_session))
+        .route("/sessions/{id}/abandon", post(abandon_session))
+        .route("/sessions/{id}/approvals/{ticket}", post(decide_session))
+        .route("/sessions/{id}/reconcile/{call}", post(reconcile_session))
         .route("/knowledge", get(knowledge).post(import))
         .route("/knowledge/{id}", axum::routing::delete(remove))
         .route("/knowledge/search", post(search))
@@ -62,6 +86,15 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         ));
     Ok(Router::new()
         .route("/", get(|| async { Html(include_str!("ui.html")) }))
+        .route(
+            "/orchestration.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("orchestration.js"),
+                )
+            }),
+        )
         .nest("/api", api)
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(security_headers))
@@ -119,7 +152,7 @@ async fn security_headers(request: Request, next: Next) -> Response {
         "referrer-policy",
         header::HeaderValue::from_static("no-referrer"),
     );
-    headers.insert("content-security-policy",header::HeaderValue::from_static("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"));
+    headers.insert("content-security-policy",header::HeaderValue::from_static("default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"));
     response
 }
 #[derive(Deserialize)]
@@ -213,6 +246,167 @@ async fn report(State(app): State<Arc<Application>>, Path(id): Path<String>) -> 
     Ok(Json(
         serde_json::to_value(app.verified_report(&id).await?)
             .map_err(super::super::store::storage)?,
+    ))
+}
+async fn roles(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(json!({"roles":app.config.roles})))
+}
+async fn workflows(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(
+        json!({"workflows":app.list_workflows().await?,"limit":1000}),
+    ))
+}
+async fn workflow(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    let state = app.workflow(&id).await?;
+    Ok(Json(
+        json!({"budget":state.budget()?,"state":state,"job":app.workflow_job(&id)?}),
+    ))
+}
+async fn workflow_events(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Query(query): Query<EventQuery>,
+) -> ApiResult {
+    let state = app.workflow(&id).await?;
+    let events = state
+        .events
+        .iter()
+        .skip(query.after)
+        .take(200)
+        .collect::<Vec<_>>();
+    let next = query.after.saturating_add(events.len());
+    Ok(Json(
+        json!({"events":events,"next":next,"revision":state.revision,"job":app.workflow_job(&id)?}),
+    ))
+}
+async fn start_workflow(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<AppWorkflowRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let state = app.start_workflow(input).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({"workflow_id":state.id,"revision":state.revision})),
+    ))
+}
+async fn resume_workflow(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    app.resume_workflow(&id).await?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn pause_workflow(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    app.pause_workflow(&id)?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn cancel_workflow(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Json(actor): Json<Actor>,
+) -> ApiResult {
+    app.cancel_workflow(&id, &actor.actor, &actor.note).await?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn decide_workflow(
+    State(app): State<Arc<Application>>,
+    Path((id, node, ticket)): Path<(String, String, String)>,
+    Json(decision): Json<ApprovalDecision>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"state":app.decide_workflow(&id,&node,&ticket,decision).await?}),
+    ))
+}
+async fn reconcile_workflow(
+    State(app): State<Arc<Application>>,
+    Path((id, node, call)): Path<(String, String, String)>,
+    Json(decision): Json<RecoveryDecision>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"state":app.reconcile_workflow(&id,&node,&call,decision).await?}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Identity {
+    id: String,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Turn {
+    turn_id: String,
+    prompt: String,
+}
+async fn sessions(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(
+        json!({"sessions":app.list_sessions().await?,"limit":1000}),
+    ))
+}
+async fn session(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    Ok(Json(
+        json!({"session":app.session(&id).await?,"job":app.session_job(&id)?}),
+    ))
+}
+async fn create_session(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<Identity>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"session":app.create_session(&input.id).await?})),
+    ))
+}
+async fn start_turn(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Json(input): Json<Turn>,
+) -> Result<impl IntoResponse, ApiError> {
+    let state = app
+        .start_session_turn(&id, &input.turn_id, &input.prompt)
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({"run_id":state.report.run_id,"revision":state.revision})),
+    ))
+}
+async fn resume_session(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    app.resume_session(&id).await?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn pause_session(State(app): State<Arc<Application>>, Path(id): Path<String>) -> ApiResult {
+    app.pause_session(&id)?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn cancel_session(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Json(actor): Json<Actor>,
+) -> ApiResult {
+    app.cancel_session(&id, &actor.actor, &actor.note).await?;
+    Ok(Json(json!({"accepted":true})))
+}
+async fn abandon_session(
+    State(app): State<Arc<Application>>,
+    Path(id): Path<String>,
+    Json(actor): Json<Actor>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"session":app.abandon_session(&id,&actor.actor,&actor.note).await?}),
+    ))
+}
+async fn decide_session(
+    State(app): State<Arc<Application>>,
+    Path((id, ticket)): Path<(String, String)>,
+    Json(decision): Json<ApprovalDecision>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"state":app.decide_session(&id,&ticket,decision).await?}),
+    ))
+}
+async fn reconcile_session(
+    State(app): State<Arc<Application>>,
+    Path((id, call)): Path<(String, String)>,
+    Json(decision): Json<RecoveryDecision>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"state":app.reconcile_session(&id,&call,decision).await?}),
     ))
 }
 async fn knowledge(State(app): State<Arc<Application>>) -> ApiResult {

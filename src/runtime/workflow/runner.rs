@@ -62,6 +62,27 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
         definition: WorkflowDefinition,
         input: Value,
     ) -> Result<WorkflowState, RuntimeError> {
+        let (state, lease) = self.create_leased(id, definition, input).await?;
+        self.execute(state, lease).await
+    }
+
+    /// Persist a validated workflow without dispatching any tasks. Hosts can
+    /// acknowledge creation before admitting an asynchronous worker.
+    pub async fn create(
+        &self,
+        id: &str,
+        definition: WorkflowDefinition,
+        input: Value,
+    ) -> Result<WorkflowState, RuntimeError> {
+        Ok(self.create_leased(id, definition, input).await?.0)
+    }
+
+    async fn create_leased(
+        &self,
+        id: &str,
+        definition: WorkflowDefinition,
+        input: Value,
+    ) -> Result<(WorkflowState, Arc<dyn WorkflowLease>), RuntimeError> {
         let lease = self.store.acquire(id).await?;
         if lease.load().await?.is_some() {
             return Err(RuntimeError::Conflict("workflow id already exists".into()));
@@ -70,7 +91,7 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
         let clock = Clock::new(0);
         self.event(&mut state, &clock, WorkflowEventKind::Started);
         self.save(&mut state, &lease, &clock).await?;
-        self.execute(state, lease).await
+        Ok((state, lease))
     }
 
     pub async fn resume(&self, id: &str) -> Result<WorkflowState, RuntimeError> {

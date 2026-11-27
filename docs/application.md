@@ -108,8 +108,9 @@ The CLI binds loopback only. The library exports `runtime::app::router` and
 operator console, not a multi-tenant production control plane: it does not
 provide OAuth/RBAC, tenant isolation, TLS termination, distributed scheduling,
 database migrations, automatic retention or a visual workflow editor. Supply
-those at the deployment boundary when needed. Sessions and workflows retain
-their documented Rust APIs; the current UI controls individual durable runs.
+those at the deployment boundary when needed. The console also operates
+persisted role DAGs, PEER collaboration and conversation sessions as described
+below. There is no automatic resume after restarting the server.
 
 All `/api` routes require `Authorization: Bearer TOKEN`, including read access.
 The static UI shell contains no secret. Responses disable caching. Request
@@ -139,6 +140,19 @@ returns 401 before run inspection.
 | `POST /api/runs/{id}/approvals/{ticket}` | `{ "approved": true, "actor": "operator", "note": "reviewed exact arguments" }`; records a decision only |
 | `POST /api/runs/{id}/reconcile/{call}` | A `RecoveryDecision` JSON; records observed output, safe retry eligibility or abort, without implicitly running tools |
 | `GET /api/runs/{id}/report` | Verify final `CitedReport` against all saved `knowledge_search` outputs, preserving distinct corpus revisions |
+| `GET /api/roles` | Host-configured role contracts; requests cannot grant new tools or replace role system prompts |
+| `POST /api/workflows` | `{id,input,definition}` for a role DAG or `{id,input,peer}` for PEER; optional full `WorkflowLimits`; validates and saves before 202 |
+| `GET /api/workflows` / `GET /api/workflows/{id}` | Bounded parent summaries / complete saved graph, handoffs, events, child IDs, budget and local job |
+| `GET /api/workflows/{id}/events?after=0` | Up to 200 ordered parent events with next offset and revision |
+| `POST /api/workflows/{id}/resume`, `/pause`, `/cancel` | Explicit parent controls; cancellation takes `{actor,note}`; no completed executor replay |
+| `POST /api/workflows/{id}/nodes/{node}/approvals/{ticket}` | ApprovalDecision handled by the node's original role controller; separately resume the parent |
+| `POST /api/workflows/{id}/nodes/{node}/reconcile/{call}` | RecoveryDecision handled by the original role; inspect the actual external effect first |
+| `POST /api/sessions` | `{id}`; stores the host system prefix and returns 201 |
+| `GET /api/sessions` / `GET /api/sessions/{id}` | Bounded summaries / complete append-only conversation, committed turns, active binding and local job |
+| `POST /api/sessions/{id}/turns` | `{turn_id,prompt}`; persist binding and durable child before 202; another active turn conflicts |
+| `POST /api/sessions/{id}/resume`, `/pause`, `/cancel` | Operate the active turn; cancellation takes `{actor,note}` |
+| `POST /api/sessions/{id}/approvals/{ticket}`, `/reconcile/{call}` | Decision for the active turn only; separately resume the session |
+| `POST /api/sessions/{id}/abandon` | `{actor,note}` acknowledges a failed terminal turn after uncertain effects are reconciled; then permits another turn |
 | `GET /api/knowledge` | Revision, document summaries and chunk count |
 | `POST /api/knowledge` | `{ "document": { "id", "title", "source", "text", "metadata": {} }, "expected_revision": 0 }`; atomic import/replacement |
 | `DELETE /api/knowledge/{id}?expected_revision=1` | Atomic document/chunk removal with optional CAS |
@@ -152,6 +166,71 @@ After server restart, a saved `running` state with no worker is interrupted
 work, not an automatically restarted job. Explicit resume applies durable
 recovery rules. Active worker ownership is local to this host instance; use
 its API/UI to signal cancellation rather than a separate CLI process.
+
+## Workflow roles and conversation sessions
+
+The host configuration's optional `roles` array defines each role's `name`,
+`system`, `output` (`{"type":"text"}` or `{"type":"json","schema":...}`)
+and explicit `tools` allowlist. All tools must already be permitted by the host;
+roles cannot expand permissions. Empty tools means no tools. Role schemas are
+validated before the server starts. Example role configurations are in
+[`examples/app/roles.json`](../examples/app/roles.json); merge the `roles` field
+into a provider configuration and choose model prices/ceilings before paid use.
+The normal offline model returns excerpts, so it cannot perform a general PEER
+plan. This is reported as an output-contract failure rather than invented work.
+
+`definition` uses the serialized [workflow DAG](workflows.md) types; node `task`
+values name configured roles. `peer` uses `PeerSpec` (planner/executor/writer/
+reviewer names, `max_tasks`, `max_revisions`). Planning, writing and review tools
+must be read-only; effects belong to executors. The console provides a JSON DAG
+input and a bounded PEER preset. The saved graph shows dependency handoffs,
+per-node spend, reserved/uncertain parent budget, child runs and review revisions.
+The internal application input envelope retains the user `input` and optional
+PEER specification so generated pure validation tasks can be restored exactly.
+
+`WorkflowRunner::create` saves a Ready workflow without executing a task. API
+workers resume this checkpoint using saved limits and current role contracts;
+changed provider/tool/prompt/schema settings reject reentry. Parent creation
+IDs and turn IDs use 1–64 ASCII letters/digits/hyphens/underscores. Generated
+workflow/session child IDs are longer: `GET /api/runs/{id}`, events and report
+inspection accept up to 128 characters. Generic run mutation routes reject
+these managed child IDs. Use the parent-specific decision/control route so an
+approval always reaches its owning configuration. In the UI choose **Inspect
+child** or **Inspect turn**, review the exact call, decide, then **Resume**.
+
+Sessions preserve the raw archive and one active turn through approval, pause,
+recovery and process restart. Successful turns commit once; failed terminal
+turns stay active until explicit acknowledgement. Their uncertain tools must
+first be reconciled. Archived turns remain inspectable and read-only in the
+console. Subsequent turns reuse the saved conversation and the configured
+context projection policy; source/tool messages are not reinterpreted as grants.
+
+`max_active_runs` is a shared admission ceiling across standalone runs,
+workflows and sessions. Typed job keys keep identical parent IDs independent.
+Within each workflow, `max_parallel` limits child concurrency. The API additionally
+caps requested graph size at 256 nodes, parallelism at 32, dispatches at 4096,
+outputs at 1 MiB, elapsed duration at one day and shutdown grace at 30 seconds.
+These are resource bounds, not tenant isolation or a global billing account.
+
+For a reproducible zero-model-cost UI acceptance fixture:
+
+```powershell
+$env:TASKLOOM_API_TOKEN = 'replace-with-your-local-operator-token'
+cargo run --locked --features app --example app_approval -- .fixture-state 127.0.0.1:8081
+```
+
+Connect to the console, select PEER, create a workflow, inspect `worker-0`, approve
+its one local note and resume. Review 0 rejects, draft 1 is accepted, and the
+executor write remains at one. Create a session and submit a turn to exercise
+the same approval path with conversation history. The fixture's local writes
+are real and confined to the supplied state directory; its planner/reviewer
+are deterministic. This verifies controls and handoffs, not model quality.
+
+2026-11-27 local browser acceptance completed PEER approval plus one revision
+and a two-turn session without console errors. Integration tests separately
+cover restart, role changes, global admission, cancellation and uncertain write
+reconciliation. Hosted/model validation is tracked in the
+[delivery roadmap](preview-delivery-roadmap.md).
 
 ## Approvals, cancellation and recovery
 

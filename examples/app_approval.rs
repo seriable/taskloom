@@ -8,7 +8,8 @@ use std::time::Duration;
 
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
-use taskloom::runtime::app::{router, AppConfig, Application};
+use taskloom::runtime::app::{router, AppConfig, AppRole, Application};
+use taskloom::runtime::workflow::{PeerPlan, PeerReview, WorkflowOutput};
 use taskloom::runtime::*;
 
 struct ApprovalDemo;
@@ -20,6 +21,50 @@ impl Model for ApprovalDemo {
     ) -> BoxFuture<'a, Result<ModelOutput, RuntimeError>> {
         Box::pin(async move {
             budget.reserve_before_dispatch(0).await?.settle(0);
+            let system = match &request.messages[0] {
+                Message::System { content } => content.as_str(),
+                _ => "",
+            };
+            // Explicit fixtures for checking handoffs and reviewer rework in
+            // the console. These branches do not claim model reasoning quality.
+            let fixture = match system {
+                "Offline fixture: planner" => Some(AssistantTurn::text(
+                    r#"{"tasks":[{"id":"note","instructions":"Create one reviewed local fixture note."}]}"#,
+                )),
+                "Offline fixture: writer" | "Offline fixture: reviewer" => {
+                    let input = request
+                        .messages
+                        .iter()
+                        .rev()
+                        .find_map(|m| match m {
+                            Message::User { content } => {
+                                serde_json::from_str::<Value>(content).ok()
+                            }
+                            _ => None,
+                        })
+                        .ok_or_else(|| {
+                            RuntimeError::Protocol("fixture expected a node context".into())
+                        })?;
+                    Some(if system.ends_with("writer") {
+                        AssistantTurn::text(format!(
+                            "Offline fixture draft {}: the executor saved the approved local note.",
+                            input["params"]["revision"]
+                        ))
+                    } else {
+                        let approved = input["dependencies"]["draft"]
+                            .as_str()
+                            .is_some_and(|draft| draft.contains("draft 1:"));
+                        AssistantTurn::text(json!({"approved":approved,"feedback":if approved {"Fixture accepted."} else {"Fixture requests one rewrite; do not repeat the executor."}}).to_string())
+                    })
+                }
+                _ => None,
+            };
+            if let Some(turn) = fixture {
+                return Ok(ModelOutput {
+                    turn,
+                    model: request.model.clone(),
+                });
+            }
             let result = request.messages.iter().find_map(|message| match message {
                 Message::Tool { result } => Some(result),
                 _ => None,
@@ -83,6 +128,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state_dir: root,
             knowledge: false,
             model: "offline-approval-demo".into(),
+            roles: vec![
+                AppRole {
+                    name: "planner".into(),
+                    system: "Offline fixture: planner".into(),
+                    output: WorkflowOutput::Json {
+                        schema: PeerPlan::schema(2),
+                    },
+                    tools: BTreeSet::new(),
+                },
+                AppRole {
+                    name: "executor".into(),
+                    system: "Offline fixture: executor".into(),
+                    output: WorkflowOutput::Text,
+                    tools: BTreeSet::from(["save_note".into()]),
+                },
+                AppRole {
+                    name: "writer".into(),
+                    system: "Offline fixture: writer".into(),
+                    output: WorkflowOutput::Text,
+                    tools: BTreeSet::new(),
+                },
+                AppRole {
+                    name: "reviewer".into(),
+                    system: "Offline fixture: reviewer".into(),
+                    output: WorkflowOutput::Json {
+                        schema: PeerReview::schema(),
+                    },
+                    tools: BTreeSet::new(),
+                },
+            ],
             limits: RunLimits {
                 max_cost_micros: Some(0),
                 ..Default::default()

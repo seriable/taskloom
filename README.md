@@ -57,7 +57,7 @@ checks and campaign budgets with explicit offline/provider provenance.
 | **Agent runtime (optional, unreleased)** | Native tool conversations, schema-checked tools, explicit permissions, bounded decisions/tool calls/time/model spending, execution events and reports. |
 | **Durable collaboration (optional, unreleased)** | Atomic checkpoints, exact-input approvals, explicit effect reconciliation, sessions/context, parallel/conditional workflows and bounded PEER review. |
 | **Knowledge and tools (optional, unreleased)** | Pluggable ingestion/chunking/retrieval, exact source citations, local lexical search and explicitly bound MCP HTTP tools. |
-| **Application host (optional, unreleased)** | Installable CLI, authenticated local run/knowledge API and operator UI for events, results, approvals and execution controls. |
+| **Application host (optional, unreleased)** | Installable CLI, authenticated run/workflow/session/knowledge API and operator UI for role handoffs, review revisions, budgets, approvals and recovery. |
 | **Typed errors** | `TaskError` / `ModelError` kinds (transient, context overflow, schema mismatch, auth, content rejected, misconfigured, deadline, cancelled). Branch on the kind, never on message text. |
 
 ## Quick start

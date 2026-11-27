@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Workflow/session operator APIs and UI: host-defined roles, persisted DAG or
+  PEER creation, exact child-controller approvals/recovery, session turn binding
+  and explicit failed-turn acknowledgement. Shared typed admission bounds all
+  parent workers. Role handoffs, child runs, spend and review revisions are
+  inspectable; completed executors do not replay during draft revision. Added
+  restart/effect/concurrency integration coverage and a multi-role UI fixture.
+
 - Parse persisted decimal floating-point values with round-trip precision.
   Multi-source retrieval exposed a score changing precision on reload and
   invalidating a context fingerprint; full-suite CLI regression covers the

@@ -22,11 +22,11 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
 
 ## 3. Multi-agent operator experience
 
-- [ ] Workflow creation, inspection, event and control APIs.
-- [ ] Session creation, turn execution, history and recovery APIs.
-- [ ] UI shows role handoffs, child runs, allocations and review revisions.
-- [ ] Approval/reconciliation remains bound to the correct owning role/run.
-- [ ] Restart/concurrency/error coverage and browser acceptance.
+- [x] Workflow creation, inspection, event and control APIs.
+- [x] Session creation, turn execution, history and recovery APIs.
+- [x] UI shows role handoffs, child runs, allocations and review revisions.
+- [x] Approval/reconciliation remains bound to the correct owning role/run.
+- [x] Restart/concurrency/error coverage and local fixture browser acceptance.
 
 ## 4. Research capabilities and isolated execution
 
