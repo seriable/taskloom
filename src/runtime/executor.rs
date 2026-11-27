@@ -138,6 +138,10 @@ pub enum RunEventKind {
 pub struct RunEvent {
     pub sequence: usize,
     pub elapsed_ms: u64,
+    /// Observation time, not the active-runtime budget clock. Absent in old
+    /// journals and when the system clock cannot represent Unix time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unix_ms: Option<u64>,
     pub kind: RunEventKind,
 }
 
@@ -661,6 +665,7 @@ impl<'a> AgentLoop<'a> {
 
     pub(super) fn emit_at(&self, report: &mut RunReport, elapsed_ms: u64, kind: RunEventKind) {
         let event = RunEvent {
+            unix_ms: super::observability::unix_ms(),
             sequence: report.events.len(),
             elapsed_ms,
             kind,

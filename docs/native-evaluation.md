@@ -412,3 +412,60 @@ Changed prompts/format prohibit treating v2/v3 as a same-conditions score
 comparison. Source/artifact hashes, raw native journals, failed probes and
 inspection limits are in `acceptance/p0-locators-20261128.json`. The P0 complex
 task/quality gates, wider competitor trials and P0-P2 Goal remain unfinished.
+
+## Native diagnostics and actual Collector receiver (2026-11-28)
+
+A fresh native Qwen skill campaign passed all four templates and thirteen
+control checks in 13,230 ms, using eight native requests, 4,809 input / 232
+output tokens, one real public GitHub read and one persisted note. Generation
+and public API prices/caps remained explicit as in the preceding campaign:
+zero-micro-USD generation cap, zero input/output API prices, twenty-request
+connector process cap and no embedding. Hardware/electricity and chat usage
+remain unmetered; source-support quality is not inferred from protocol success.
+
+The new event records contain actual Unix observation times. With generation
+and connector credential environments removed, the separate diagnostic CLI
+read the observed before-approval snapshot from an inspection-only copy and the
+final live stores without rewinding them. Explicit exports went to a real
+official Collector on loopback. Its pinned v0.140.0 Windows release asset
+matched the official SHA-256; the binary itself reports version 0.140.1.
+The Docker image pull timed out, and the browser-download URL reset the
+connection; an official public release API asset download succeeded instead.
+No Docker Collector execution is claimed.
+
+The first acceptance wrapper failed before export because its copied workflow
+filename missed `.workflow`. That failure remains recorded. A later intermediate
+projection exported 20 spans; the final projection adds actual approval waits,
+reconciliation and output-validation spans. Its three explicit exports were:
+before approval: two ended spans, four still open; final note: thirteen ended
+spans; research: nine ended spans. The actual Collector acknowledged all **24
+spans and 54 gauge observations** (eighteen gauges per snapshot). Verification
+used only bytes newly appended after that probe began, not previous log data.
+Existing trace/span IDs and parents matched across native approval, host restart
+and observed-effect reconciliation. The historical uncertain tool outcome stayed
+visible alongside the explicit recovery action, with one actual write total.
+
+Receiver log checks excluded the actual research prompt, source quote, note text
+and credential environment names. Local retrieval inspection exposes saved IDs,
+titles, scores and byte ranges, while OTLP uses a separate numerical/status
+allowlist and never serializes these local hit records. A browser flow exported
+the final nine-span research trace, inspected native retrieval metadata, used a
+390×844 layout without page overflow, compared declared native versus fixture
+report conditions without ranking, and rejected the standalone LangGraph report
+schema rather than inventing an adapter. A real earlier failed native DAG was
+locally attributed to output validation; its old missing clocks were preserved.
+Three actual native memory sessions created before the timestamp field was
+added also passed current diagnostic loading, including their closed-report
+fingerprint checks. Their missing clocks stayed missing; no native history was
+rewritten and no new model request was made for that compatibility check.
+The earlier real process-death campaign also loaded with one uncertain model
+attempt and one recorded request. Its usage-completeness flag was false, so
+the surviving request's token subtotal cannot masquerade as complete usage.
+
+This is actual native/API and receiver evidence, with fixture network-control
+tests separately labelled. It is an on-demand journal projection. Standalone
+child entry points still need durable parent trace binding; generation metrics
+can lag newer reservation journals, and embedding/tool-service allocation is
+explicitly unknown rather than zero. The complete unified-trace gate and all
+remaining P0/P2 requirements are open. See `observability.md` and
+`acceptance/p1-observability-20261128.json` for raw artifacts and source hashes.

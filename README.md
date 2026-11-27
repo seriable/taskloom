@@ -29,6 +29,10 @@ within the original model budget and narrowed permissions.
 [Data-only skill packages](docs/skill-packages.md) add exact dependency/content
 pins, explicit host grants and reusable role/workflow templates. Source MCP
 examples exercise live repository metadata and approved, recoverable note writes.
+The development checkout also includes [journal diagnostics](docs/observability.md),
+local trace/retrieval/evaluation views and explicit default-off OTLP export.
+Parent trace projections have actual Collector acceptance; persistent trace
+identity across standalone child entry points remains open work.
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
 retrieval and exact source citations (`agent_research`). See the
 [roadmap](docs/agent-roadmap.md) for acceptance checks and external validation.

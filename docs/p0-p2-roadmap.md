@@ -174,12 +174,41 @@ collaboration acceptance. Role prompts/format changed from v2. See
 ## P1.3 — Observability and diagnosis
 
 - [ ] Correlated run/workflow/session/model/tool/retrieval spans and metrics.
-- [ ] Configured OpenTelemetry export, default-off external transmission,
+- [x] Configured OpenTelemetry export, default-off external transmission,
   bounded buffers, teardown and failure handling; no prompt/secret export by
   default. Verify against a real local receiver.
-- [ ] Error attribution, retrieval inspection and evaluation comparison views.
-- [ ] Distinguish generation, embedding and tool-service charges; missing
+- [x] Error attribution, retrieval inspection and evaluation comparison views.
+- [x] Distinguish generation, embedding and tool-service charges; missing
   prices/usage remain unknown rather than silently becoming zero.
+
+2026-11-28 observability increment: validated journal projections now link
+workflow/node/run and session/turn/run records, with model/tool/retrieval,
+approval-wait, reconciliation and output-validation spans and snapshot metrics.
+Explicit bounded OTLP/HTTP JSON export sends no prompt, quote, tool arguments,
+actor or credential by default. A real pinned official Windows Collector
+accepted the final native probe's 24 spans and 54 gauge observations; the four
+native templates passed and cross-restart parent/span identity was retained
+within the selected workflow trace. Mock HTTP tests separately cover partial
+acceptance, redirects, timeout, backpressure, payload limits and shutdown.
+
+CLI/API inspection needs no model/connector credential; export binds both saved
+revisions and destination settings. Browser acceptance covers native trace
+reading/export, saved retrieval details, a 390-pixel layout, condition-aware
+local comparison and unsupported-schema rejection with stale results cleared.
+Generation metrics are saved-checkpoint observations; live reservation journals
+may be newer. Embedding has an independent host ledger and no per-run allocation
+here; generic tool-service billing is unknown, not zero. Fixture/chat ledgers
+and wall time do not become real API billing or inference benchmarks.
+
+The complete unified-trace box stays unchecked: inspecting a child run alone
+currently creates a standalone trace identity. A durable host-owned binding
+across parent and standalone entry points remains to be implemented and tested.
+Old journals retain missing wall clocks; sessions have no terminal close event,
+and their open root spans are not exported as completed. These are explicit
+snapshot projections, not an implicit live subscriber or W3C header injector.
+See `observability.md`, `native-evaluation.md` and
+`acceptance/p1-observability-20261128.json` for commands, migration, failed
+prerequisite/harness probes, raw evidence and limitations. P0/P2 remain open.
 
 ## P2.1 — Product experience
 

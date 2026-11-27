@@ -21,6 +21,8 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   cancel ID ACTOR NOTE               cancel an unowned persisted run\n\
   reconcile ID CALL DECISION.json    record observed tool outcome\n\
   report ID                         verify saved cited report\n\
+  diagnostics KIND ID               inspect run/workflow/session trace, no network\n\
+  trace-export KIND ID REV_KEY BIND  explicitly export reviewed revisions/destination\n\
   import ID TITLE FILE               import UTF-8 text/Markdown\n\
   import-pdf ID TITLE FILE           import PDF using configured pdftotext\n\
   import-web ID TITLE URL            ingest a host-granted webpage\n\
@@ -264,6 +266,40 @@ pub async fn run(
         return Ok(());
     }
     match args[0].as_str() {
+        "diagnostics" | "trace-export" if args.len() == 3 || args.len() == 5 => {
+            let exporting = args[0] == "trace-export";
+            if args.len() != if exporting { 5 } else { 3 } {
+                return Err(HELP.into());
+            }
+            let snapshot = super::diagnostic_snapshot(
+                &config,
+                super::DiagnosticTarget::parse(&args[1])?,
+                &args[2],
+            )
+            .await?;
+            if exporting {
+                if snapshot.source_revision_key != args[3]
+                    || super::diagnostics::export_binding(&config, &snapshot)?.as_deref()
+                        != Some(args[4].as_str())
+                {
+                    return Err("diagnostic revisions changed; inspect again before export".into());
+                }
+                let cfg = config
+                    .observability
+                    .as_ref()
+                    .and_then(|c| c.otlp.clone())
+                    .ok_or("OTLP export is not configured by the host")?;
+                let exporter = super::super::observability::OtlpHttpExporter::new(cfg)?;
+                let receipt = exporter.export(&snapshot).await;
+                exporter.shutdown().await?;
+                output(&receipt?)?;
+            } else {
+                output(
+                    &serde_json::json!({"billing_boundaries":snapshot.billing_boundaries(),"export_binding":super::diagnostics::export_binding(&config,&snapshot)?,"export_destination":config.observability.as_ref().and_then(|c|c.otlp.as_ref()).map(|c|&c.endpoint),"snapshot":snapshot,"export_configured":config.observability.as_ref().is_some_and(|c|c.otlp.is_some())}),
+                )?;
+            }
+            return Ok(());
+        }
         "list" if args.len() == 1 => {
             output(&super::list_persisted(&runs).await?)?;
             return Ok(());

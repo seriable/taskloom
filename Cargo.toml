@@ -24,6 +24,8 @@ anthropic = ["dep:reqwest", "dep:base64"]
 schemars = ["dep:schemars"]
 # Autonomous tool execution, kept separate from the typed single-task API.
 runtime = ["dep:jsonschema", "dep:uuid"]
+# Explicit OTLP/HTTP JSON export of bounded, redacted journal projections.
+telemetry = ["runtime", "dep:reqwest"]
 # Explicitly configured MCP Streamable HTTP tool clients.
 mcp = ["runtime", "dep:reqwest"]
 # Opt-in bounded web ingestion/search and a configured PDF text extractor.
@@ -31,7 +33,7 @@ research = ["runtime", "dep:reqwest", "dep:scraper", "dep:html5ever", "tokio/net
 # Explicit Linux-container Python execution, never a host-shell fallback.
 sandbox = ["runtime", "dep:base64", "tokio/process", "tokio/io-util"]
 # Local API/CLI/UI host; library-only users retain the minimal default build.
-app = ["mcp", "research", "sandbox", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
+app = ["mcp", "research", "sandbox", "openai", "anthropic", "telemetry", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"], optional = true }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Journal diagnostics project validated run/workflow/session records into parent
+  traces with model/tool/retrieval, approval, reconciliation and output checks.
+  Explicit OTLP/HTTP JSON export sends bounded allowlisted spans and gauges;
+  nothing uploads by default. CLI/API/UI expose billing boundaries and local
+  evaluation comparison without inferring rankings. Actual native-model and
+  official Collector evidence is retained. Standalone child views still need a
+  durable parent trace binding. New optional event timestamps preserve old wire
+  hashes; direct Rust event literals need `unix_ms`. See `docs/observability.md`.
 - Opt-in exact-locator citation contracts retain model JSON and resolve only
   unambiguous retrieved document/revision/UTF-8-byte-offset references. Workflow
   handoffs receive verified canonical citations; report API/CLI expose original

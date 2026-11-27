@@ -17,6 +17,7 @@ mod executor;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod memory;
+pub mod observability;
 mod output;
 pub mod rag;
 #[cfg(feature = "sandbox")]

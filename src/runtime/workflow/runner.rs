@@ -835,6 +835,7 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
 
     fn event(&self, state: &mut WorkflowState, clock: &Clock, kind: WorkflowEventKind) {
         let event = WorkflowEvent {
+            unix_ms: crate::runtime::observability::unix_ms(),
             sequence: state.events.len(),
             elapsed_ms: clock.elapsed_ms(),
             kind,

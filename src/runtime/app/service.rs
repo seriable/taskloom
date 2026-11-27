@@ -52,6 +52,8 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/runs/{id}/approvals/{ticket}", post(decide))
         .route("/runs/{id}/reconcile/{call}", post(reconcile))
         .route("/runs/{id}/report", get(report))
+        .route("/diagnostics/{kind}/{id}", get(diagnostics))
+        .route("/diagnostics/{kind}/{id}/export", post(export_diagnostics))
         .route("/roles", get(roles))
         .route("/templates", get(templates))
         .route("/templates/{mount}/{template}/runs", post(start_template))
@@ -117,6 +119,15 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
                     include_str!("research.js"),
+                )
+            }),
+        )
+        .route(
+            "/diagnostics.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("diagnostics.js"),
                 )
             }),
         )
@@ -275,6 +286,47 @@ async fn report(State(app): State<Arc<Application>>, Path(id): Path<String>) -> 
 async fn roles(State(app): State<Arc<Application>>) -> ApiResult {
     Ok(Json(
         json!({"roles":app.registered_roles().collect::<Vec<_>>()}),
+    ))
+}
+async fn diagnostics(
+    State(app): State<Arc<Application>>,
+    Path((kind, id)): Path<(String, String)>,
+) -> ApiResult {
+    let target = super::DiagnosticTarget::parse(&kind)?;
+    let snapshot = super::diagnostic_snapshot(&app.config, target, &id).await?;
+    Ok(Json(
+        json!({"billing_boundaries":snapshot.billing_boundaries(),"export_binding":super::diagnostics::export_binding(&app.config,&snapshot)?,"export_destination":app.config.observability.as_ref().and_then(|c|c.otlp.as_ref()).map(|c|&c.endpoint),"snapshot":snapshot,"export_configured":app.telemetry.is_some()}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExportDiagnostics {
+    source_revision_key: String,
+    export_binding: String,
+}
+async fn export_diagnostics(
+    State(app): State<Arc<Application>>,
+    Path((kind, id)): Path<(String, String)>,
+    Json(input): Json<ExportDiagnostics>,
+) -> ApiResult {
+    let exporter = app
+        .telemetry
+        .as_ref()
+        .ok_or_else(|| config_error("OTLP export is not configured by the host"))?;
+    let snapshot =
+        super::diagnostic_snapshot(&app.config, super::DiagnosticTarget::parse(&kind)?, &id)
+            .await?;
+    if input.source_revision_key != snapshot.source_revision_key
+        || Some(input.export_binding) != super::diagnostics::export_binding(&app.config, &snapshot)?
+    {
+        return Err(RuntimeError::Conflict(
+            "diagnostic journal revisions changed; inspect again before export".into(),
+        )
+        .into());
+    }
+    Ok(Json(
+        serde_json::to_value(exporter.export(&snapshot).await?)
+            .map_err(crate::runtime::store::storage)?,
     ))
 }
 async fn templates(State(app): State<Arc<Application>>) -> ApiResult {

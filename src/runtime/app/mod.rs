@@ -1,6 +1,7 @@
 //! Optional local application host: shared durable control, HTTP API and CLI.
 pub mod cli;
 mod config;
+mod diagnostics;
 mod memory;
 mod orchestration;
 pub mod retrieval;
@@ -23,6 +24,7 @@ use super::rag::{
 use super::*;
 use crate::CancelToken;
 pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppResearch, AppRole};
+pub use diagnostics::{diagnostic_snapshot, AppObservability, DiagnosticTarget};
 pub use memory::{AppMemory, MemoryEdit, MemoryExtract, MemoryForget, MemoryReview};
 pub use orchestration::AppWorkflowRequest;
 pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
@@ -50,6 +52,7 @@ pub struct Application {
     skill_roles: Vec<AppRole>,
     skill_bindings: BTreeMap<String, super::skills::SkillBinding>,
     recovery_roles: std::collections::BTreeSet<String>,
+    telemetry: Option<super::observability::OtlpHttpExporter>,
 }
 #[derive(Clone)]
 struct Job {
@@ -184,6 +187,12 @@ impl Application {
             }
         }
         let compiled = skills::load(&config, &tools, &policy).await?;
+        let telemetry = config
+            .observability
+            .as_ref()
+            .and_then(|c| c.otlp.clone())
+            .map(super::observability::OtlpHttpExporter::new)
+            .transpose()?;
         let app = Arc::new(Self {
             config,
             runs,
@@ -205,6 +214,7 @@ impl Application {
             skill_roles: compiled.roles,
             skill_bindings: compiled.bindings,
             recovery_roles: compiled.recovery_roles,
+            telemetry,
         });
         // Validate output schemas before the server begins accepting requests.
         let roles = app.role_agents();
@@ -425,6 +435,9 @@ impl Application {
         }
         for client in &self.clients {
             client.close().await?;
+        }
+        if let Some(exporter) = &self.telemetry {
+            exporter.shutdown().await?;
         }
         Ok(())
     }
