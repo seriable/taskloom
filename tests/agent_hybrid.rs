@@ -67,6 +67,56 @@ fn model() -> Arc<FixtureEmbeddings> {
 }
 
 #[tokio::test]
+async fn vector_cutoff_is_explicit_bound_and_does_not_turn_similarity_into_citation_support() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let embeddings = model();
+    let mut index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    // Both documents have positive similarity, but fruit is a weak match.
+    let fruit = snapshot
+        .chunks
+        .iter()
+        .find(|c| c.document_id == "fruit")
+        .unwrap();
+    index.vectors.insert(fruit.id.clone(), vec![0.2, 1.0]);
+    let baseline = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot).unwrap();
+    assert_eq!(
+        search(&store, &baseline, &RetrievalQuery::new("automobile"))
+            .await
+            .unwrap()
+            .hits
+            .len(),
+        2
+    );
+    let filtered = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot)
+        .unwrap()
+        .with_min_score(0.7)
+        .unwrap();
+    assert_ne!(baseline.identity(), filtered.identity());
+    let result = search(&store, &filtered, &RetrievalQuery::new("automobile"))
+        .await
+        .unwrap();
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].chunk.document_id, "vehicle");
+    let zero = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot)
+        .unwrap()
+        .with_min_score(0.0)
+        .unwrap();
+    assert_eq!(baseline.identity(), zero.identity());
+    for minimum in [f64::NAN, -0.1, 1.1, f64::INFINITY] {
+        assert!(
+            VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot)
+                .unwrap()
+                .with_min_score(minimum)
+                .is_err()
+        );
+    }
+}
+
+#[tokio::test]
 async fn hybrid_can_return_vector_only_evidence_and_verify_unchanged_sources() {
     let dir = tempfile::tempdir().unwrap();
     let store = corpus(dir.path()).await;

@@ -165,7 +165,10 @@ let results = hybrid.retrieve(&snapshot, &RetrievalQuery::new("research question
 # Ok(()) }
 ```
 
-`VectorRetriever` uses positive cosine similarity. `HybridRetriever` combines
+`VectorRetriever` uses positive cosine similarity by default. A host-calibrated
+`with_min_score` or application `retrieval.semantic_min_score` can filter weak
+semantic candidates before fusion; no universal relevance cutoff is implied.
+`HybridRetriever` combines
 lexical and semantic rankings using weighted reciprocal rank fusion, with up
 to 20 candidates per backend. Scores from different services are not directly
 compared. Unknown/duplicate IDs and invalid scores fail before fusion; ties are
@@ -246,6 +249,7 @@ are rejected; remote services require HTTPS.
     },
     "lexical_weight": 1,
     "semantic_weight": 1,
+    "semantic_min_score": 0,
     "rank_constant": 60,
     "candidate_k": 20
   }
@@ -349,8 +353,10 @@ not a held-out benchmark or evidence of general research quality. Quote matching
 and claim support/factual accuracy remain distinct assessments. The second uses
 real local HTTP, separate CLI processes and durable files with **protocol-fixture
 vectors** to test index, authorization, reservation, timeout and restart behavior.
-It does not establish real-model embedding relevance. Native model/embedding and
-same-condition competitor acceptance remain open P0 work.
+It does not establish real-model embedding relevance. The subsequent
+[native local evaluation](native-evaluation.md) uses actual Qwen weights and
+retains unsuccessful negative-query/agent outcomes. Broader quality and
+cross-framework acceptance remain open P0 work.
 
 ## Validation provenance
 

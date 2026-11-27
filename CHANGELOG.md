@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Native evaluation examples now exercise verified local Qwen weights, real
+  embedding index lifecycle, actual DAG/PEER roles and an audited LangGraph
+  comparison. Failures remain in the reports: basic trials scored 5/12 for
+  both frameworks, and all three initial collaboration tasks failed final
+  citation/review checks despite observed parallelism and reviewer rewrites.
+  No broader superiority or P0-P2 completion is claimed.
+- Vector retrieval accepts an explicit, identity-bound minimum cosine score
+  (`retrieval.semantic_min_score` in the app). Zero preserves positive-only
+  behavior; thresholds require model/corpus calibration and do not prove
+  relevance or claim support. See `docs/native-evaluation.md`.
+
 - P0 retrieval increment: field-aware lexical recall (body/title/selected
   metadata), bounded host-owned query aliases, explicit application hybrid
   configuration and CLI/API/UI index lifecycle. Embedding requests use a

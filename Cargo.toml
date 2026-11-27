@@ -9,7 +9,7 @@ readme = "README.md"
 keywords = ["llm", "agent", "openai", "anthropic", "gateway"]
 categories = ["api-bindings", "asynchronous"]
 repository = "https://github.com/seriable/taskloom"
-include = ["src/**", "examples/**", "tests/**", "docs/**", "sandbox/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
+include = ["src/**", "examples/**", "!examples/**/__pycache__/**", "!examples/**/*.pyc", "tests/**", "docs/**", "sandbox/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -94,6 +94,11 @@ required-features = ["runtime"]
 [[example]]
 name = "app_approval"
 required-features = ["app"]
+
+[[example]]
+name = "benchmark_citations"
+path = "examples/benchmarks/citations.rs"
+required-features = ["runtime"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }

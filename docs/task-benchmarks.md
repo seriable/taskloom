@@ -1,8 +1,9 @@
 # Reproducible task acceptance campaigns
 
 This is an executable baseline, not evidence of hosted-model quality.
-Configured-provider effectiveness remains unverified and is separate from the
-owner's source-only publication scope. See [the current checklist](preview-delivery-roadmap.md).
+Actual local Qwen API trials and a LangGraph comparison are now documented in
+[native evaluation](native-evaluation.md), including unsuccessful outcomes.
+Broader effectiveness gates remain in the [P0–P2 roadmap](p0-p2-roadmap.md).
 
 ## Suite and CLI
 
@@ -133,7 +134,8 @@ boundaries, exact note input, actual local writes, controller interruption,
 completed reentry, a shared spending ceiling, unsettled paid attempts,
 incomplete active-campaign reporting, strict manifests, output-directory reuse,
 and real CLI subprocesses. Mock-model charges in these regressions are explicitly
-fixtures, not provider bills. No hosted-model results are claimed here yet.
+fixtures, not provider bills. The later local-weight trials have separate
+provenance; no paid hosted-model results are claimed here.
 
 The complete offline-demo suite is also a regression: three source-excerpt
 research tasks pass and nine arithmetic/write tasks fail as unsupported, with

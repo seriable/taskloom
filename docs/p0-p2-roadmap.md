@@ -6,8 +6,9 @@ service capabilities. Unchecked work is unfinished; a type, mock or feature
 name alone is not acceptance.
 
 The preceding source-delivery scope has shipped. Its hosted Actions gate was
-explicitly waived by the owner. Native-provider effectiveness is still
-unverified and is a required P0 gate here. The retained 12/12 session-assisted
+explicitly waived by the owner. Native-provider effectiveness now has limited
+local measurements; broader quality and framework comparison remain P0 gates.
+The retained 12/12 session-assisted
 trial is a controlled integration baseline, not an independent API benchmark.
 
 ## Invariants
@@ -29,7 +30,7 @@ trial is a controlled integration baseline, not an independent API benchmark.
 
 - [ ] A versioned suite with realistic research, planning, role handoff,
   parallel work, bounded reviewer revisions, tool-error repair and long tasks.
-- [ ] Real model decisions through an explicitly configured local or remote
+- [x] Real model decisions through an explicitly configured local or remote
   native API, with prompts, outputs, tool observations, framework/model versions,
   cost/uncertainty, wall time and failure reasons retained.
 - [ ] Actual DAG/PEER lifecycle acceptance, including process interruption,
@@ -41,13 +42,27 @@ trial is a controlled integration baseline, not an independent API benchmark.
 - [ ] Evaluate source coverage/exact quotes separately from claim support,
   factual accuracy and research quality. Publish the method and limitations.
 
+2026-11-27 native increment: verified public Qwen weights ran through the
+official Transformers generation API and a bounded learned-embedding API.
+The 12-case native Taskloom run scored 5/12. A real LangGraph StateGraph adapter
+scored the same 5/12; a separate audit matched all 30 actual model-conditioning
+steps (only opaque control IDs normalized) and all 31 HTTP attempts, with the
+same suite, output allowance and one-micro-USD campaign cap at explicit zero
+local API prices. This is a basic controlled comparison, not broader leadership
+evidence. The three native collaboration cases all failed citation/review
+acceptance, despite two overlapping analysts in every case and real reviewer
+rejection/rewrite in both PEER cases. Tool-error repair, long-task and native
+process-death coverage, DeerFlow/agentUniverse results and independent claim
+support/factual scoring remain open. See `native-evaluation.md` for commands,
+model/hardware provenance, failed trials and interpretation limits.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,
   with bounded, deterministic ranking and meaningful quality regressions.
 - [x] Controlled query rewriting with visible provenance and budget accounting
   for any model-backed step; untrusted documents cannot issue rewrite commands.
-- [ ] Embedding/provider/index settings and explicit build/update operations in
+- [x] Embedding/provider/index settings and explicit build/update operations in
   CLI, API and UI; index/model/corpus binding remains strict.
 - [x] The default research host can select lexical or configured hybrid search;
   operator search and model tools use the same retriever.
@@ -64,9 +79,19 @@ recall, visible expansion, invalid hybrid settings and validated configuration
 export, not a real embedding build. The 12-document/18-query synthetic
 regression corpus improved body-only recall@5/MRR@5 from 0.3125/0.3125 to
 1.0/1.0; this visible maintainer-authored set is not a held-out quality benchmark.
-Native embedding relevance, full browser index acceptance and model/competitor
-effectiveness are still unchecked. See `research-tools.md` for migration,
+At that initial increment, native embedding relevance, full browser index
+acceptance and model/competitor effectiveness were unchecked. See the later
+native increment below and `research-tools.md` for migration,
 commands, billing limitations and frozen-index restart behavior.
+
+The later native increment completed actual embedding index build/update through
+CLI/API/UI and a browser hybrid query after host restart. The UI ledger advanced
+19→20 for a build and 20→21 for a query; an independent CLI build also passed.
+Actual Qwen embedding trials retain an important quality failure: default hybrid
+returned unrelated evidence on both negative queries; an exploratory cosine
+cutoff/weight configuration improved this to 1/2, not full acceptance. The
+configured cutoff is available and identity-bound, but this small visible set
+does not establish general semantic relevance or answer abstention.
 
 ## P1.1 — Cross-session memory
 

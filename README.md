@@ -34,6 +34,8 @@ The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool
 increments. [Task benchmarks](docs/task-benchmarks.md) provide versioned outcome
 checks and campaign budgets with explicit offline/provider provenance.
+The [native local evaluation](docs/native-evaluation.md) retains actual Qwen API
+and LangGraph trials, including failures and the limits of those comparisons.
 
 ## What you get
 

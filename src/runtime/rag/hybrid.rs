@@ -223,6 +223,7 @@ pub struct VectorRetriever {
     index: EmbeddingIndex,
     model: Arc<dyn EmbeddingModel>,
     binding: String,
+    min_score: f64,
 }
 impl VectorRetriever {
     pub fn new(
@@ -236,12 +237,33 @@ impl VectorRetriever {
             index,
             model,
             binding,
+            min_score: 0.0,
         })
+    }
+    /// Host-calibrated minimum cosine similarity, in 0..=1. Positive
+    /// similarity alone is not a relevance judgment. This filter does not
+    /// assert factual support and does not remove lexical candidates in fusion.
+    pub fn with_min_score(mut self, minimum: f64) -> Result<Self, RuntimeError> {
+        if !minimum.is_finite() || !(0.0..=1.0).contains(&minimum) {
+            return Err(invalid(
+                "minimum vector similarity must be finite and in 0..=1",
+            ));
+        }
+        self.min_score = minimum;
+        Ok(self)
     }
 }
 impl Retriever for VectorRetriever {
     fn identity(&self) -> Option<String> {
-        Some(format!("vector-v1:{}", self.binding))
+        if self.min_score == 0.0 {
+            Some(format!("vector-v1:{}", self.binding))
+        } else {
+            Some(format!(
+                "vector-v2:{}",
+                fingerprint(&(&self.binding, self.min_score))
+                    .expect("validated vector configuration")
+            ))
+        }
     }
     fn retrieve<'a>(
         &'a self,
@@ -272,7 +294,7 @@ impl Retriever for VectorRetriever {
                         .map(|(a, b)| f64::from(*a) * f64::from(*b))
                         .sum::<f64>();
                     let score = (dot / (query_norm * norm(v))).clamp(-1.0, 1.0);
-                    (score > 0.0).then(|| ScoredChunk {
+                    (score > 0.0 && score >= self.min_score).then(|| ScoredChunk {
                         chunk_id: id.clone(),
                         score,
                     })

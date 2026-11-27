@@ -8,3 +8,5 @@ Cargo.lock.bak
 /step-cache
 /.taskloom
 /taskloom.json
+__pycache__/
+*.pyc

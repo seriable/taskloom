@@ -1,0 +1,774 @@
+{
+  "version": 1,
+  "date": "2026-11-27",
+  "scope": "P0 native evaluation and explicit semantic cutoff increment; P0-P2 remains incomplete",
+  "parent_commit": "6d6f9fac7758e64d38a8b969e04db1c3e855e945",
+  "evidence_kind": "actual local downloaded weights and native HTTP APIs, separate from session-assisted/fixture results",
+  "environment": {
+    "os": "Windows",
+    "python": "3.14",
+    "torch": "2.14.1+cu126",
+    "transformers": "5.20.2",
+    "langgraph": "1.2.24",
+    "device": "NVIDIA GeForce RTX 3080 Ti Laptop GPU",
+    "vram_bytes": 17179344896
+  },
+  "models": {
+    "generation": "Qwen/Qwen3-1.7B",
+    "embedding": "Qwen/Qwen3-Embedding-0.6B",
+    "manifest_sha256": "46dde46ea467dc8a0a42032b6da0f6cfcf8fc4e65ce93001b6ac8f8f4787e54f",
+    "verified_files_after_inference": 17,
+    "trust_remote_code": false,
+    "generation_server": "official transformers serve, greedy, reasoning off, seed 42",
+    "embedding_server": "bounded local AutoModel last-token pooling; no query instruction or synthetic vectors"
+  },
+  "cost_boundary": {
+    "credential_environment": "TASKLOOM_LOCAL_API_KEY",
+    "credential_kind": "disposable local dummy; official generation server ignores it, embedding example checks it",
+    "currency": "USD",
+    "input_price_per_million": 0,
+    "output_price_per_million": 0,
+    "basic_campaign_cap_micros": 1,
+    "embedding_cap_micros": 0,
+    "api_fees_incurred": 0,
+    "excluded": "hardware/electricity and current-chat model usage are not metered"
+  },
+  "generation_basic": {
+    "requested": 12,
+    "passed": 5,
+    "failed": 7,
+    "not_run": 0,
+    "wall_ms": 53036,
+    "model_decisions": 30,
+    "tool_attempts": 21,
+    "answered_requests": 29,
+    "known_input_tokens": 20609,
+    "known_output_tokens": 1117,
+    "unknown_usage_attempts": 2,
+    "cases": [
+      {
+        "id": "research-approval",
+        "category": "research",
+        "status": "failed",
+        "failures": [
+          "invalid cited report JSON: expected value at line 1 column 1",
+          "final answer does not contain \"exact tool name and arguments\""
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "research-recovery",
+        "category": "research",
+        "status": "failed",
+        "failures": [
+          "invalid cited report JSON: expected value at line 1 column 1"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "research-two-sources",
+        "category": "research",
+        "status": "failed",
+        "failures": [
+          "run did not complete: Finished/PermissionDenied",
+          "invalid cited report JSON: EOF while parsing a value at line 1 column 0"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": false
+      },
+      {
+        "id": "arithmetic-multiply",
+        "category": "tool_use",
+        "status": "passed",
+        "failures": [],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "arithmetic-negative",
+        "category": "tool_use",
+        "status": "failed",
+        "failures": [
+          "JSON assertion failed at /value"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "arithmetic-zero",
+        "category": "tool_use",
+        "status": "passed",
+        "failures": [],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "arithmetic-two-steps",
+        "category": "tool_use",
+        "status": "failed",
+        "failures": [
+          "JSON assertion failed at /value"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "arithmetic-three-steps",
+        "category": "tool_use",
+        "status": "failed",
+        "failures": [
+          "JSON assertion failed at /value"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": true
+      },
+      {
+        "id": "approved-note",
+        "category": "approval",
+        "status": "passed",
+        "failures": [],
+        "approval_exercised": true,
+        "controller_interruption_exercised": false,
+        "effects": 1,
+        "replay_unchanged": true
+      },
+      {
+        "id": "approved-chinese-note",
+        "category": "approval",
+        "status": "passed",
+        "failures": [],
+        "approval_exercised": true,
+        "controller_interruption_exercised": false,
+        "effects": 1,
+        "replay_unchanged": true
+      },
+      {
+        "id": "recovered-note",
+        "category": "recovery",
+        "status": "passed",
+        "failures": [],
+        "approval_exercised": true,
+        "controller_interruption_exercised": true,
+        "effects": 1,
+        "replay_unchanged": true
+      },
+      {
+        "id": "recovered-chinese-note",
+        "category": "recovery",
+        "status": "failed",
+        "failures": [
+          "case did not reach approval before its fixture effect",
+          "run did not complete: Finished/ModelError",
+          "final answer is not exact JSON: EOF while parsing a value at line 1 column 0",
+          "missing executed exact arguments for record_note",
+          "record_note attempts: 0; expected 1..=1",
+          "expected exactly one externally observed fixture write"
+        ],
+        "approval_exercised": false,
+        "controller_interruption_exercised": false,
+        "effects": 0,
+        "replay_unchanged": false
+      }
+    ]
+  },
+  "langgraph_basic": {
+    "requested": 12,
+    "passed": 5,
+    "failed": 7,
+    "not_run": 0,
+    "wall_ms": 49161,
+    "model_decisions": 30,
+    "http_attempts": 31,
+    "unknown_usage_attempts": 2,
+    "parity": {
+      "version": 1,
+      "normalized": "opaque tool-call IDs only",
+      "cases": [
+        {
+          "id": "research-approval",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            },
+            {
+              "step": 3,
+              "matched": true
+            },
+            {
+              "step": 4,
+              "matched": true
+            },
+            {
+              "step": 5,
+              "matched": true
+            },
+            {
+              "step": 6,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 6,
+          "comparison_http_attempts": 6,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "research-recovery",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            },
+            {
+              "step": 3,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 3,
+          "comparison_http_attempts": 3,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "research-two-sources",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            },
+            {
+              "step": 3,
+              "matched": true
+            },
+            {
+              "step": 4,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 4,
+          "comparison_http_attempts": 4,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "arithmetic-multiply",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "arithmetic-negative",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "arithmetic-zero",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "arithmetic-two-steps",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "arithmetic-three-steps",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "approved-note",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "approved-chinese-note",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "recovered-note",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            },
+            {
+              "step": 2,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        },
+        {
+          "id": "recovered-chinese-note",
+          "model_decisions_match": true,
+          "conditioning": [
+            {
+              "step": 1,
+              "matched": true
+            }
+          ],
+          "native_http_attempts_known_or_uncertain": 2,
+          "comparison_http_attempts": 2,
+          "http_attempt_budget_match": true,
+          "same_outcome": true
+        }
+      ],
+      "all_conditioning_matches": true,
+      "all_http_attempt_counts_match": true,
+      "same_suite_fingerprint": true,
+      "same_total_api_fee_cap": true,
+      "limitations": [
+        "native HTTP attempt count is inferred from answered requests and durable uncertainty journals",
+        "no latency superiority or factual-quality conclusion follows from parity"
+      ]
+    },
+    "strict_outcome_recheck": true,
+    "limitations": [
+      "custom documented StateGraph adapter, not all LangGraph applications",
+      "in-memory native checkpoint; OS-process recovery not evaluated",
+      "RAG uses the same Taskloom engine over copied corpus via local API; IPC affects latency",
+      "hardware/electricity not metered",
+      "same checks do not establish semantic claim support or general superiority"
+    ]
+  },
+  "collaboration": {
+    "requested": 3,
+    "passed": 0,
+    "failed": 3,
+    "cases": [
+      {
+        "id": "parallel-policy-brief",
+        "status": "failed",
+        "failures": [
+          "exact citation/output check: Error: Protocol(\"knowledge: citation quote, provenance or marker mismatch\")\n"
+        ],
+        "maximum_concurrent_analysts": 2,
+        "review_rework_exercised": false,
+        "model_steps": 9,
+        "tool_attempts": 5,
+        "wall_elapsed_ms": 31289,
+        "charged_model_cost_micros": 0
+      },
+      {
+        "id": "peer-release-check",
+        "status": "failed",
+        "failures": [
+          "workflow did not complete: failed",
+          "result: PEER revision limit reached without an approved draft",
+          "missing final report text"
+        ],
+        "maximum_concurrent_analysts": 2,
+        "review_rework_exercised": true,
+        "model_steps": 13,
+        "tool_attempts": 6,
+        "wall_elapsed_ms": 67669,
+        "charged_model_cost_micros": 0
+      },
+      {
+        "id": "peer-initial-draft-audit",
+        "status": "failed",
+        "failures": [
+          "exact citation/output check: Error: Protocol(\"knowledge: citation was not retrieved\")\n"
+        ],
+        "maximum_concurrent_analysts": 2,
+        "review_rework_exercised": true,
+        "model_steps": 19,
+        "tool_attempts": 12,
+        "wall_elapsed_ms": 81987,
+        "charged_model_cost_micros": 0
+      }
+    ],
+    "independent_claim_support": "not yet evaluated; model reviewer approval did not override failed citation checks"
+  },
+  "embedding_relevance": {
+    "corpus": "tests/data/retrieval-quality-v1.json",
+    "default_lexical": {
+      "positive_queries": 16,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "negative_queries": 2,
+      "negative_correct": 2,
+      "errors": 0
+    },
+    "default_hybrid": {
+      "positive_queries": 16,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 0.96875,
+      "negative_queries": 2,
+      "negative_correct": 0,
+      "errors": 0
+    },
+    "exploratory_configured_hybrid": {
+      "positive_queries": 16,
+      "recall_at_5": 1.0,
+      "mrr_at_5": 1.0,
+      "negative_queries": 2,
+      "negative_correct": 1,
+      "errors": 0
+    },
+    "configured_minimum_cosine": 0.46,
+    "configured_lexical_weight": 2,
+    "calibration_cases": 8,
+    "each_campaign_embedding_requests": 19,
+    "acceptance": "incomplete: technical negative query still returned unrelated semantic candidates",
+    "limitations": [
+      "visible synthetic relevance set, no held-out generalization",
+      "ranking/exact quotations do not judge semantic claim support or factual correctness"
+    ]
+  },
+  "native_cli_api_ui": {
+    "api_full_build_and_queries": "passed with actual learned model",
+    "browser_real_build": "requests 19 to 20, 12 chunks, corpus revision 12, index remained valid",
+    "browser_restart_hybrid_query": "requests 20 to 21; active hybrid binding, approval document first, no console errors/warnings observed",
+    "cli_explicit_build": "passed; requests 21 to 22; same saved index binding",
+    "saved_index_binding": "af57aa614abdeea6e938cd6746292a800a8a620ebd9c141a775bd2b646d83c61",
+    "temporary_services": "stopped; browser tab closed"
+  },
+  "checks": {
+    "all_features": {
+      "passed": 279,
+      "failed": 0,
+      "ignored": 6
+    },
+    "minimal_features": {
+      "passed": 84,
+      "failed": 0,
+      "ignored": 0
+    },
+    "clippy_strict": "passed",
+    "rust_1_86_all_features_compile": "passed",
+    "rustdoc_warnings": "passed",
+    "fmt": "passed",
+    "javascript_syntax": "passed",
+    "python_syntax": "passed",
+    "package_source_list": "passed; no pycache, pyc or safetensors included",
+    "shared_citation_cli_smoke": "valid observed evidence passes; missing marker fails",
+    "production_services_withheld_preflight": {
+      "kind": "preflight integration, not native model effectiveness",
+      "production_service_settings_withheld": true,
+      "isolated_host_and_child_created": true,
+      "closed_local_model_endpoint_failed_as_expected": true,
+      "exit_code": 1
+    },
+    "rust_1_86_citation_example_compile": "passed"
+  },
+  "failed_preliminary_trials_retained": [
+    "target/langgraph-native-20261127-1: only one HTTP attempt on a transient failure",
+    "target/langgraph-native-20261127-2: tool-argument history whitespace differed from Taskloom",
+    "target/native-collaboration-20261127-1: harness read PEER final field incorrectly; corrected fresh campaign still failed actual citation/review acceptance"
+  ],
+  "not_completed": [
+    "native tool-error repair and long-task coverage",
+    "native OS-process interruption coverage",
+    "DeerFlow and agentUniverse native comparisons",
+    "complex-agent cross-framework comparisons",
+    "independent factual/entailment scoring",
+    "semantic irrelevant-query acceptance",
+    "P1 and P2 work",
+    "final GitHub main delivery"
+  ],
+  "raw_artifact_sha256": {
+    "target/native-generation-20261127-1/report.json": "cf364cade54b0587a48605e8b117fbb7b76b6bcefcfa4ccab220d4cd89f96858",
+    "target/native-generation-20261127-1/suite.json": "6fd6cc01493fb6f5b3800e628f9fd8d9d1b8387499230f2cb6a68958edfbe72a",
+    "target/native-generation-20261127-1/cases/research-two-sources/knowledge/corpus.json": "dc32967e5d314a7bdcc0160967a8eda0384255b7786b6b064335acf1e7d1b751",
+    "target/native-generation-20261127-1/cases/research-two-sources/runs/4276fa840282b65d3830bd8bc13bca56234594b91087ab574012653333565f93.budget.json": "fc3c8b485d0c72c107ff304fbe088ff1a0d8ad1456d79cbb9afd3c7796321b5c",
+    "target/native-generation-20261127-1/cases/research-two-sources/runs/4276fa840282b65d3830bd8bc13bca56234594b91087ab574012653333565f93.json": "e53ccaa25aa4008d5cda01021c985aadc5a9b7a2e0e0ef8f79727c4d144f790c",
+    "target/native-generation-20261127-1/cases/research-recovery/knowledge/corpus.json": "da0888aebd31513d2caae2bda46bd2977fd5d4f5b84278dbee17080641314e47",
+    "target/native-generation-20261127-1/cases/research-recovery/runs/9e8bd3b879dcbb4b3ed25f81ebaee02fc01992e68982b3b63c4eee3073748191.budget.json": "3d4866abf77453978dc7b5b07cf34f026ab97aeb2b9e4c20bb065894ece63c2f",
+    "target/native-generation-20261127-1/cases/research-recovery/runs/9e8bd3b879dcbb4b3ed25f81ebaee02fc01992e68982b3b63c4eee3073748191.json": "b1393381c0ce1b823e78c91221a3b946b5ad9b21f33f89bf57bea19df6093c01",
+    "target/native-generation-20261127-1/cases/research-approval/knowledge/corpus.json": "67df4987a718c56233674e1121fec1c4dd14b1f1ede8e4dd05880fb8ea8fdc3d",
+    "target/native-generation-20261127-1/cases/research-approval/runs/e7eb05486b3a138d45fc6bca038341664b9a84142d7cceaf6131ebcd73d459c7.budget.json": "7a723d773160bf53e3ec550c64fd4d7a9ac54f2fb497c9e865efc14e1d052d61",
+    "target/native-generation-20261127-1/cases/research-approval/runs/e7eb05486b3a138d45fc6bca038341664b9a84142d7cceaf6131ebcd73d459c7.json": "dbdccb51c3013dbbba0cb910f60e58d735cf61a63771e132badd31127dc8b8f5",
+    "target/native-generation-20261127-1/cases/recovered-note/effects/e772351a9b28b43a44502afd8d9a0f1ea83e75db994376f82059b515eeb227b8.txt": "5e59ef630b640eadc530a2e90ff4b2bbbdb6040c6c48bf0deb799da9a8f1b919",
+    "target/native-generation-20261127-1/cases/recovered-note/runs/7d1cb1ad55a4ed700c347764b6fb2d66c083a4482818382002ef9ff2bec1d6ad.budget.json": "3354c5d2e5bb088a22f7295fb1fdac4f8cd7071bcb72afb60f828cc3cfa30692",
+    "target/native-generation-20261127-1/cases/recovered-note/runs/7d1cb1ad55a4ed700c347764b6fb2d66c083a4482818382002ef9ff2bec1d6ad.json": "0341878c6c0a85be6f98714317711fdea44a9320c1456ac0d60d1dc99d10ab68",
+    "target/native-generation-20261127-1/cases/recovered-chinese-note/runs/9b3bd32b217a7dfa861ebdd58d7137c390cae5409764ab0410031fb1bd76451e.budget.json": "20d1c176844dbc230c9ad6ac5568026e3616d00571fbc0d4d9a70802f92c5155",
+    "target/native-generation-20261127-1/cases/recovered-chinese-note/runs/9b3bd32b217a7dfa861ebdd58d7137c390cae5409764ab0410031fb1bd76451e.json": "e7dccf2e966755b9f2369fca8f2754614adb823f03a4b4be4dad560db07dda89",
+    "target/native-generation-20261127-1/cases/arithmetic-zero/runs/2ca59e39985d648724b6916fbc174b6b608067002ce5015086adacbb10114711.budget.json": "cddea024732b7b302ce1080d4f5e8590475a3ae61aa7515621e59388cf226499",
+    "target/native-generation-20261127-1/cases/arithmetic-zero/runs/2ca59e39985d648724b6916fbc174b6b608067002ce5015086adacbb10114711.json": "6af37a9b0cfcc453fbc35fbb7845256638e3160223ceb24f85462a7c1ba0f223",
+    "target/native-generation-20261127-1/cases/arithmetic-two-steps/runs/20b55c86da039e184f47a6bf2fa6858b94ad977442ccc2d5f4626ea718b809a2.budget.json": "274ccfb912d9c17c67c50645eee1bded2bb15db208e9037151ee2e8a73374509",
+    "target/native-generation-20261127-1/cases/arithmetic-two-steps/runs/20b55c86da039e184f47a6bf2fa6858b94ad977442ccc2d5f4626ea718b809a2.json": "4818571c593a5a08c9d90f408ff230eb2481ca787c0d3eb3aa933ed134f85ed6",
+    "target/native-generation-20261127-1/cases/arithmetic-three-steps/runs/a08cbdb64f6530ac6a847e9941ecc40cac1e392329c8dc239bea13e1505f3eaf.budget.json": "90e2f6e93136a1f718281cb868f72641853a5a925adbc8738d8fada4c5ad8b49",
+    "target/native-generation-20261127-1/cases/arithmetic-three-steps/runs/a08cbdb64f6530ac6a847e9941ecc40cac1e392329c8dc239bea13e1505f3eaf.json": "58b5fd3e16da7138d223d6d4e8402bb4c6430698b6303f98fae20de626eb31da",
+    "target/native-generation-20261127-1/cases/arithmetic-negative/runs/5caebb5df68af02b2a70b74a4319157ad75b5258e4981a299637ad13d20ff628.budget.json": "52128146e28f196b8fe25fe57e7bb36da40f493f2da453184decfae21f4c5221",
+    "target/native-generation-20261127-1/cases/arithmetic-negative/runs/5caebb5df68af02b2a70b74a4319157ad75b5258e4981a299637ad13d20ff628.json": "a4d0e5f61dd576e27f339c9f0dd33c4c2ddcd04dc9d072da3a47a76f8fa7761a",
+    "target/native-generation-20261127-1/cases/arithmetic-multiply/runs/e8844a94600e8e94def36d759df5c57de6fa61d98f537bf91a63048923bd9e32.budget.json": "ff8730ff9d4a2cd263e9ae855f50750efae2d6297ac5b2dfbbfd8f551ab79869",
+    "target/native-generation-20261127-1/cases/arithmetic-multiply/runs/e8844a94600e8e94def36d759df5c57de6fa61d98f537bf91a63048923bd9e32.json": "4d8008d9e809c4d1e853f3deb95ee50f3e6f4ff68d0661ab233b4e8e2538a7fc",
+    "target/native-generation-20261127-1/cases/approved-note/effects/0ae3faf9ec4964386df1d8a11e69914f6c529dae4b1afbfefa97a7c67b8ddb8b.txt": "fa427ea1aa261429624ec7a165a07567c2288d511c69458ca8b180e6fa315159",
+    "target/native-generation-20261127-1/cases/approved-note/runs/0f6c8326d73b8fa687f78c69bb1ad537465eda85a4a6dc056948607efba4e313.budget.json": "277f04ef7a4cdb4f026c0b03184277ce24d4009d18fc0ff957af4c51ce155843",
+    "target/native-generation-20261127-1/cases/approved-note/runs/0f6c8326d73b8fa687f78c69bb1ad537465eda85a4a6dc056948607efba4e313.json": "c600769cf0bda6c03c3c88258b267ea18cc78cd51d9c823e51c41dc0f59793ac",
+    "target/native-generation-20261127-1/cases/approved-chinese-note/effects/9bd800724c59a524ff709309c0e480d791710388825245e5d007f7395baa59fb.txt": "5ca57f644b9dc0a326b3e480529620ca24e7223d9ad75536ac50b212eed26859",
+    "target/native-generation-20261127-1/cases/approved-chinese-note/runs/7fee97b435ddafef2a05821e8102cefd2375715be55fbc7ba84ae5ea7b31b114.budget.json": "b8523137222dffec66662f4fc816ca236fa31405f5f66165bbeafb2dddb90631",
+    "target/native-generation-20261127-1/cases/approved-chinese-note/runs/7fee97b435ddafef2a05821e8102cefd2375715be55fbc7ba84ae5ea7b31b114.json": "c92345180a224f69e22ed0eb5af44ff8892388b88e0fe47fa6d3286362324ef8",
+    "target/langgraph-native-20261127-3/execution-provenance.json": "0cbd16418eb32263b9c7b377886532586b4ccdfcca9f3191e625a8948f3a58d0",
+    "target/langgraph-native-20261127-3/harness.py": "ed9f504aa3a93dfc4a7352a02f1772828cff8c38a2b7b58295b8f894a8b11119",
+    "target/langgraph-native-20261127-3/native_retrieval.py": "c61e0844895aa8ed21ea481b3d916a0199d1110c4976abadfb59fd49fe63fc5d",
+    "target/langgraph-native-20261127-3/report.json": "b320f5c7da4a6c9d479559413c61a15330298d8288baa55a250707015a55eb84",
+    "target/langgraph-native-20261127-3/approved-chinese-note/effect.txt": "5ca57f644b9dc0a326b3e480529620ca24e7223d9ad75536ac50b212eed26859",
+    "target/langgraph-native-20261127-3/approved-chinese-note/knowledge.json": "5dbfeb28491299020adefa5e1bbdacc0d224987ec1e120f17673c3ed4955b08a",
+    "target/langgraph-native-20261127-3/approved-chinese-note/model-api.json": "7ff32094ecc44dfbe6cda8954db647bcd44914146c5db9516eb4018451a7f1af",
+    "target/langgraph-native-20261127-3/approved-chinese-note/result.json": "6bef964604bd9465995f1f9bf7b47ab4f29a016211a4d6b42ea087877ce78a7a",
+    "target/langgraph-native-20261127-3/approved-note/effect.txt": "fa427ea1aa261429624ec7a165a07567c2288d511c69458ca8b180e6fa315159",
+    "target/langgraph-native-20261127-3/approved-note/knowledge.json": "0ba76366e3a362819e904516d5ee4ea8c33af1df0e841faab842af015419b02f",
+    "target/langgraph-native-20261127-3/approved-note/model-api.json": "b19b88a0d094ec514e7be503eba81722717d173b4b196b8a86d29d6a99be0e02",
+    "target/langgraph-native-20261127-3/approved-note/result.json": "2a47b3d33af00fdadbdd32e01f7ed2c7880121a3f9126ad87c8dd475b00a21ad",
+    "target/langgraph-native-20261127-3/arithmetic-multiply/knowledge.json": "b03aaf3f5bb830022b88ceb1322b01f2ea5caeab4c2690d4e4e14f0473d094fe",
+    "target/langgraph-native-20261127-3/arithmetic-multiply/model-api.json": "e827c1fae0e543f92de4a08e80f647f5b3b9122bb8612e297be8059b81cea0cc",
+    "target/langgraph-native-20261127-3/arithmetic-multiply/result.json": "0bfa0b181de8faa3083b5480e17d0bf6df964ef287e81ed82d7494ed7efdda64",
+    "target/langgraph-native-20261127-3/arithmetic-negative/knowledge.json": "177145bedf2388de72055814af3e00613e271c2b501cc30de4c59291bea6483f",
+    "target/langgraph-native-20261127-3/arithmetic-negative/model-api.json": "446b2e08b58149e3bce89e661b53a99e56ea820d340cb56cc897f8352b967998",
+    "target/langgraph-native-20261127-3/arithmetic-negative/result.json": "ffc0e0545e0b8a7abf016199eda1670c8bf1d7c4d3337c84cc6dd2b6b5b98edd",
+    "target/langgraph-native-20261127-3/arithmetic-three-steps/knowledge.json": "010a8802e269d739e45d5aa0dbf0cd61f40ba5b509a44c733ec0507eb2846df0",
+    "target/langgraph-native-20261127-3/arithmetic-three-steps/model-api.json": "34a1bc216f8b57f803df38a4738bccdfd0f20382a8edd8e0ee8a0eebae4001f5",
+    "target/langgraph-native-20261127-3/arithmetic-three-steps/result.json": "853556761814578a734768b8f78de6347f67360ed0f18cb4db01843b98c08ff3",
+    "target/langgraph-native-20261127-3/arithmetic-two-steps/knowledge.json": "5c1d4780d842da81f79c78e74ae8876f1152bf54c36ef92e66966937958682b5",
+    "target/langgraph-native-20261127-3/arithmetic-two-steps/model-api.json": "89f99f5cedb273588f16357d55d10787794d5648a1b2f5be32a57225da82450f",
+    "target/langgraph-native-20261127-3/arithmetic-two-steps/result.json": "e7c8ecc107f02fb162ea5e596ed4e031c1f90cb04507e35257ee950b2ee180b5",
+    "target/langgraph-native-20261127-3/arithmetic-zero/knowledge.json": "ef56d34c924b68eadfae41c4ad2d07b56352c97d4257f22ce9422ea173a82864",
+    "target/langgraph-native-20261127-3/arithmetic-zero/model-api.json": "b07a5ade75a272aa7b0e040b2d43e03d598c57a7330e13e0e5a65233f5e12a26",
+    "target/langgraph-native-20261127-3/arithmetic-zero/result.json": "c382fddb7e74058ec00d31432ecb6119716131029e7dc77cca9c42396faafc62",
+    "target/langgraph-native-20261127-3/recovered-chinese-note/knowledge.json": "40ac325fdea2b518089edc718602cca686e23fd62a1787072861f71d307dd6f0",
+    "target/langgraph-native-20261127-3/recovered-chinese-note/model-api.json": "c44a1ff501669af9577aeec80f3fc39e8dfc74cce7e5f612c79b5d43c294a5db",
+    "target/langgraph-native-20261127-3/recovered-chinese-note/result.json": "65741fe24bd321b9544e71018d7dbe4377f355126d7ced98536292ab3a424a72",
+    "target/langgraph-native-20261127-3/recovered-note/effect.txt": "5e59ef630b640eadc530a2e90ff4b2bbbdb6040c6c48bf0deb799da9a8f1b919",
+    "target/langgraph-native-20261127-3/recovered-note/knowledge.json": "2de514c0bba199af19506a1188f92bb840079ee1208f6a53435c2a86dfa137cb",
+    "target/langgraph-native-20261127-3/recovered-note/model-api.json": "c75cb93d12386e19f1eecfb21993eb92d7b5098e31ba7de5100517b95684e7e4",
+    "target/langgraph-native-20261127-3/recovered-note/result.json": "b7d52cee5c2fe44dd087d77762149f715fae4c0d721f61f92c7e58e250fc006e",
+    "target/langgraph-native-20261127-3/research-approval/knowledge.json": "4173b998314c5ebaa81bc1af06083fd18412981de2d7e4d98c4ec910dd559a15",
+    "target/langgraph-native-20261127-3/research-approval/model-api.json": "b5a60eb8d8beb692310349cd9891874a72ce6b8eceae678e1368f84e6d1a67a0",
+    "target/langgraph-native-20261127-3/research-approval/result.json": "28db6d678452a17f3329a20e1046a1aaf16eb69fe30487bf7ba494f9fced34c0",
+    "target/langgraph-native-20261127-3/research-recovery/knowledge.json": "f531f072bbce3b76fe8314c9ac8f17a5589d2074c01298ead360a6741baa06e2",
+    "target/langgraph-native-20261127-3/research-recovery/model-api.json": "950415d1095c9976753b87ebc0e16860da86f4fce5b8349261043b2f8eba302f",
+    "target/langgraph-native-20261127-3/research-recovery/result.json": "393060c9b64c33c4eb204edbf551a2eccfa965851cc40398bffc3d835c85d339",
+    "target/langgraph-native-20261127-3/research-two-sources/knowledge.json": "f8229ba66585615023b9e47db24593ed14c013da3a6e4412d9114ca49746fa49",
+    "target/langgraph-native-20261127-3/research-two-sources/model-api.json": "ffa205a4e2c2fbbdd3052fed3a39cee539621c901e5a1d8c3b60f933ace34432",
+    "target/langgraph-native-20261127-3/research-two-sources/result.json": "4941618eb1cf34915be99479b934155838a392ea4f4bd52d59ed01eae0a1e007",
+    "target/langgraph-native-20261127-3/research-two-sources/state/knowledge/corpus.json": "dc32967e5d314a7bdcc0160967a8eda0384255b7786b6b064335acf1e7d1b751",
+    "target/langgraph-native-20261127-3/research-recovery/state/knowledge/corpus.json": "da0888aebd31513d2caae2bda46bd2977fd5d4f5b84278dbee17080641314e47",
+    "target/langgraph-native-20261127-3/research-approval/state/knowledge/corpus.json": "67df4987a718c56233674e1121fec1c4dd14b1f1ede8e4dd05880fb8ea8fdc3d",
+    "target/native-collaboration-20261127-2/defaults.json": "5c44374041d04c09880b47d44e3b9a0b6cd989f9cf901c0aaf8d0c54e8d49cde",
+    "target/native-collaboration-20261127-2/execution-provenance.json": "ee2420e1a2a64931c46626b8e65b1491731e41d66f458d0c127deb2177c7fa4d",
+    "target/native-collaboration-20261127-2/harness.py": "6e9606a4f26bd46ea5deb41cbffe475b32b0e5d8258842b2b8b51c05053bb640",
+    "target/native-collaboration-20261127-2/native_retrieval.py": "c61e0844895aa8ed21ea481b3d916a0199d1110c4976abadfb59fd49fe63fc5d",
+    "target/native-collaboration-20261127-2/report.json": "4777d4046fe0bf84a25853aaa42b745d87aac62058987a217b3959f1fd4957c1",
+    "target/native-collaboration-20261127-2/suite.json": "30d5590cddb6896a648bb1075ed054493aa0ce5b2922e8518eb4de7de13236ba",
+    "target/native-collaboration-20261127-2/taskloom.json": "89baf6b054005ee09b18367f1d2aa0d16e42f34c242b3f2b31a3480303f4a6af",
+    "target/native-collaboration-20261127-2/parallel-policy-brief/result.json": "63853b0941bbe8327cdde0831d1b19cb7f9d6c8d2379405d59adb0bed05491c5",
+    "target/native-collaboration-20261127-2/peer-initial-draft-audit/result.json": "b02b331699b3972eaf1155cacc78ae21dc55a1b4ebd3d53422625eb5d94f2cb2",
+    "target/native-collaboration-20261127-2/peer-release-check/result.json": "6d580f8bd67da28006e818293d6c8559ec3949ab0094e6bb398ad8ca03c90ba8",
+    "target/native-collaboration-20261127-2/state/knowledge/corpus.json": "5525d6e01667c51004d5e29556654db4ff7caaab62b331b4fba552521ca56563",
+    "target/native-collaboration-20261127-2/state/runs/01b64698af2b9202417dcae64795f6a99477e6c48ace303dd510442984bea403.budget.json": "a3a938170985fa593642b8d2125316703259682b536e3aab09248afc0d128d0d",
+    "target/native-collaboration-20261127-2/state/runs/01b64698af2b9202417dcae64795f6a99477e6c48ace303dd510442984bea403.json": "086b975c4c04e6f0a5731a453464f0d6c1afce2c1649ccf1fb00b7b9862a259f",
+    "target/native-collaboration-20261127-2/state/runs/0f49c7adbc9de80eaf045da5d2d5097fd59b47e5b14097e08ee50baca26a157d.budget.json": "c6973cbe2236f5e972502f23c0fcc058800be73ff438d78ec58d526dc67dd023",
+    "target/native-collaboration-20261127-2/state/runs/0f49c7adbc9de80eaf045da5d2d5097fd59b47e5b14097e08ee50baca26a157d.json": "43c6eeed8c7df4e7b5452cc2c1bed501878707c8ab16c287c4052b7717557b10",
+    "target/native-collaboration-20261127-2/state/runs/16000176363d8814dfb8079f06be23c72b35e326c77dab5ec5067787f81c1491.budget.json": "ae7e5b117d6bb5bcb66fce85926126e792a7a92f1240cf283abbbeb53d84e69c",
+    "target/native-collaboration-20261127-2/state/runs/16000176363d8814dfb8079f06be23c72b35e326c77dab5ec5067787f81c1491.json": "94fd98f67e9453eefdd4f2db7cd84b622dd5d79ce722f3f70abb7255e33edb69",
+    "target/native-collaboration-20261127-2/state/runs/30b514b3ac205b9416ad6f1f7725b013be1c2780c0313502585a0e6b50955201.budget.json": "8aebe651a099d030fe13ad34d388abe9feebb7bf6311cca80e07801ac3959500",
+    "target/native-collaboration-20261127-2/state/runs/30b514b3ac205b9416ad6f1f7725b013be1c2780c0313502585a0e6b50955201.json": "b7bf7dc0b171d54d2033875cf8c76147ca709a8ac9f951dede97dee4e2f0a393",
+    "target/native-collaboration-20261127-2/state/runs/449bf036cdeb8c2a0b0ee898ccc2a9b10f3c1b8df35a2b7b077caba52dad9091.budget.json": "78530e1c5e40f5626666594a41b631716450527f3bdffc5547c59bb8633086b9",
+    "target/native-collaboration-20261127-2/state/runs/449bf036cdeb8c2a0b0ee898ccc2a9b10f3c1b8df35a2b7b077caba52dad9091.json": "a9b8099cbf9ee4dfcdd6c8d5cfb60305f39245e044e91f4066ce350d97f4c431",
+    "target/native-collaboration-20261127-2/state/runs/47cc5d4df181687af7a202e74e4925623b0e8b8f10723c8e8332d23be378dd55.budget.json": "80ac11ab8d2e847773a0284baf8a2af745685935a225c5e69c7368a9eee9a6ea",
+    "target/native-collaboration-20261127-2/state/runs/47cc5d4df181687af7a202e74e4925623b0e8b8f10723c8e8332d23be378dd55.json": "2760bef8f3c65cb83440a6086655b917cb4f99e33e88db22fe690a1f07a62a8a",
+    "target/native-collaboration-20261127-2/state/runs/4a84d3c313e1f4cbfee0d137e7a2ef7c98218811473f1b14ab3d8bacf0d88695.budget.json": "489632e69a906a8a4f7c0873d120a5e5f068e6774cfd751560f1068629f87c92",
+    "target/native-collaboration-20261127-2/state/runs/4a84d3c313e1f4cbfee0d137e7a2ef7c98218811473f1b14ab3d8bacf0d88695.json": "0bfc649100974cab863b5768bd8f0ec4e2cd64c138447b864cad508e4fdb1222",
+    "target/native-collaboration-20261127-2/state/runs/5ef274e5af244c66c5059f294b182c9d3d2a017396ba9f5df9f4564c0b9a720e.budget.json": "aa39c3f5818cc6fc0e68db84d84d0f5fe58eb49869b30764ba9b911c2072a189",
+    "target/native-collaboration-20261127-2/state/runs/5ef274e5af244c66c5059f294b182c9d3d2a017396ba9f5df9f4564c0b9a720e.json": "4162fec8efc79c65867a425653c5a490282de55c9165b9f226b49f9de7e24129",
+    "target/native-collaboration-20261127-2/state/runs/79320afe9f1d522349ecd3ef80a09e5a2044d2af01977b431762320437d4bce1.budget.json": "889a6254c04c367c9c6688583cd744eab06e010e1749989db5cc08fe67567134",
+    "target/native-collaboration-20261127-2/state/runs/79320afe9f1d522349ecd3ef80a09e5a2044d2af01977b431762320437d4bce1.json": "40159f35313af426091cc9c0827c06e7cd87855056f9426ff5eeb9c20b8ee788",
+    "target/native-collaboration-20261127-2/state/runs/7f5cd469995f478c94e7160368d570d4c6472ecfe8abf1675d3ee42179b4548a.budget.json": "61c227aedae091d070be9a95b7b41806b11707cc75692d11414161203432cede",
+    "target/native-collaboration-20261127-2/state/runs/7f5cd469995f478c94e7160368d570d4c6472ecfe8abf1675d3ee42179b4548a.json": "35ba76e2a0ad33c87ce0e7a745c1c587f3a0d9bc411bef9dc32ed48686a0812f",
+    "target/native-collaboration-20261127-2/state/runs/801a43e2ad141ebf134c1ef6537ab8c5839816895ae6b1ebbd7db1ed8020a883.budget.json": "05f0bb3bd0aaaffd477c29f15b9091788bd75218c9d390804d0fe64783487525",
+    "target/native-collaboration-20261127-2/state/runs/801a43e2ad141ebf134c1ef6537ab8c5839816895ae6b1ebbd7db1ed8020a883.json": "270efc6926b5f2d29799a5b0d5ce08e07d460578a1f04a095a7e80fc95b92f77",
+    "target/native-collaboration-20261127-2/state/runs/91f6cd0058d0f133f27a6bc1472db8650fca9cadb32bdbb0afc10710ffe6a01a.budget.json": "2226e743055cfe6407869f4032f7777d579f6e33277345dff3602338328f6859",
+    "target/native-collaboration-20261127-2/state/runs/91f6cd0058d0f133f27a6bc1472db8650fca9cadb32bdbb0afc10710ffe6a01a.json": "cd2ae8ce8eacd733649d1704d657b086a71a1a542d366f32078ba7b3ddb47e0b",
+    "target/native-collaboration-20261127-2/state/runs/c9c3235d816df62f5565261fa3f9fe213447aee643675aaca3507ed15a563eb2.budget.json": "bf430cadd174135e877a98bd5cef092dedc42e78917c1a5f7c7e151d2b038640",
+    "target/native-collaboration-20261127-2/state/runs/c9c3235d816df62f5565261fa3f9fe213447aee643675aaca3507ed15a563eb2.json": "db32d81e3c310e8fa8f1cc3cf3880e5f5ecf078c66401c09ac4e43dbecde0236",
+    "target/native-collaboration-20261127-2/state/runs/ce6225a08f50f705b4bd1846922af658e128a21b33deaab1a8dc388634e0f02a.budget.json": "506a70e4c1ea6206fad3df755e55f004f36fc70ef217ce200799f518b066c718",
+    "target/native-collaboration-20261127-2/state/runs/ce6225a08f50f705b4bd1846922af658e128a21b33deaab1a8dc388634e0f02a.json": "00b3cfcfcac96b6099b78718e53480092a6f60c39d27b29046e853f663cdc78f",
+    "target/native-collaboration-20261127-2/state/runs/ebae2c3b46d938420c83ad4a4ff3427548b50649e0863a31e31d15caff7821c2.budget.json": "570c7911e11017f012aa190a27c8cb9dec4fed766ae9d7a8aa64ba2b5e333aa2",
+    "target/native-collaboration-20261127-2/state/runs/ebae2c3b46d938420c83ad4a4ff3427548b50649e0863a31e31d15caff7821c2.json": "ae9a313621cb599242f816e2e2d8de60692ede6fb6aaa5199cf1e3f647e00947",
+    "target/native-collaboration-20261127-2/state/runs/ec1b527ac2a7ce64b777e12d8f88c0940d2c861d51fd6215efe87e0f6b134f85.budget.json": "b8d9357c23c42c4a6afac05874137eff277c6f1f63d5a2e75eee63b66d578de1",
+    "target/native-collaboration-20261127-2/state/runs/ec1b527ac2a7ce64b777e12d8f88c0940d2c861d51fd6215efe87e0f6b134f85.json": "3ef439772217ea8ddf731f46e9333e9394da9dae7e4d2c16bbb05403e1f528a0",
+    "target/native-collaboration-20261127-2/state/runs/f167d090d1bce943a8dd23e38f031d10c833a359b0d8c01eaaa7ca265f1152ca.budget.json": "64b130d4c7f9199ddbbf45cbb9437c68a2c870b7cfad84c8f0b23e3cd73949a6",
+    "target/native-collaboration-20261127-2/state/runs/f167d090d1bce943a8dd23e38f031d10c833a359b0d8c01eaaa7ca265f1152ca.json": "4a11174d9139d483880e777609cd38638f9e6f84fe1440c03c2d8213ea7d8280",
+    "target/native-collaboration-20261127-2/state/runs/fb723ca7cd0537deddb9835cdb5ae582e243aaa9d693079f36183bb4fa0ce4a7.budget.json": "00ad1b1d06cc3a00408afe27af05c325d82dceefcefc4b89f938a257e5df3b31",
+    "target/native-collaboration-20261127-2/state/runs/fb723ca7cd0537deddb9835cdb5ae582e243aaa9d693079f36183bb4fa0ce4a7.json": "7fc22fccc7bfa813f5a489f3fd584db3e6c21865063792c3011e0e5e6339a52c",
+    "target/native-collaboration-20261127-2/state/workflows/0c33272876407ce60dd07b2319c02dfcc311abf7524049eaad395fc2d5f569c4.workflow.json": "2899fc291423482728f4c99ead8bbfd3c9dd438262aabfa2384cba030410d92a",
+    "target/native-collaboration-20261127-2/state/workflows/2399396ca7e69327c8219cd8214f441bf61aaa3edc1305385c60c834d2bf1aa6.workflow.json": "4f403217d3bfdb73c7de25dbfbbb3a99a371ddd7fe11bfd76546d259bfa22ad1",
+    "target/native-collaboration-20261127-2/state/workflows/9c8f53ff69edb7e1d249db7b7d09574604f776db26a2ee368f9bc059a02b535e.workflow.json": "7d91c67df2d67c34e9763a83fc2acb696ad34cdf3ff8836d6961e2f1a46e38b4",
+    "target/native-retrieval-20261127-1/dataset.json": "7a01ac84ae3073abe60c669b793160b12b19ad86ce5859eb91b41e1ea19e5612",
+    "target/native-retrieval-20261127-1/models.lock.json": "46dde46ea467dc8a0a42032b6da0f6cfcf8fc4e65ce93001b6ac8f8f4787e54f",
+    "target/native-retrieval-20261127-1/report.json": "ef3bfd0ab547fbf4d5349e3c8f8c8e1d2dd79557e67da37f92788b9df075cdf4",
+    "target/native-retrieval-20261127-1/taskloom.json": "e91a82d7a9c99e4ddfa06c998e47aede950759134fd6250201643634307ad9ee",
+    "target/native-retrieval-20261127-1/state/knowledge/corpus.json": "5d4fa10acb2c9db26ce89a838ceda5a964da8fee78035dc59ad909e4a0bc3dfd",
+    "target/native-retrieval-20261127-1/state/retrieval/index.json": "e116aca44be158d5574200803f152a5e82a8059d2ac43ee4d39ed9e063c97e81",
+    "target/native-retrieval-20261127-1/state/retrieval/spend.json": "4dfeb8bf00c46ee8f6430d3254e2af17b5b6b24739869f65ee2f2ad1ee4ccf77",
+    "target/native-retrieval-20261127-2/dataset.json": "7a01ac84ae3073abe60c669b793160b12b19ad86ce5859eb91b41e1ea19e5612",
+    "target/native-retrieval-20261127-2/models.lock.json": "46dde46ea467dc8a0a42032b6da0f6cfcf8fc4e65ce93001b6ac8f8f4787e54f",
+    "target/native-retrieval-20261127-2/report.json": "bef06002489d43e2b07c3365964c4620ee72a5fd624a63860ceb56c9fd5e3e79",
+    "target/native-retrieval-20261127-2/taskloom.json": "340772dd1f769db9611710f9cd5e10249934027aeeb7ae2e60a78293f2b8d18b",
+    "target/native-retrieval-20261127-2/state/knowledge/corpus.json": "5d4fa10acb2c9db26ce89a838ceda5a964da8fee78035dc59ad909e4a0bc3dfd",
+    "target/native-retrieval-20261127-2/state/retrieval/index.json": "e116aca44be158d5574200803f152a5e82a8059d2ac43ee4d39ed9e063c97e81",
+    "target/native-retrieval-20261127-2/state/retrieval/spend.json": "4dfeb8bf00c46ee8f6430d3254e2af17b5b6b24739869f65ee2f2ad1ee4ccf77",
+    "target/langgraph-parity-20261127-final.json": "654231bd40337b4d4f7a904d234c53c38052cdb76d52221b91ee18b125ae91ec",
+    "target/langgraph-strict-outcome-recheck.json": "f0b900432db0c4bfe579c885e800686da15dde83b0d01da9b7be25f8fad26c5d",
+    "target/native-retrieval-calibration.json": "a40fd97b0e1c416a4b06eed15362a80cb750d3726e59d2051de9b2055e79b787",
+    "target/competitors/langgraph-requirements.txt": "4f6bc8155162b6f243c9181aa7b1271f6cf69c5b13972a4ca41a22aecb498203",
+    "target/competitors/langgraph-install.json": "b0c864ddc9786c6f440e647a91f69263451a9dd0a3fe9ad3445f58cb1a6dafdb",
+    "target/native-cli-index-build.log": "9cf7695d8ee9de8bf9ef3770edaaf7fe3ccb8482bc496fab6e480248105af9a8",
+    "target/langgraph-native-20261127-3/strict-outcome-grader.py": "6a3edb689fc647c062935db1bf05d37ec7432ea237202eb5e748a509a35cc1b1",
+    "target/preflight-native-controls/checks.json": "570b6fc77eb638f875558a3946b8ed347df89f96ce4cbad0b22ab2531c1fdcdc"
+  },
+  "source_git_blobs": {
+    ".gitignore": "524a455ea7b9076b51199a1cbca8277d159fbb45",
+    "Cargo.toml": "76109c1d008d42172423730e66e9b64e9c88e6c5",
+    "README.md": "f8761d92482483d1c391364018e956c68fd9d280",
+    "CHANGELOG.md": "e93be83af0eb8447b37c6a4e6ab8fc40619cedbb",
+    "src/runtime/rag/hybrid.rs": "8f705d750fe512568223e7524a7d938458aaa311",
+    "src/runtime/app/retrieval.rs": "b1ab13b81fcea2012371961155f758a5dba813d1",
+    "tests/agent_hybrid.rs": "86ee721a23b64de5c0c0eb9692d8a8e596c614d1",
+    "examples/benchmarks/citations.rs": "1e64621ed48edc2aba547285b9ff20967782607c",
+    "examples/benchmarks/collaboration-v1.json": "09c772426f55e9db6dc3d49c1398b750835e0268",
+    "examples/benchmarks/compare_parity.py": "c0a762907f4b8ef797632be541b267f1345d98e4",
+    "examples/benchmarks/langgraph_compare.py": "eae7f3a98a01fad3eab827b475a8e12f7259e612",
+    "examples/benchmarks/native_collaboration.py": "88894c38d2909c13865d49c74b2db5b065500639",
+    "examples/benchmarks/native_retrieval.py": "0b089fea3330c2ddeb372f41c390b8324aae05e3",
+    "examples/local_models/download.py": "3f77356c1f3f4e28682356d6ec1e68b94896ff61",
+    "examples/local_models/serve_embeddings.py": "290c91972897945d8b81db77955289e82cece529",
+    "docs/native-evaluation.md": "3f1fe8ab348a99bd329f3e4f5ca7238a00991ad5",
+    "docs/task-benchmarks.md": "a5b34e3d987602311a381220110944c8dc6ce5a1",
+    "docs/research-tools.md": "0f27dd43661c77a2f36406c21646cd9e8cadeecf",
+    "docs/p0-p2-roadmap.md": "3012097a8821c1f15980ef9baa70c543b740e504",
+    "docs/acceptance/native-models-20261127.lock.json": "0b6b0d033933414eef4dfeb8aed2f5a9a4a2623a"
+  }
+}

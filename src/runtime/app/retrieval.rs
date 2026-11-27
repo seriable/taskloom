@@ -39,6 +39,8 @@ pub struct AppRetrieval {
     pub embedding: Option<AppEmbedding>,
     pub lexical_weight: f64,
     pub semantic_weight: f64,
+    /// Explicitly calibrated cosine cutoff; zero preserves positive-only behavior.
+    pub semantic_min_score: f64,
     pub rank_constant: f64,
     pub candidate_k: usize,
 }
@@ -50,6 +52,7 @@ impl Default for AppRetrieval {
             embedding: None,
             lexical_weight: 1.0,
             semantic_weight: 1.0,
+            semantic_min_score: 0.0,
             rank_constant: 60.0,
             candidate_k: 20,
         }
@@ -74,6 +77,11 @@ pub struct AppEmbedding {
 impl AppRetrieval {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.lexical.validate()?;
+        if !self.semantic_min_score.is_finite() || !(0.0..=1.0).contains(&self.semantic_min_score) {
+            return Err(config_error(
+                "semantic_min_score must be finite and in 0..=1",
+            ));
+        }
         HybridRetriever::new(
             Arc::new(rag::LexicalRetriever),
             Arc::new(rag::LexicalRetriever),
@@ -358,7 +366,10 @@ pub(super) async fn configured(config: &AppConfig) -> Result<Arc<dyn Retriever>,
         .expect("validated hybrid configuration");
     let model = Arc::new(MeteredEmbedding::new(cfg, root)?);
     let snapshot = corpus.snapshot().await?;
-    let vector = Arc::new(VectorRetriever::new(index, model, &snapshot)?);
+    let vector = Arc::new(
+        VectorRetriever::new(index, model, &snapshot)?
+            .with_min_score(config.retrieval.semantic_min_score)?,
+    );
     Ok(Arc::new(
         HybridRetriever::new(lexical, vector).with_fusion(
             config.retrieval.lexical_weight,
