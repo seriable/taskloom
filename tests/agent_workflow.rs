@@ -479,3 +479,127 @@ async fn json_null_is_a_completed_output_not_a_missing_value() {
         Some(&Value::Null)
     );
 }
+
+#[tokio::test]
+async fn reconcile_after_process_death_recovers_running_nodes_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileWorkflowStore::new(dir.path());
+    let mut tasks = WorkflowTasks::new();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let signal = Arc::clone(&started);
+    tasks
+        .register(FnWorkflowTask::new(
+            definition("manual", TaskRecovery::Manual),
+            move |context: NodeContext, _: CancelToken| {
+                let signal = Arc::clone(&signal);
+                async move {
+                    if context.node_id == "a" {
+                        signal.notified().await;
+                        Err(taskloom::runtime::RuntimeError::Storage(
+                            "effect outcome unknown".into(),
+                        ))
+                    } else {
+                        signal.notify_one();
+                        std::future::pending().await
+                    }
+                }
+            },
+        ))
+        .unwrap();
+    let runner = WorkflowRunner::new(&tasks, &store);
+    let graph = WorkflowDefinition::new([
+        WorkflowNode::new("a", "manual"),
+        WorkflowNode::new("b", "manual"),
+    ]);
+    // Drop the controller (a simulated process death) once `a` is uncertain
+    // while `b` is still running.
+    tokio::select! {
+        _ = runner.start("crash", graph, Value::Null) => panic!("workflow must not stop"),
+        () = async {
+            loop {
+                let state = store.inspect("crash").await.unwrap();
+                if state.is_some_and(|s| s.node("a").unwrap().status == NodeStatus::Uncertain) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        } => {}
+    }
+    let crashed = store.inspect("crash").await.unwrap().unwrap();
+    assert_eq!(crashed.status, WorkflowStatus::Running);
+    assert_eq!(crashed.node("b").unwrap().status, NodeStatus::Running);
+    let mut stopped = crashed.clone();
+    stopped.status = WorkflowStatus::Paused;
+    stopped.invocation_started_unix_ms = None;
+    assert!(
+        stopped.validate().is_err(),
+        "stopped state with a running node"
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let state = runner
+        .reconcile(
+            "crash",
+            "a",
+            NodeRecovery::RecordOutput {
+                output: json!("observed"),
+                cost_micros: Some(0),
+                usage: Default::default(),
+                actor: "operator".into(),
+                note: "checked".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(state.status, WorkflowStatus::NeedsRecovery);
+    assert_eq!(state.node("a").unwrap().status, NodeStatus::Complete);
+    assert_eq!(state.node("b").unwrap().status, NodeStatus::Uncertain);
+    assert!(state.elapsed_ms >= 20, "downtime must be charged");
+    let resumed = runner.resume("crash").await.unwrap();
+    assert_eq!(resumed.status, WorkflowStatus::NeedsRecovery);
+    assert_eq!(resumed.node("b").unwrap().dispatches, 1);
+}
+
+#[tokio::test]
+async fn resume_that_changes_nothing_does_not_grow_the_event_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileWorkflowStore::new(dir.path());
+    let mut tasks = WorkflowTasks::new();
+    tasks
+        .register(FnWorkflowTask::new(
+            definition("task", TaskRecovery::Pure),
+            |_: NodeContext, _: CancelToken| async { Ok(NodeOutcome::pure(json!(1))) },
+        ))
+        .unwrap();
+    let pause = CancelToken::new();
+    pause.cancel();
+    let seen = std::sync::Mutex::new(Vec::new());
+    let sink = |event: &WorkflowEvent| seen.lock().unwrap().push(event.clone());
+    let runner = WorkflowRunner::new(&tasks, &store)
+        .with_pause(&pause)
+        .with_events(&sink);
+    let paused = runner
+        .start(
+            "idle",
+            WorkflowDefinition::new([WorkflowNode::new("a", "task")]),
+            Value::Null,
+        )
+        .await
+        .unwrap();
+    assert_eq!(paused.status, WorkflowStatus::Paused);
+    let logged = paused.events.len();
+    assert_eq!(*seen.lock().unwrap(), paused.events);
+    for _ in 0..3 {
+        let again = runner.resume("idle").await.unwrap();
+        assert_eq!(again.status, WorkflowStatus::Paused);
+        assert_eq!(again.events.len(), logged);
+    }
+    assert_eq!(*seen.lock().unwrap(), paused.events);
+    let done = WorkflowRunner::new(&tasks, &store)
+        .with_events(&sink)
+        .resume("idle")
+        .await
+        .unwrap();
+    assert_eq!(done.status, WorkflowStatus::Completed);
+    assert_eq!(*seen.lock().unwrap(), done.events);
+}

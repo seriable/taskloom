@@ -92,8 +92,16 @@ budget allocation.
 Manual uncertain nodes use `WorkflowRunner::reconcile` with `RecordOutput`
 (observed result/cost/usage) or `Abort`. `RetryPure` is restricted to pure
 nodes in nonterminal workflows. Reconciliation records actor, note and time.
+Every entry point that takes ownership (`resume` and `reconcile`) first
+recovers a workflow whose previous controller died while `Running`: it charges
+the downtime and turns the nodes that controller left running into `Pending`
+(pure/durable) or `Uncertain` (manual), so reconciling one node never hides
+another node's possible effect. A stored state with running nodes under any
+status other than `Running` is rejected as corrupt.
 Durable-child effects cannot be overridden through the parent's manual
-reconciliation API.
+reconciliation API. A native agent node whose child run has finished without a
+usable final answer fails, naming the child run; a finished child cannot
+change, so it is not re-dispatched.
 
 ## Limits, pause and cancellation
 
@@ -128,6 +136,16 @@ their separate format 2. Both reject unsupported versions and corrupt state.
 File roots are captured absolutely at construction. Persisted messages,
 outputs, exact inputs and events may contain private data; host access control
 and retention remain the application's responsibility.
+
+The event log is not capped: load-time validation checks every node's
+dispatch counter against its `NodeStarted` events, so dropping old events
+would weaken corruption detection. Its growth is bounded instead. A resume
+that records nothing and ends in the status it started from (for example a
+paused workflow resumed with the pause signal still set) leaves the log
+unchanged and emits nothing to the event sink. Every other invocation either
+dispatches (bounded by `max_dispatches`), changes status or resolves an
+uncertain node, so the log grows with dispatches and node count, plus one
+`Resumed` event per controller that died before recording anything else.
 
 ## Bounded planner/executor/writer/reviewer flow
 

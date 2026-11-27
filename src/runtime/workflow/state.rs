@@ -377,6 +377,14 @@ impl WorkflowState {
         if (self.status == WorkflowStatus::Running) != self.invocation_started_unix_ms.is_some() {
             return Err(invalid("workflow ownership clock does not match status"));
         }
+        if self.status != WorkflowStatus::Running
+            && self
+                .nodes
+                .iter()
+                .any(|node| node.status == NodeStatus::Running)
+        {
+            return Err(invalid("stopped workflow has running nodes"));
+        }
         self.budget()?;
         Ok(())
     }
