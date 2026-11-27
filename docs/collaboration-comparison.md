@@ -153,9 +153,68 @@ tests, the Rust 1.86 example check, strict example Clippy, Python compilation an
 source-only package listing also passed. No runtime API, default feature or
 production permission/budget contract changed in this evaluation increment.
 
+## Actual DeerFlow natural-research adapter
+
 DeerFlow's pinned source `acafc36dfe654af9f10c35923a51f05efa64cd7f`
-(2.3.0-dev) has been fetched and its isolated environment is being prepared.
-No DeerFlow native comparison result is claimed here. The earlier basic
+(2.3.0-dev) was installed in an isolated Python 3.12 environment; `pip check`
+passed. The adapter executes its real `DeerFlowClient.stream` and native
+lead/subagent machinery, checking the installed client hash against the
+checkout. Actual upstream RBAC offers only read-only `knowledge_search` and
+the framework's `task` delegation tool; skills, memory, title, summarization,
+task continuity, unrelated tools and external tracing are disabled. An owned
+worker runs in a fresh cwd/home/extensions/skills environment. The final probe
+also disables dotenv discovery before importing the framework. Earlier two
+exploratory probes did not set that guard and remain separately qualified.
+
+The corresponding V5 parallel-policy-brief task uses the same Qwen3-4B native
+model, task goal, corpus, 1024-token output allowance and explicit zero API
+prices/one-micro-USD cap. A bounded loopback recorder permits at most 64 native
+requests (the reference's four roles times sixteen), two concurrent subagents,
+three delegations, sixteen turns per subagent and a 300-second campaign window.
+Reservations are recorded before dispatch; unknown responses remain visible.
+The local dummy key is named `TASKLOOM_LOCAL_API_KEY`. Hardware, electricity
+and this chat are not metered. The adapter never calls paid remote providers.
+
+The final guarded probe scored **0/1** on the declared collaboration gate. It
+completed one native knowledge call and three native model requests, including
+one bounded format repair. Final SDK exact-locator/citation/source-coverage
+validation passed, but no delegated analyst or independent reviewer was
+observed. The model chose direct research despite `task` being advertised and
+the host requesting delegation. This is a failure of this trial, not proof
+that DeerFlow cannot delegate. Actual usage was 14,872 input / 412 output
+tokens, 33,844 ms campaign wall time, at declared zero API fee. The first probe
+failed ordinal citation format; the second passed format repair but also lacked
+delegation. All failures and raw native traffic are retained in
+`acceptance/p0-deerflow-20261128.json`.
+
+This adapter uses DeerFlow's native system prompts, tools, natural delegation
+and provider wrappers; it is not identical conditioning or a speed/leadership
+ranking. Taskloom's corresponding fixed DAG passed; this alone establishes no
+overall framework advantage. Shared knowledge uses Taskloom lexical retrieval,
+so framework-native retrieval quality is not compared. Two bounded final-format
+repairs disable further delegation. Verification uses actual recorded native
+tool calls through an SDK-validator bridge, not an invented Taskloom run or
+billing ledger; zero placeholder bridge usage is excluded from cost evidence.
+Exact quote matching is separate from claim support/factual truth. No blind
+factual or semantic-quality verdict is asserted. Exact staged PEER and submitted
+draft-review lifecycles remain visibly **not comparable** in this adapter.
+
+```powershell
+git clone https://github.com/bytedance/deer-flow.git target/competitors/deer-flow
+git -C target/competitors/deer-flow checkout acafc36dfe654af9f10c35923a51f05efa64cd7f
+python3.12 -m venv target/competitors/deerflow-venv
+target/competitors/deerflow-venv/Scripts/python.exe -m pip install ./target/competitors/deer-flow/backend/packages/extension-api ./target/competitors/deer-flow/backend/packages/harness
+target/competitors/deerflow-venv/Scripts/python.exe -m pip check
+target/competitors/deerflow-venv/Scripts/python.exe examples/benchmarks/deerflow_compare.py target/native-collaboration-v5 target/deerflow-v5 --taskloom target/debug/taskloom.exe --verifier target/debug/examples/benchmark_citations.exe --source target/competitors/deer-flow
+```
+
+The reference campaign must be a completed V5 native campaign with its explicit
+loopback generation configuration; start that exact native model first. Worker
+events, responses, knowledge, prompts, control-source hashes, installed versions
+and validation attempts are saved below the fresh output directory. Vendored
+frameworks, dependencies, weights and binaries stay under ignored `target/`.
+
+The earlier basic
 LangGraph comparison remains 5/12 against Taskloom 5/12 with Qwen3-1.7B; a
 matching complex-agent comparison is still required. Broader realistic/long
 tasks, native failure repair, multi-agent process-death recovery and retrieval
