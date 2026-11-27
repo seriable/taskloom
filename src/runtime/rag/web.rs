@@ -78,6 +78,8 @@ impl WebClient {
     /// or external references are executed/fetched. DNS addresses are checked
     /// and pinned for each hop; proxies and automatic redirects are disabled.
     pub async fn fetch(&self, url: &str, id: &str, title: &str) -> Result<Document, RuntimeError> {
+        // `timeout_ms` bounds the whole fetch, including HTML extraction.
+        let deadline = std::time::Instant::now() + Duration::from_millis(self.access.timeout_ms);
         let fetched = self.get(url, HeaderMap::new(), true).await?;
         let text = String::from_utf8(fetched.bytes.clone())
             .map_err(|_| invalid("web source must be UTF-8"))?;
@@ -98,7 +100,13 @@ impl WebClient {
         let text = match mime.as_str() {
             "text/plain" | "text/markdown" => text,
             "text/html" | "application/xhtml+xml" => {
-                extract_html(&text, self.access.max_text_bytes)?
+                let max = self.access.max_text_bytes;
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                let task = tokio::task::spawn_blocking(move || extract_html(&text, max, deadline));
+                tokio::time::timeout(remaining, task)
+                    .await
+                    .map_err(|_| invalid("HTML extraction exceeded total deadline"))?
+                    .map_err(|_| invalid("HTML extraction task failed"))??
             }
             _ => {
                 return Err(invalid(
@@ -308,26 +316,167 @@ fn public_ip(ip: IpAddr) -> bool {
         }
     }
 }
-fn extract_html(html: &str, max: usize) -> Result<String, RuntimeError> {
+/// Maximum element nesting accepted by HTML extraction.
+const MAX_HTML_DEPTH: usize = 512;
+/// Cheap linear pre-parse estimate of element nesting. The HTML parser's
+/// scope checks cost O(depth) per tag, so deep input must be refused before
+/// parsing; once started, parsing cannot be interrupted. Optional-end-tag
+/// elements (p, li, td, ...) and raw-text elements do not count; self-closing
+/// syntax is honoured only inside svg/math, as the HTML parser does.
+fn nesting_exceeds(html: &str, cap: usize) -> bool {
+    const VOID: &[&str] = &[
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
+        "track", "wbr", "param", "keygen",
+    ];
+    const OPTIONAL_END: &[&str] = &[
+        "p", "li", "dt", "dd", "option", "optgroup", "tr", "td", "th", "thead", "tbody", "tfoot",
+        "rb", "rt", "rp", "rtc", "colgroup", "caption", "html", "head", "body",
+    ];
+    const RAW_TEXT: &[&str] = &[
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript",
+    ];
+    let lower = html.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let find = |from: usize, needle: &[u8]| {
+        bytes
+            .get(from..)
+            .and_then(|tail| tail.windows(needle.len()).position(|w| w == needle))
+            .map(|at| from + at)
+    };
+    let mut stack: Vec<&str> = Vec::new();
+    let mut foreign = 0usize;
+    let mut at = 0usize;
+    while let Some(open) = find(at, b"<") {
+        at = open + 1;
+        if bytes[at..].starts_with(b"!--") {
+            match find(at + 3, b"-->") {
+                Some(end) => at = end + 3,
+                None => return false,
+            }
+            continue;
+        }
+        let closing = bytes.get(at) == Some(&b'/');
+        let start = at + usize::from(closing);
+        let mut end = start;
+        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'-') {
+            end += 1;
+        }
+        let Some(close) = find(end, b">") else {
+            return false;
+        };
+        if end == start {
+            // `<!doctype>`, `<?...>` and stray `<` are not elements.
+            at = if matches!(bytes.get(at), Some(b'!' | b'?')) {
+                close + 1
+            } else {
+                at
+            };
+            continue;
+        }
+        let name = &lower[start..end];
+        at = close + 1;
+        if closing {
+            if let Some(position) = stack.iter().rposition(|open| *open == name) {
+                foreign -= stack[position..]
+                    .iter()
+                    .filter(|n| matches!(**n, "svg" | "math"))
+                    .count();
+                stack.truncate(position);
+            }
+            continue;
+        }
+        if VOID.contains(&name) || OPTIONAL_END.contains(&name) {
+            continue;
+        }
+        if foreign > 0 && bytes[close - 1] == b'/' {
+            continue;
+        }
+        if RAW_TEXT.contains(&name) {
+            match find(at, format!("</{name}").as_bytes()) {
+                Some(end) => at = end,
+                None => return false,
+            }
+            continue;
+        }
+        if matches!(name, "svg" | "math") {
+            foreign += 1;
+        }
+        stack.push(name);
+        if stack.len() > cap {
+            return true;
+        }
+    }
+    false
+}
+/// Synchronous (CPU-bound) extraction; callers run it on a blocking thread.
+/// The traversal checks `deadline` so abandoned work stops promptly.
+fn extract_html(
+    html: &str,
+    max: usize,
+    deadline: std::time::Instant,
+) -> Result<String, RuntimeError> {
+    if nesting_exceeds(html, MAX_HTML_DEPTH) {
+        return Err(invalid("HTML nesting exceeds depth limit"));
+    }
+    if std::time::Instant::now() >= deadline {
+        return Err(invalid("HTML extraction exceeded total deadline"));
+    }
     let parsed = scraper::Html::parse_document(html);
     let selector = scraper::Selector::parse("body").expect("static selector");
     let body = parsed
         .select(&selector)
         .next()
         .ok_or_else(|| invalid("HTML body missing"))?;
+    let expired = || invalid("HTML extraction exceeded total deadline");
+    if std::time::Instant::now() >= deadline {
+        return Err(expired());
+    }
     let mut output = String::new();
-    for node in body.descendants() {
-        if let scraper::node::Node::Text(text) = node.value() {
-            if node.ancestors().any(|n| {
-                n.value().as_element().is_some_and(|e| {
-                    matches!(
-                        e.name(),
-                        "script" | "style" | "noscript" | "template" | "iframe" | "svg"
-                    )
-                })
-            }) {
+    // Single iterative pre-order pass. Excluded subtrees are skipped whole,
+    // so no node re-walks its ancestors (linear, not quadratic, in depth).
+    let root = *body;
+    let mut depth = 1usize;
+    let mut next = root.first_child();
+    let mut visited = 0usize;
+    while let Some(node) = next {
+        visited += 1;
+        if visited % 4096 == 0 && std::time::Instant::now() >= deadline {
+            return Err(expired());
+        }
+        let excluded = node.value().as_element().is_some_and(|e| {
+            matches!(
+                e.name(),
+                "script" | "style" | "noscript" | "template" | "iframe" | "svg"
+            )
+        });
+        if !excluded {
+            if let Some(child) = node.first_child() {
+                // The pre-parse estimate omits optional-end-tag elements;
+                // allow for them here while still bounding the tree.
+                if depth >= 2 * MAX_HTML_DEPTH {
+                    return Err(invalid("HTML nesting exceeds depth limit"));
+                }
+                depth += 1;
+                next = Some(child);
                 continue;
             }
+        }
+        // Advance to the next sibling, climbing (amortized O(1)) as needed.
+        let mut current = node;
+        next = loop {
+            if let Some(sibling) = current.next_sibling() {
+                break Some(sibling);
+            }
+            depth -= 1;
+            if depth == 0 {
+                break None;
+            }
+            current = current.parent().expect("node below body has a parent");
+        };
+        if excluded {
+            continue;
+        }
+        if let scraper::node::Node::Text(text) = node.value() {
             for word in text.text.split_whitespace() {
                 if output
                     .len()
@@ -509,6 +658,43 @@ impl Tool for WebSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deeply_nested_html_is_rejected_quickly_and_exclusions_are_skipped() {
+        let far = std::time::Instant::now() + Duration::from_secs(60);
+        let deep = format!(
+            "<html><body>{}text{}</body></html>",
+            "<div>".repeat(100_000),
+            "</div>".repeat(100_000)
+        );
+        let started = std::time::Instant::now();
+        let error = extract_html(&deep, 1024, far).unwrap_err().to_string();
+        assert!(error.contains("depth limit"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            started.elapsed()
+        );
+        let nested = format!(
+            "<body>{}<p>kept <script>dropped</script>words</p><svg><text>no</text></svg>{}<i>tail</i></body>",
+            "<span>".repeat(300),
+            "</span>".repeat(300)
+        );
+        assert_eq!(extract_html(&nested, 1024, far).unwrap(), "kept words tail");
+        let list = format!("<body><ul>{}</ul><p>a<p>b</body>", "<li>item".repeat(5_000));
+        assert!(extract_html(&list, 64 * 1024, far).is_ok());
+        let foreign = format!("<body><svg>{}</svg>ok</body>", "<path/>".repeat(5_000));
+        assert_eq!(extract_html(&foreign, 1024, far).unwrap(), "ok");
+        let hidden = format!(
+            "<body><script>{}</script>{}x</body>",
+            "<div>".repeat(5_000),
+            "<b>".repeat(100)
+        );
+        assert_eq!(extract_html(&hidden, 1024, far).unwrap(), "x");
+        let self_closing = format!("<body>{}</body>", "<div/>".repeat(100_000));
+        assert!(extract_html(&self_closing, 1024, far).is_err());
+        let past = std::time::Instant::now();
+        assert!(extract_html("<body>late</body>", 1024, past).is_err());
+    }
     #[test]
     fn private_reserved_and_mapped_destinations_fail_closed() {
         for ip in [
