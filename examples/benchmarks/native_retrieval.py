@@ -45,6 +45,10 @@ def host(executable, config, root):
         except urllib.error.HTTPError as error:
             raise RuntimeError(f"HTTP {error.code}: {error.read(8192).decode()}") from error
 
+    # Owned process handle for explicit OS-process interruption campaigns.
+    # This never refers to an independently running user process.
+    api.host_process = process
+
     try:
         for _ in range(150):
             if process.poll() is not None:

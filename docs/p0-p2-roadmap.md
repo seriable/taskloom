@@ -56,6 +56,17 @@ process-death coverage, DeerFlow/agentUniverse results and independent claim
 support/factual scoring remain open. See `native-evaluation.md` for commands,
 model/hardware provenance, failed trials and interpretation limits.
 
+2026-11-28 increment: opt-in durable final-output contracts now reject invalid
+JSON/citations before success and bound repairs within the same budget and
+narrowed read-only permissions. Native collaboration v2 still failed 0/3 in
+both retained campaigns; two analyst outputs passed exact provenance, including
+one semantically empty placeholder. Claims are therefore still a separate gate.
+An actual native-generation process kill/restart retained the crash-time
+reservation and one uncertain attempt, emitted explicit model recovery and
+performed no work on terminal reentry. Its second generation was truncated and
+failed; no native uncertain-tool-effect or multi-agent process-death acceptance
+is claimed. See `final-output.md` and `acceptance/p0-output-20261128.json`.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,

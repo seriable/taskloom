@@ -101,6 +101,17 @@ pub enum RunEventKind {
         omitted_messages: usize,
         input_bytes: usize,
     },
+    OutputRejected {
+        step: usize,
+        validator: String,
+        attempt: usize,
+        detail: String,
+        repair: bool,
+    },
+    OutputValidated {
+        step: usize,
+        validator: String,
+    },
     ApprovalRequested {
         request_id: String,
         call_id: String,
@@ -181,6 +192,7 @@ pub struct AgentLoop<'a> {
     events: Option<&'a EventSink<'a>>,
     pub(super) context_policy: Option<ContextPolicy>,
     pub(super) compressor: &'a dyn ContextCompressor,
+    pub(super) output_policy: Option<super::FinalOutputPolicy>,
 }
 
 static EXTRACTIVE: ExtractiveCompressor = ExtractiveCompressor;
@@ -200,6 +212,7 @@ impl<'a> AgentLoop<'a> {
             events: None,
             context_policy: None,
             compressor: &EXTRACTIVE,
+            output_policy: None,
         }
     }
 
@@ -239,6 +252,24 @@ impl<'a> AgentLoop<'a> {
     pub fn with_context_compressor(mut self, compressor: &'a dyn ContextCompressor) -> Self {
         self.compressor = compressor;
         self
+    }
+    /// An explicit final-output contract. Repairs use the original run's
+    /// bounded model budget and a narrowed, read-only tool policy.
+    pub fn with_output_policy(mut self, policy: super::FinalOutputPolicy) -> Self {
+        self.output_policy = Some(policy);
+        self
+    }
+    pub fn without_output_policy(mut self) -> Self {
+        self.output_policy = None;
+        self
+    }
+    pub(super) fn active_policy(&self, report: &RunReport) -> ToolPolicy {
+        match &self.output_policy {
+            Some(policy) if super::output::rejected_count(report) > 0 => {
+                policy.repair_policy(&self.policy)
+            }
+            _ => self.policy.clone(),
+        }
     }
 
     pub async fn run(&self, run_id: impl Into<String>, messages: Vec<Message>) -> RunReport {
@@ -310,7 +341,36 @@ impl<'a> AgentLoop<'a> {
         report
     }
 
+    pub(super) fn validate_output_policy(&self) -> Result<(), RuntimeError> {
+        if let Some(policy) = &self.output_policy {
+            policy.validate()?;
+            if policy.max_repairs() > 0 && self.limits.max_cost_micros.is_none() {
+                return Err(RuntimeError::Configuration(
+                    "output repairs require an explicit run model-spend cap".into(),
+                ));
+            }
+            if let super::FinalOutputPolicy::CitedReport {
+                retrieval_tools, ..
+            } = policy
+            {
+                for name in retrieval_tools {
+                    if !self
+                        .tools
+                        .definition(name)
+                        .is_some_and(|d| self.policy.permits(d) && d.effect == ToolEffect::ReadOnly)
+                    {
+                        return Err(RuntimeError::Configuration(
+                            "citation validation requires permitted read-only retrieval tools"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     pub(super) fn validate(&self, report: &RunReport) -> Result<(), RuntimeError> {
+        self.validate_output_policy()?;
         if let Some(policy) = &self.context_policy {
             policy.validate()?;
             if self.compressor.id().trim().is_empty() {
@@ -380,7 +440,8 @@ impl<'a> AgentLoop<'a> {
             // Give deadline/cancellation priority after a sink notification,
             // even when the following model future would complete immediately.
             tokio::task::yield_now().await;
-            let tools = self.tools.definitions(&self.policy);
+            let active_policy = self.active_policy(report);
+            let tools = self.tools.definitions(&active_policy);
             let messages = self.prepare_context(report, &tools)?;
             if let Some(record) = report.contexts.last() {
                 self.emit(
@@ -428,6 +489,42 @@ impl<'a> AgentLoop<'a> {
             let calls = turn.tool_calls.clone();
             report.messages.push(Message::Assistant { turn });
             if calls.is_empty() {
+                if let Some(policy) = &self.output_policy {
+                    let validator = policy.identity()?;
+                    match policy.check(report) {
+                        Ok(()) => self.emit(
+                            report,
+                            started,
+                            RunEventKind::OutputValidated {
+                                step: report.steps,
+                                validator,
+                            },
+                        ),
+                        Err(detail) => {
+                            let attempt = super::output::rejected_count(report) + 1;
+                            let repair = attempt <= policy.max_repairs();
+                            let detail = super::output::bounded_detail(&detail);
+                            self.emit(
+                                report,
+                                started,
+                                RunEventKind::OutputRejected {
+                                    step: report.steps,
+                                    validator,
+                                    attempt,
+                                    detail: detail.clone(),
+                                    repair,
+                                },
+                            );
+                            if repair {
+                                report.messages.push(super::output::feedback(&detail));
+                                continue;
+                            }
+                            return Err(RuntimeError::Protocol(format!(
+                                "final-output validation rejected the answer: {detail}"
+                            )));
+                        }
+                    }
+                }
                 return Ok(StopReason::Completed);
             }
             if calls.len() > self.limits.max_tool_calls.saturating_sub(report.tool_calls) {
@@ -442,7 +539,7 @@ impl<'a> AgentLoop<'a> {
                         call.id
                     )));
                 }
-                prepared.push(self.tools.prepare(call, &self.policy)?);
+                prepared.push(self.tools.prepare(call, &active_policy)?);
             }
             for (call, tool) in calls.into_iter().zip(prepared) {
                 tokio::task::yield_now().await;

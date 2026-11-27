@@ -16,6 +16,7 @@ mod durable;
 mod executor;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+mod output;
 pub mod rag;
 #[cfg(feature = "sandbox")]
 pub mod sandbox;
@@ -32,6 +33,7 @@ pub use durable::{CancelReason, DurableAgent};
 pub use executor::{
     AgentLoop, EventSink, RunEvent, RunEventKind, RunLimits, RunReport, StopReason,
 };
+pub use output::FinalOutputPolicy;
 pub use session::{
     FileSessionStore, Session, SessionBinding, SessionInput, SessionManager, SessionRun,
     SessionStore, SessionTurn, SESSION_VERSION,

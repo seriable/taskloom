@@ -235,3 +235,60 @@ DeerFlow and agentUniverse adapters/results, cross-framework complex-agent cases
 independent factual/entailment scoring and the remaining lifecycle scenarios are
 still required by the active P0–P2 Goal. Neither this document nor a failed local
 campaign closes those gates.
+
+## Host output validation and real process interruption (2026-11-28)
+
+`collaboration-v2.json` opts analysts/writers into the host's final-output
+contract, with two bounded repairs and only permitted knowledge reads during
+repair. Writers must retrieve their own evidence and cite two chunks. This
+changes both role contracts and the writer prompt; do not treat v1/v2 as a
+same-conditions model-score comparison. See `final-output.md` for configuration,
+permissions, budget and migration details.
+
+```powershell
+python examples/benchmarks/native_collaboration.py target/native-collaboration-v2 --suite examples/benchmarks/collaboration-v2.json --config local-provider.json --taskloom target/debug/taskloom.exe --verifier target/debug/examples/benchmark_citations.exe
+```
+
+Both retained native v2 campaigns scored **0/3**. The second, final campaign
+used bounded diagnostics showing actual retrieved IDs. Each observed two
+concurrent analysts; 24 total model steps, six tool attempts, 13 rejected
+outputs, ten admitted repairs and two validated analyst outputs were recorded.
+Incorrect IDs and extra trailing answer content exhausted the repair limit;
+the failed analysts prevented writer/reviewer execution. No native v2
+reviewer-driven rewrite was reached. Output repairs do not make an unreliable
+model reliable by definition, and no pass is fabricated by replacing IDs.
+
+A separate session-assisted, visible-output audit of the two validated analyst
+outputs illustrates the distinction: one accurately repeated the recovery
+policy, while the other returned the placeholder prose `concise finding with
+[[...]] markers` with a valid budget quotation. The latter passes exact
+provenance but supplies no substantive finding. This is disclosed current-chat
+inspection, not an independent or blind factual score, a new native request,
+or competitor evidence. Broader claim-support acceptance remains open.
+
+`native_process_recovery.py` adds an actual OS-process kill, using an owned
+Taskloom child and an exclusively observed official Transformers server log.
+Run it separately from other native traffic:
+
+```powershell
+python examples/benchmarks/native_process_recovery.py target/native-process-recovery --config local-provider.json --taskloom target/debug/taskloom.exe --model-log target/local-generation.log
+```
+
+The retained run observed server receipt and a durable `ModelInFlight` cursor,
+killed the caller process, archived its crash-time reservation journal and
+started a new host on the same state. The journal retained one in-flight
+attempt; restart recovery emitted `RecoveredModel` and preserved one uncertain
+attempt while admitting a new request under the original explicit zero-price,
+zero-micro-USD cap. Generation can repeat after process death; this is not
+exactly-once generation. Two native requests were observed in total. The second
+used 58 input/1024 output tokens and ended in `ModelError` because generation
+was truncated. The first request's usage remains unknown. Terminal reentry
+changed neither state nor request count. The control checks passed in 61,775 ms;
+task/answer quality did not pass. No tools, approvals, uncertain effects or
+multi-agent process death were exercised by this isolated check.
+
+The acceptance manifest `acceptance/p0-output-20261128.json` preserves both
+failed campaigns, the process-control result, artifact/source digests and check
+boundaries. All local API prices were explicitly zero, with
+`TASKLOOM_LOCAL_API_KEY` as the dummy credential environment; hardware,
+electricity and chat usage remain outside the fee record. P0-P2 is unfinished.

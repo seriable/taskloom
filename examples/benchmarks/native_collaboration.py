@@ -34,7 +34,8 @@ def run_case(case, api, root, verifier):
         request["definition"] = {"nodes": branches + [node("draft", "writer", [b["id"] for b in case["branches"]]),
             node("review", "reviewer", ["draft"], select={"draft": {"node": "draft", "pointer": ""}})]}
         final_node = "draft"
-    result = {"id": case["id"], "request": request, "failures": [], "children": [], "model_steps": 0, "tool_attempts": 0}
+    result = {"id": case["id"], "request": request, "failures": [], "children": [], "model_steps": 0, "tool_attempts": 0,
+              "output_rejections": 0, "output_repairs_admitted": 0, "output_validations": 0}
     directory = root / case["id"]
     directory.mkdir()
     try:
@@ -59,6 +60,13 @@ def run_case(case, api, root, verifier):
                 result["children"].append(child)
                 result["model_steps"] += child["report"]["steps"]
                 result["tool_attempts"] += child["report"]["tool_calls"]
+                for event in child["report"]["events"]:
+                    kind = event["kind"]
+                    if kind["type"] == "output_rejected":
+                        result["output_rejections"] += 1
+                        result["output_repairs_admitted"] += int(kind["repair"])
+                    elif kind["type"] == "output_validated":
+                        result["output_validations"] += 1
                 search_ids = {t["call"]["id"] for t in child["tool_steps"] if t["call"]["name"] == "knowledge_search"}
                 for message in child["report"]["messages"]:
                     if message["role"] == "tool" and message["result"]["call_id"] in search_ids and not message["result"]["is_error"]:
@@ -92,11 +100,13 @@ def run_case(case, api, root, verifier):
         if case["kind"] == "peer" and isinstance(final, dict):
             final = final.get("answer")
         result["final_output"] = final
-        if not isinstance(final, str):
+        if not isinstance(final, (str, dict)):
             result["failures"].append("missing final report text")
         else:
             try:
-                report = json.loads(final)
+                # Validated role output is a typed JSON object. Legacy Text
+                # output still requires exact JSON; never strip fences/IDs.
+                report = json.loads(final) if isinstance(final, str) else final
                 for phrase in case["required_phrases"]:
                     if phrase.lower() not in report["text"].lower():
                         result["failures"].append("missing requested topic: " + phrase)
@@ -143,7 +153,7 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] != 1 or not suite["cases"]:
+    if suite["version"] not in {1, 2} or not suite["cases"]:
         raise ValueError("unsupported suite")
     ids = [case["id"] for case in suite["cases"]]
     if len(set(ids)) != len(ids) or any(not 1 <= len(value) <= 64 or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in value) for value in ids):

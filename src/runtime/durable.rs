@@ -534,6 +534,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 .context_policy
                 .as_ref()
                 .map(|_| self.agent.compressor.id().into()),
+            output_policy: self.agent.output_policy.clone(),
         }
     }
 
@@ -582,6 +583,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         self.agent.validate(&state.report)?;
         validate_history(&state.report.messages)?;
         self.event(&mut state, &clock, RunEventKind::Started);
+        if self.agent.output_policy.is_some() {
+            self.check_capacity(&state, lease, 0)?;
+        }
         let budget = RunBudget::restore(
             state.report.budget.clone(),
             Arc::new(LeaseJournal(Arc::clone(lease))),
@@ -604,7 +608,16 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         if state.report.run_id != run_id {
             return Err(corrupt("store returned a checkpoint for a different run"));
         }
-        self.agent.validate(&state.report)?;
+        if strict_config {
+            self.agent.validate(&state.report)?;
+        } else {
+            // Administrative cancellation/rejection must remain possible
+            // when a host removes or changes an output-validation tool.
+            self.agent
+                .clone()
+                .without_output_policy()
+                .validate(&state.report)?;
+        }
         if strict_config && state.config != self.configuration() {
             return Err(RuntimeError::Configuration(
                 "resume configuration or tool definitions differ from the saved run".into(),
@@ -735,9 +748,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         // until its checkpoint and the largest legal reply have been admitted.
         let mut candidate = state.clone();
         candidate.report.steps += 1;
-        let messages = self
-            .agent
-            .prepare_context(&mut candidate.report, &candidate.config.tools)?;
+        let active_policy = self.agent.active_policy(&candidate.report);
+        let tools = self.agent.tools.definitions(&active_policy);
+        let messages = self.agent.prepare_context(&mut candidate.report, &tools)?;
         let max_definition = candidate
             .config
             .tools
@@ -768,7 +781,12 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 serde_json::to_vec(&self.agent.model_id)
                     .map_err(|e| corrupt(&e.to_string()))?
                     .len(),
-            );
+            )
+            .saturating_add(if self.agent.output_policy.is_some() {
+                super::output::OUTPUT_FEEDBACK_RESERVE
+            } else {
+                0
+            });
         self.check_capacity(&candidate, lease, reserve)?;
         *state = candidate;
         self.event(
@@ -799,7 +817,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             label: self.agent.label.clone(),
             model: self.agent.model_id.clone(),
             messages,
-            tools: state.config.tools.clone(),
+            tools,
             temperature: self.agent.temperature,
             max_output_tokens: self.agent.max_output_tokens,
         };
@@ -884,6 +902,44 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             .messages
             .push(Message::Assistant { turn: output.turn });
         if calls.is_empty() {
+            if let Some(policy) = &self.agent.output_policy {
+                let validator = policy.identity()?;
+                match policy.check(&state.report) {
+                    Ok(()) => self.event(
+                        state,
+                        clock,
+                        RunEventKind::OutputValidated {
+                            step: state.report.steps,
+                            validator,
+                        },
+                    ),
+                    Err(detail) => {
+                        let attempt = super::output::rejected_count(&state.report) + 1;
+                        let repair = attempt <= policy.max_repairs();
+                        let detail = super::output::bounded_detail(&detail);
+                        self.event(
+                            state,
+                            clock,
+                            RunEventKind::OutputRejected {
+                                step: state.report.steps,
+                                validator,
+                                attempt,
+                                detail: detail.clone(),
+                                repair,
+                            },
+                        );
+                        if repair {
+                            state.report.messages.push(super::output::feedback(&detail));
+                            // Invalid answer, feedback, repair phase and settled
+                            // model budget are saved together before more work.
+                            return self.save(state, lease, budget, clock).await;
+                        }
+                        return Err(RuntimeError::Protocol(format!(
+                            "final-output validation rejected the answer: {detail}"
+                        )));
+                    }
+                }
+            }
             state.cursor = RunCursor::Finished;
             return self
                 .stop(
@@ -919,7 +975,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         }
         let mut batch = Vec::new();
         for call in calls {
-            if let Err(error) = self.agent.tools.prepare(&call, &self.agent.policy) {
+            if let Err(error) = self.agent.tools.prepare(&call, &active_policy) {
                 state.cursor = RunCursor::Finished;
                 return Err(error);
             }
@@ -988,7 +1044,10 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         let step = &state.tool_steps[index];
         let call = step.call.clone();
         let effect = step.definition.effect;
-        let prepared = self.agent.tools.prepare(&call, &self.agent.policy)?;
+        let prepared = self
+            .agent
+            .tools
+            .prepare(&call, &self.agent.active_policy(&state.report))?;
         let request = step.request(&state.report.run_id, step.attempts + 1)?;
         let request_bytes = serde_json::to_vec(&request)
             .map_err(|e| corrupt(&e.to_string()))?

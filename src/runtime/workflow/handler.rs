@@ -167,7 +167,14 @@ impl<'a> WorkflowTasks<'a> {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WorkflowOutput {
     Text,
-    Json { schema: Value },
+    Json {
+        schema: Value,
+    },
+    /// Validate before the durable child can complete. Optional repairs are
+    /// bounded within that same child and never repeat effectful tools.
+    Validated {
+        policy: crate::runtime::FinalOutputPolicy,
+    },
 }
 
 /// A model/tool role backed by a durable child run. JSON output is decoded and
@@ -191,12 +198,23 @@ impl<'a, 'model> AgentWorkflowTask<'a, 'model> {
         system: impl Into<String>,
         output: WorkflowOutput,
     ) -> Result<Self, RuntimeError> {
+        match &output {
+            WorkflowOutput::Validated { policy } => agent
+                .clone()
+                .with_output_policy(policy.clone())
+                .validate_output_policy()?,
+            _ => agent.validate_output_policy()?,
+        }
         let validator = match &output {
             WorkflowOutput::Text => None,
             WorkflowOutput::Json { schema } => Some(
                 jsonschema::validator_for(schema)
                     .map_err(|error| config(&format!("invalid workflow output schema: {error}")))?,
             ),
+            WorkflowOutput::Validated { policy } => {
+                policy.validate()?;
+                None
+            }
         };
         Ok(Self {
             name: name.into(),
@@ -213,6 +231,13 @@ impl<'a, 'model> AgentWorkflowTask<'a, 'model> {
         self.approvals = approvals;
         self
     }
+    fn configured_agent(&self) -> AgentLoop<'model> {
+        let agent = self.agent.clone();
+        match &self.output {
+            WorkflowOutput::Validated { policy } => agent.with_output_policy(policy.clone()),
+            _ => agent,
+        }
+    }
     /// Attribute a cancellation of the child run to an operator.
     pub fn with_cancel_reason(mut self, reason: std::sync::Arc<CancelReason>) -> Self {
         self.cancel_reason = Some(reason);
@@ -222,7 +247,8 @@ impl<'a, 'model> AgentWorkflowTask<'a, 'model> {
 
 impl WorkflowTask for AgentWorkflowTask<'_, '_> {
     fn definition(&self) -> Result<TaskDefinition, RuntimeError> {
-        let config = DurableAgent::new(self.agent, self.store)
+        let agent = self.configured_agent();
+        let config = DurableAgent::new(&agent, self.store)
             .with_approvals(self.approvals.clone())
             .configuration();
         Ok(TaskDefinition {
@@ -248,7 +274,7 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                 .cloned()
                 .or_else(crate::cancel::current)
                 .unwrap_or_default();
-            let agent = self.agent.clone().with_cancel(&child_cancel);
+            let agent = self.configured_agent().with_cancel(&child_cancel);
             let mut durable =
                 DurableAgent::new(&agent, self.store).with_approvals(self.approvals.clone());
             if let Some(reason) = &self.cancel_reason {
@@ -304,8 +330,10 @@ impl WorkflowTask for AgentWorkflowTask<'_, '_> {
                 };
                 let decoded = match &self.output {
                     WorkflowOutput::Text => Ok(Value::String(text.into())),
-                    WorkflowOutput::Json { .. } => serde_json::from_str::<Value>(text)
-                        .map_err(|error| format!("invalid JSON role output: {error}")),
+                    WorkflowOutput::Json { .. } | WorkflowOutput::Validated { .. } => {
+                        serde_json::from_str::<Value>(text)
+                            .map_err(|error| format!("invalid JSON role output: {error}"))
+                    }
                 };
                 match decoded.and_then(|value| {
                     if let Some(validator) = &self.validator {

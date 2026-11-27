@@ -71,7 +71,10 @@ impl Application {
                     policy
                         .allowed_tools
                         .retain(|name| role.tools.contains(name));
-                    (role, self.agent().with_policy(policy))
+                    (
+                        role,
+                        self.agent().without_output_policy().with_policy(policy),
+                    )
                 })
                 .collect(),
         }

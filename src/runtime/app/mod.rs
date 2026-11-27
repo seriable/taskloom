@@ -192,6 +192,7 @@ impl Application {
         });
         // Validate output schemas before the server begins accepting requests.
         let roles = app.role_agents();
+        app.agent().validate_output_policy()?;
         roles.tasks(&app.runs)?;
         Ok(app)
     }
@@ -202,12 +203,17 @@ impl Application {
         if self.config.sandbox.is_some() && !self.config.sandbox_top_level {
             policy.allowed_tools.remove("python_sandbox");
         }
-        AgentLoop::new(self.model.as_ref(), &self.tools, &self.config.model)
+        let agent = AgentLoop::new(self.model.as_ref(), &self.tools, &self.config.model)
             .with_policy(policy)
             .with_limits(self.config.limits.clone())
             .with_context(self.config.context.clone())
             .with_output_tokens(self.config.output_tokens)
-            .with_label(&self.label)
+            .with_label(&self.label);
+        if let Some(policy) = &self.config.final_output {
+            agent.with_output_policy(policy.clone())
+        } else {
+            agent
+        }
     }
     fn jobs(&self) -> Result<std::sync::MutexGuard<'_, BTreeMap<String, Job>>, RuntimeError> {
         self.jobs

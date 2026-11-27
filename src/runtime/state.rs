@@ -58,6 +58,8 @@ pub struct RunConfig {
     pub tools: Vec<ToolDefinition>,
     pub context: Option<ContextPolicy>,
     pub compressor_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_policy: Option<super::FinalOutputPolicy>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +265,12 @@ impl RunState {
             .get(..self.initial_message_count)
             .ok_or_else(|| invalid("initial input boundary is outside the transcript"))?;
         validate_history(initial).map_err(|error| invalid(&error.to_string()))?;
+        if let Some(policy) = &self.config.output_policy {
+            policy.validate().map_err(|e| invalid(&e.to_string()))?;
+            if policy.max_repairs() > 0 && self.config.limits.max_cost_micros.is_none() {
+                return Err(invalid("output repairs have no model-spend ceiling"));
+            }
+        }
         let mut context_steps = BTreeSet::new();
         let mut previous_context_step = 0;
         let mut previous_source_count = self.initial_message_count;
@@ -281,8 +289,17 @@ impl RunState {
             }
             previous_context_step = record.step;
             previous_source_count = record.source_message_count;
+            let tools = if super::output::repair_at_step(&self.report.events, record.step) {
+                self.config
+                    .output_policy
+                    .as_ref()
+                    .ok_or_else(|| invalid("repair context has no output policy"))?
+                    .repair_tools(&self.config.tools)
+            } else {
+                self.config.tools.clone()
+            };
             record
-                .restore(&self.report.messages, &self.config.tools, policy)
+                .restore(&self.report.messages, &tools, policy)
                 .map_err(|error| invalid(&error.to_string()))?;
         }
         if self.config.context.is_some() != self.config.compressor_id.is_some() {
@@ -311,6 +328,10 @@ impl RunState {
         let mut previous_ms = 0;
         let mut model_steps = 0;
         let mut tool_attempts = 0;
+        let mut rejections = 0;
+        let mut last_rejection_step = 0;
+        let mut validated_step = None;
+        let mut last_model_step = 0;
         for (index, event) in self.report.events.iter().enumerate() {
             if event.sequence != index
                 || event.elapsed_ms < previous_ms
@@ -322,8 +343,63 @@ impl RunState {
             if matches!(event.kind, super::RunEventKind::ModelStarted { .. }) {
                 model_steps += 1;
             }
+            match &event.kind {
+                super::RunEventKind::ModelStarted { step, .. } => last_model_step = *step,
+                super::RunEventKind::OutputRejected {
+                    step,
+                    validator,
+                    attempt,
+                    detail,
+                    repair,
+                } => {
+                    let policy = self
+                        .config
+                        .output_policy
+                        .as_ref()
+                        .ok_or_else(|| invalid("output rejection has no configured policy"))?;
+                    rejections += 1;
+                    if *step != last_model_step
+                        || *step <= last_rejection_step
+                        || *attempt != rejections
+                        || rejections > policy.max_repairs() + 1
+                        || *repair != (*attempt <= policy.max_repairs())
+                        || detail.len() > super::output::MAX_OUTPUT_DETAIL
+                        || validator != &policy.identity().map_err(|e| invalid(&e.to_string()))?
+                    {
+                        return Err(invalid(
+                            "output rejection counter, identity or bound mismatch",
+                        ));
+                    }
+                    last_rejection_step = *step;
+                }
+                super::RunEventKind::OutputValidated { step, validator } => {
+                    let policy = self
+                        .config
+                        .output_policy
+                        .as_ref()
+                        .ok_or_else(|| invalid("output validation has no configured policy"))?;
+                    if *step != last_model_step
+                        || validated_step.is_some()
+                        || validator != &policy.identity().map_err(|e| invalid(&e.to_string()))?
+                    {
+                        return Err(invalid("output validation identity or step mismatch"));
+                    }
+                    validated_step = Some(*step);
+                }
+                _ => {}
+            }
             if matches!(event.kind, super::RunEventKind::ToolStarted { .. }) {
                 tool_attempts += 1;
+            }
+        }
+        if self.status == RunStatus::Finished && self.report.stop_reason == StopReason::Completed {
+            if let Some(policy) = &self.config.output_policy {
+                if validated_step != Some(self.report.steps)
+                    || last_rejection_step >= self.report.steps
+                {
+                    return Err(invalid("completed output was not validated"));
+                }
+                policy.check(&self.report).map_err(|e| invalid(&e))?;
             }
         }
         let attempts = self

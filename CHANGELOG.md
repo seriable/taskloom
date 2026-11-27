@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Opt-in host final-output contracts validate exact JSON/schema or citations
+  before a durable run can complete. Bounded repair freezes the policy, keeps
+  the original budget and narrows tools to permitted read-only retrieval (none
+  for JSON). Workflow roles can return validated typed JSON. Existing default
+  behavior and serialized configs without a policy are preserved; exhaustive
+  Rust matches need the new output/event variants. Exact citation matching does
+  not establish factual correctness. See `docs/final-output.md`.
 - Native evaluation examples now exercise verified local Qwen weights, real
   embedding index lifecycle, actual DAG/PEER roles and an audited LangGraph
   comparison. Failures remain in the reports: basic trials scored 5/12 for
