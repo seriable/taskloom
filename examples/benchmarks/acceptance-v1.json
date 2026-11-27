@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "name": "taskloom controlled task acceptance v1",
+  "cases": [
+    {
+      "id": "research-approval",
+      "category": "research",
+      "prompt": "Search approval in the supplied knowledge. Explain what binds an approval to an operation. Return a JSON CitedReport with exact quotes and [[full_chunk_id]] markers. State the rule explicitly using the phrase exact tool name and arguments.",
+      "documents": [{"id":"approval","title":"Approval policy","source":"fixture:approval-policy-v1","text":"Approval is bound to the exact tool name and arguments. Saving approval does not execute a tool. Execution requires a separate resume.","metadata":{}}],
+      "checks": [{"type":"citations","min_sources":1,"required_documents":["approval"]},{"type":"final_contains","text":"exact tool name and arguments"},{"type":"tool_calls","name":"knowledge_search","min":1,"max":3}]
+    },
+    {
+      "id": "research-recovery",
+      "category": "research",
+      "prompt": "Search recovery in the supplied knowledge. Summarize interrupted write recovery in a JSON CitedReport. Include exact supporting quotes and [[full_chunk_id]] markers. Explicitly state that interrupted non-idempotent writes require reconciliation.",
+      "documents": [{"id":"recovery","title":"Recovery policy","source":"fixture:recovery-policy-v1","text":"Interrupted non-idempotent writes require reconciliation. Confirm the original operation's external outcome before deciding how to continue. Do not silently repeat the write.","metadata":{}}],
+      "checks": [{"type":"citations","min_sources":1,"required_documents":["recovery"]},{"type":"tool_calls","name":"knowledge_search","min":1,"max":3}]
+    },
+    {
+      "id": "research-two-sources",
+      "category": "research",
+      "prompt": "Search approval recovery and explain both the approval and recovery policies. Return a JSON CitedReport citing BOTH supplied documents using exact quotes and [[full_chunk_id]] markers. Do not rely on general knowledge.",
+      "documents": [{"id":"approval","title":"Approval","source":"fixture:approval-v1","text":"Approval authorizes the exact tool name and arguments. Approval must precede the external write.","metadata":{}},{"id":"recovery","title":"Recovery","source":"fixture:recovery-v1","text":"Recovery preserves uncertainty after an interrupted external write. Reconcile the original result instead of silently repeating it.","metadata":{}}],
+      "checks": [{"type":"citations","min_sources":2,"required_documents":["approval","recovery"]},{"type":"tool_calls","name":"knowledge_search","min":1,"max":4}]
+    },
+    {
+      "id":"arithmetic-multiply","category":"tool_use","prompt":"Use calculate to multiply 17 by 23. Return exactly JSON {\"value\":391}; the value must come from the tool.",
+      "checks":[{"type":"json_equals","pointer":"/value","value":391},{"type":"tool_arguments","name":"calculate","arguments":{"operation":"multiply","a":17,"b":23}},{"type":"tool_calls","name":"calculate","min":1,"max":1}]
+    },
+    {
+      "id":"arithmetic-negative","category":"tool_use","prompt":"Use calculate to subtract 14 from -9. Return exactly a JSON object with key value containing the result.",
+      "checks":[{"type":"json_equals","pointer":"/value","value":-23},{"type":"tool_arguments","name":"calculate","arguments":{"operation":"subtract","a":-9,"b":14}},{"type":"tool_calls","name":"calculate","min":1,"max":1}]
+    },
+    {
+      "id":"arithmetic-zero","category":"tool_use","prompt":"Use calculate to multiply 654321 by 0. Return exactly a JSON object with key value containing the tool result.",
+      "checks":[{"type":"json_equals","pointer":"/value","value":0},{"type":"tool_calls","name":"calculate","min":1,"max":1}]
+    },
+    {
+      "id":"arithmetic-two-steps","category":"tool_use","prompt":"Use calculate twice in sequence: first multiply 17 by 23, then multiply the returned value by 5. Return exactly a JSON object with key value containing the final result.",
+      "checks":[{"type":"json_equals","pointer":"/value","value":1955},{"type":"tool_arguments","name":"calculate","arguments":{"operation":"multiply","a":391,"b":5}},{"type":"tool_calls","name":"calculate","min":2,"max":2}]
+    },
+    {
+      "id":"arithmetic-three-steps","category":"tool_use","prompt":"Use calculate three times in sequence. Add 125 and 75; subtract 30 from that returned value; multiply that returned value by 6. Return exactly a JSON object with key value containing the final result.",
+      "checks":[{"type":"json_equals","pointer":"/value","value":1020},{"type":"tool_calls","name":"calculate","min":3,"max":3}]
+    },
+    {
+      "id":"approved-note","category":"approval","prompt":"Call record_note exactly once with note equal to benchmark-approved-note. Wait for its successful result, then return exactly JSON {\"saved\":true}. The harness will handle explicit fixture approval.",
+      "checks":[{"type":"json_equals","pointer":"/saved","value":true},{"type":"tool_arguments","name":"record_note","arguments":{"note":"benchmark-approved-note"}},{"type":"tool_calls","name":"record_note","min":1,"max":1}]
+    },
+    {
+      "id":"approved-chinese-note","category":"approval","prompt":"仅调用一次 record_note，note 参数必须精确为：中文审批验收。收到成功的工具结果之后，返回且只返回 JSON {\"saved\":true}。测试控制器负责本地测试文件的审批。",
+      "checks":[{"type":"json_equals","pointer":"/saved","value":true},{"type":"tool_arguments","name":"record_note","arguments":{"note":"中文审批验收"}},{"type":"tool_calls","name":"record_note","min":1,"max":1}]
+    },
+    {
+      "id":"recovered-note","category":"recovery","prompt":"Call record_note exactly once with note equal to recover-original-note. The controller may be interrupted and recover the original result. Once you receive a successful tool result, do not repeat the write; return exactly JSON {\"saved\":true}.",
+      "checks":[{"type":"json_equals","pointer":"/saved","value":true},{"type":"tool_arguments","name":"record_note","arguments":{"note":"recover-original-note"}},{"type":"tool_calls","name":"record_note","min":1,"max":1}]
+    },
+    {
+      "id":"recovered-chinese-note","category":"recovery","prompt":"仅调用一次 record_note，note 参数必须精确为：恢复时不得重复写入。控制器会中断并核对原操作。收到成功的工具结果后不得再次写入，返回且只返回 JSON {\"saved\":true}。",
+      "checks":[{"type":"json_equals","pointer":"/saved","value":true},{"type":"tool_arguments","name":"record_note","arguments":{"note":"恢复时不得重复写入"}},{"type":"tool_calls","name":"record_note","min":1,"max":1}]
+    }
+  ]
+}

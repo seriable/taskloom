@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Parse persisted decimal floating-point values with round-trip precision.
+  Multi-source retrieval exposed a score changing precision on reload and
+  invalidating a context fingerprint; full-suite CLI regression covers the
+  original failure while retaining strict context/input integrity checks.
+
+- Versioned task-acceptance campaigns with 12 supplied research/tool/approval/
+  recovery cases, strict outcome checks, retained trajectories, shared campaign
+  spending ceilings and explicit fixture/provider provenance. Incremental
+  reports distinguish active, failed and not-run work, preserve unsettled cost
+  and never equate fixture success with hosted-model effectiveness. Added
+  `taskloom benchmark` and documented controlled fixture approval/recovery.
+
 - Optional `app` host with an installable CLI, authenticated local run/knowledge
   API and browser operator console for trajectories, results, citations,
   approvals and execution controls. Persist before scheduling; explicit reentry

@@ -7,6 +7,7 @@
 
 #[cfg(feature = "app")]
 pub mod app;
+pub mod benchmark;
 mod budget;
 mod context;
 mod durable;

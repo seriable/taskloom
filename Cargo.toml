@@ -42,7 +42,9 @@ fs2 = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
 schemars = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Persisted tool values participate in exact context/approval fingerprints.
+# Parse decimal f64 values with round-trip precision across checkpoint reloads.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
 tempfile = "3"
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros"] }

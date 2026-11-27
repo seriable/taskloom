@@ -23,6 +23,7 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   report ID                         verify saved cited report\n\
   import ID TITLE FILE               import UTF-8 text/Markdown\n\
   knowledge | search QUERY          inspect/query local corpus\n\
+  benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
 Use API/UI to pause or cancel work owned by the running server.\n";
 pub async fn run(
     arguments: impl IntoIterator<Item = String>,
@@ -60,6 +61,57 @@ pub async fn run(
         return Ok(());
     }
     let config = AppConfig::load(&config_path).await?;
+    if args[0] == "benchmark" {
+        if args.len() != 4 {
+            return Err(HELP.into());
+        }
+        let suite_path = PathBuf::from(&args[1]);
+        let bytes = super::super::store::blocking(move || {
+            use std::io::Read;
+            let file = std::fs::File::open(suite_path).map_err(super::super::store::storage)?;
+            let mut bytes = Vec::new();
+            file.take(16 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(super::super::store::storage)?;
+            if bytes.len() > 16 * 1024 * 1024 {
+                return Err(super::config::config_error("suite exceeds 16 MiB"));
+            }
+            Ok(bytes)
+        })
+        .await?;
+        let suite: super::super::benchmark::BenchmarkSuite = serde_json::from_slice(&bytes)?;
+        suite.validate()?;
+        let total = args[3].parse::<u64>()?;
+        let kind = if matches!(&config.provider, super::AppProvider::Offline) {
+            super::super::benchmark::ExecutionKind::OfflineDemo
+        } else {
+            super::super::benchmark::ExecutionKind::ConfiguredProvider
+        };
+        let model = config.model()?;
+        let evaluation = super::super::benchmark::BenchmarkConfig {
+            origin: super::super::benchmark::BenchmarkOrigin {
+                kind,
+                model: config.model.clone(),
+                configuration_fingerprint: config.label()?,
+            },
+            limits: config.limits.clone(),
+            context: Some(config.context.clone()),
+            output_tokens: config.output_tokens,
+            max_total_cost_micros: Some(total),
+        };
+        let report = super::super::benchmark::BenchmarkRunner::new(model.as_ref(), evaluation)
+            .run(&suite, &args[2])
+            .await?;
+        output(&report)?;
+        if report.passed != report.requested {
+            return Err(format!(
+                "benchmark: {} passed, {} failed, {} not run; report saved",
+                report.passed, report.failed, report.not_run
+            )
+            .into());
+        }
+        return Ok(());
+    }
     // Inspection/import do not initialize a model or contact MCP services.
     let runs = super::super::FileRunStore::new(config.state_dir.join("runs"));
     let corpus = super::super::rag::FileCorpusStore::new(config.state_dir.join("knowledge"));

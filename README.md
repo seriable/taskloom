@@ -30,6 +30,10 @@ The optional [`app` host](docs/application.md) adds an installable CLI,
 bearer-authenticated local API and operator UI. Install from this development
 checkout with `cargo install --path . --locked --features app`, then run
 `taskloom init taskloom.json`. These features are not in the `v0.1.0` tag.
+The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
+tracks actual task evaluation, release delivery and the next application/tool
+increments. [Task benchmarks](docs/task-benchmarks.md) provide versioned outcome
+checks and campaign budgets with explicit offline/provider provenance.
 
 ## What you get
 
