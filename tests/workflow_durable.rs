@@ -570,7 +570,11 @@ async fn workflow_ownership_revision_and_configuration_fail_closed() {
     let mut newer = state.clone();
     newer.revision += 1;
     lease.save(&newer).await.unwrap();
-    lease.save(&state).await.unwrap();
+    // A stale save is a conflict, never a silent success.
+    assert!(matches!(
+        lease.save(&state).await,
+        Err(RuntimeError::Conflict(_))
+    ));
     assert_eq!(
         lease.load().await.unwrap().unwrap().revision,
         newer.revision
