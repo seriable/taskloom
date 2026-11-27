@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Optional `sandbox` worker contract and Docker Python tool: immutable audited
+  image/local engine, no host mounts/network/credentials, bounded resources and
+  a container PID 1 deadline/output supervisor with an unprivileged code child.
+  Exact-code approvals freeze the worker identity; there is no host execution
+  fallback. Command/control checks are separate from the ignored real-container
+  acceptance suite, which needs an available engine and built audited image.
+
 - Opt-in `research` sources: origin-granted DNS-pinned web fetch, configured
   Brave-compatible search and bounded trusted Poppler PDF extraction. Added
   CLI/API/UI imports with source hashes, UTF-8 extraction provenance and

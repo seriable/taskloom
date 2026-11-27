@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-27",
+  "host": "Windows with Docker Desktop Linux engine",
+  "platform": "linux/amd64",
+  "base_image": "python@sha256:a83ba18aef0f865b1a4a611c2cf460fe446f2795673bbb9fe43be570439e3b39",
+  "base_source": "Existing cached Python 3.11 slim-bookworm image; Docker Hub download failed",
+  "image": "sha256:d21d8c9f2cb6b3f18dc6ad520ac111e690d606118a46df4496fa702f9a104ceb",
+  "supervisor_build_context_sha256": "9fcb5510ed5b96ecbefc315f12e91209bd60aca7d5947bdaf20de8242358a65d",
+  "command": "cargo test --locked --features sandbox --test agent_sandbox -- --ignored --test-threads=1 --nocapture",
+  "test_duration_seconds": 6.99,
+  "passed": 5,
+  "failed": 0,
+  "cases": [
+    "actual_cancelled_controller_leaves_no_named_container",
+    "actual_container_denies_root_monitor_signals_host_writes_network_and_secrets",
+    "actual_docker_cli_missing_engine_fails_before_code_without_host_fallback",
+    "actual_supervisor_caps_output_and_kills_detached_children_at_deadline",
+    "actual_supervisor_deadline_covers_open_stdin_without_code_or_eof"
+  ],
+  "observed_worker_limits": {
+    "uid": 65534,
+    "gid": 65534,
+    "memory_bytes": 134217728,
+    "swap_bytes": 0,
+    "pids": 32,
+    "cpu_fraction": 0.5,
+    "file_descriptors": 64,
+    "file_size_bytes": 1048576
+  },
+  "labelled_containers_after_suite": 0,
+  "prior_failed_image": "sha256:62fff7d78ade0348e5f5e79d04b3031947969089ed5ba93ae0bf868ba6928fd0",
+  "prior_failure": "The deadline path attempted cross-UID killpg without CAP_KILL; repaired using bounded response and container PID 1 exit.",
+  "hosted_ci": "not validated: GitHub account billing lock"
+}

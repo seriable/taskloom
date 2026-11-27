@@ -9,7 +9,7 @@ readme = "README.md"
 keywords = ["llm", "agent", "openai", "anthropic", "gateway"]
 categories = ["api-bindings", "asynchronous"]
 repository = "https://github.com/seriable/taskloom"
-include = ["src/**", "examples/**", "tests/**", "docs/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
+include = ["src/**", "examples/**", "tests/**", "docs/**", "sandbox/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -28,8 +28,10 @@ runtime = ["dep:jsonschema", "dep:uuid"]
 mcp = ["runtime", "dep:reqwest"]
 # Opt-in bounded web ingestion/search and a configured PDF text extractor.
 research = ["runtime", "dep:reqwest", "dep:scraper", "tokio/net", "tokio/process", "tokio/io-util"]
+# Explicit Linux-container Python execution, never a host-shell fallback.
+sandbox = ["runtime", "dep:base64", "tokio/process", "tokio/io-util"]
 # Local API/CLI/UI host; library-only users retain the minimal default build.
-app = ["mcp", "research", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
+app = ["mcp", "research", "sandbox", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"], optional = true }

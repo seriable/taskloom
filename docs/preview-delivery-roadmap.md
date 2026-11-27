@@ -33,8 +33,10 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
 - [x] Configured web search and bounded webpage ingestion (local HTTP acceptance).
 - [x] PDF text extraction with source provenance and real Linux Poppler acceptance.
 - [x] Pluggable semantic retrieval and a tested hybrid ranking path (fixture embeddings).
-- [ ] Explicitly isolated code-execution interface; no unsafe host-shell fallback.
-- [ ] End-to-end examples, extension docs and relevant security/recovery checks.
+- [x] Explicit isolated code-execution interface and audited-image supervisor;
+      command/approval/fail-closed checks pass, with no host-shell fallback.
+- [x] Real-container isolation suite: five cases passed on Docker Desktop Linux.
+- [x] End-to-end examples, extension docs and relevant security/recovery checks.
 
 ## External preflight
 
@@ -44,11 +46,13 @@ endpoint/model, a credential environment name and a spending ceiling. Never put
 secret values into committed manifests or benchmark reports. The user has been
 asked for nonsecret configuration while independent implementation proceeds.
 
-Docker CLI exists; the Docker Desktop Linux engine was not running at preflight.
-Actual container isolation acceptance must be distinguished from command/config
-tests. Automatic command approval rejected the combined Docker-start/CI-read
-command with `blocked by policy` and no more specific reason; the command did
-not execute. Docker startup has not been retried through another route.
+Docker Desktop was initially stopped. Automatic approval rejected the combined
+Docker-start/CI-read command with `blocked by policy`; it did not execute and
+was not retried through another route. The owner subsequently started Docker
+manually. The audited supervisor image was built from a cached pinned Python
+base; all five separately invoked real-engine cases then passed. See the
+[recorded acceptance](acceptance/sandbox-20261127.json), distinct from command/
+config tests and hosted CI. Docker Hub download itself was unavailable.
 
 Hosted CI was inspected read-only at
 <https://github.com/seriable/taskloom/actions/runs/45910274041>.

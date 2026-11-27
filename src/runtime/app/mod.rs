@@ -124,6 +124,11 @@ impl Application {
             .clone()
             .map(PdfLoader::new)
             .transpose()?;
+        if let Some(config) = &config.sandbox {
+            let sandbox = super::sandbox::DockerSandbox::new(config.clone())?;
+            tools.register(super::sandbox::SandboxTool(Arc::new(sandbox)))?;
+            policy = policy.allow("python_sandbox").grant("sandbox:python");
+        }
         if let Some(web) = &web {
             tools.register(WebFetchTool(web.clone()))?;
             policy = policy.allow("web_fetch").grant("web:fetch");

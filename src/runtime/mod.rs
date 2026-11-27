@@ -3,7 +3,9 @@
 //! This layer is independent of [`crate::AgentTask`]. Models implement
 //! [`Model`]; the built-in [`crate::GatewayTransport`] implements it using
 //! native provider tool calls. Only explicitly allowed tools are exposed.
-//! Tools execute in process; this library does not create a security sandbox.
+//! Custom tools execute in process. The opt-in `sandbox` feature routes only
+//! explicitly configured Python calls to an audited Linux-container worker;
+//! registering ordinary tools does not isolate them.
 
 #[cfg(feature = "app")]
 pub mod app;
@@ -15,6 +17,8 @@ mod executor;
 #[cfg(feature = "mcp")]
 pub mod mcp;
 pub mod rag;
+#[cfg(feature = "sandbox")]
+pub mod sandbox;
 mod session;
 mod state;
 mod store;

@@ -566,6 +566,6 @@ async fn web_search(State(app): State<Arc<Application>>, Json(input): Json<WebQu
 }
 async fn research_capabilities(State(app): State<Arc<Application>>) -> ApiResult {
     Ok(Json(
-        json!({"web":app.web.is_some(),"search":app.search.is_some(),"pdf":app.pdf.is_some(),"allowed_origins":app.config.research.web.as_ref().map(|web|&web.allowed_origins),"retrieval_binding":app.retriever.identity()}),
+        json!({"web":app.web.is_some(),"search":app.search.is_some(),"pdf":app.pdf.is_some(),"sandbox":app.config.sandbox.is_some(),"allowed_origins":app.config.research.web.as_ref().map(|web|&web.allowed_origins),"retrieval_binding":app.retriever.identity()}),
     ))
 }
