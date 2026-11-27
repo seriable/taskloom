@@ -11,9 +11,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::super::rag::{
-    self, CorpusStore, Document, LexicalRetriever, RetrievalQuery, WindowChunker,
-};
+use super::super::rag::{self, CorpusStore, Document, RetrievalQuery, WindowChunker};
 use super::super::{ApprovalDecision, RecoveryDecision, RuntimeError};
 use super::{config::config_error, AppWorkflowRequest, Application};
 
@@ -80,6 +78,10 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/knowledge", get(knowledge).post(import))
         .route("/knowledge/{id}", axum::routing::delete(remove))
         .route("/knowledge/search", post(search))
+        .route("/knowledge/web", post(import_web))
+        .route("/knowledge/pdf", post(import_pdf))
+        .route("/research/search", post(web_search))
+        .route("/research/capabilities", get(research_capabilities))
         .route_layer(middleware::from_fn_with_state(
             Arc::new(token),
             authenticate,
@@ -92,6 +94,15 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
                     include_str!("orchestration.js"),
+                )
+            }),
+        )
+        .route(
+            "/research.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("research.js"),
                 )
             }),
         )
@@ -455,7 +466,106 @@ async fn search(
     Json(query): Json<RetrievalQuery>,
 ) -> ApiResult {
     Ok(Json(
-        serde_json::to_value(rag::search(app.corpus.as_ref(), &LexicalRetriever, &query).await?)
-            .map_err(super::super::store::storage)?,
+        serde_json::to_value(
+            rag::search(app.corpus.as_ref(), app.retriever.as_ref(), &query).await?,
+        )
+        .map_err(super::super::store::storage)?,
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WebImport {
+    id: String,
+    title: String,
+    url: String,
+    expected_revision: Option<u64>,
+}
+async fn import_web(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<WebImport>,
+) -> ApiResult {
+    let web = app
+        .web
+        .as_ref()
+        .ok_or_else(|| config_error("web ingestion is not configured"))?;
+    let document = web.fetch(&input.url, &input.id, &input.title).await?;
+    let snapshot = rag::ingest(
+        app.corpus.as_ref(),
+        document,
+        &WindowChunker::default(),
+        input.expected_revision,
+    )
+    .await?;
+    Ok(Json(
+        json!({"revision":snapshot.revision,"documents":snapshot.documents.len(),"chunks":snapshot.chunks.len()}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PdfImport {
+    id: String,
+    title: String,
+    filename: String,
+    data_base64: String,
+    expected_revision: Option<u64>,
+}
+async fn import_pdf(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<PdfImport>,
+) -> ApiResult {
+    use base64::Engine;
+    if input.filename.is_empty()
+        || input.filename.len() > 512
+        || input
+            .filename
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\'))
+    {
+        return Err(config_error("PDF filename must be a basename").into());
+    }
+    let pdf = app
+        .pdf
+        .as_ref()
+        .ok_or_else(|| config_error("PDF ingestion is not configured"))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&input.data_base64)
+        .map_err(|_| config_error("invalid PDF base64"))?;
+    let document = pdf
+        .load_bytes(
+            bytes,
+            &input.id,
+            &input.title,
+            &format!("upload:{}", input.filename),
+        )
+        .await?;
+    let snapshot = rag::ingest(
+        app.corpus.as_ref(),
+        document,
+        &WindowChunker::default(),
+        input.expected_revision,
+    )
+    .await?;
+    Ok(Json(
+        json!({"revision":snapshot.revision,"documents":snapshot.documents.len(),"chunks":snapshot.chunks.len()}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WebQuery {
+    query: String,
+    count: usize,
+}
+async fn web_search(State(app): State<Arc<Application>>, Json(input): Json<WebQuery>) -> ApiResult {
+    let search = app
+        .search
+        .as_ref()
+        .ok_or_else(|| config_error("web search is not configured"))?;
+    Ok(Json(
+        json!({"results":search.search(&input.query,input.count).await?,"binding":search.identity(),"evidence":"Search snippets are unverified leads, not source evidence."}),
+    ))
+}
+async fn research_capabilities(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(
+        json!({"web":app.web.is_some(),"search":app.search.is_some(),"pdf":app.pdf.is_some(),"allowed_origins":app.config.research.web.as_ref().map(|web|&web.allowed_origins),"retrieval_binding":app.retriever.identity()}),
     ))
 }

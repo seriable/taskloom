@@ -22,6 +22,9 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   reconcile ID CALL DECISION.json    record observed tool outcome\n\
   report ID                         verify saved cited report\n\
   import ID TITLE FILE               import UTF-8 text/Markdown\n\
+  import-pdf ID TITLE FILE           import PDF using configured pdftotext\n\
+  import-web ID TITLE URL            ingest a host-granted webpage\n\
+  web-search QUERY                   query configured Brave-compatible search\n\
   knowledge | search QUERY          inspect/query local corpus\n\
   benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
 Use API/UI to pause or cancel work owned by the running server.\n";
@@ -156,6 +159,52 @@ pub async fn run(
         "search" if args.len() == 2 => {
             output(
                 &rag::search(&corpus, &LexicalRetriever, &RetrievalQuery::new(&args[1])).await?,
+            )?;
+            return Ok(());
+        }
+        "import-pdf" if args.len() == 4 => {
+            let pdf = rag::PdfLoader::new(
+                config
+                    .research
+                    .pdf
+                    .clone()
+                    .ok_or("PDF ingestion is not configured")?,
+            )?;
+            let document = pdf
+                .load(std::path::Path::new(&args[3]), &args[1], &args[2])
+                .await?;
+            let snapshot = rag::ingest(&corpus, document, &WindowChunker::default(), None).await?;
+            output(
+                &serde_json::json!({"revision":snapshot.revision,"documents":snapshot.documents.len(),"chunks":snapshot.chunks.len()}),
+            )?;
+            return Ok(());
+        }
+        "import-web" if args.len() == 4 => {
+            let web = rag::WebClient::new(
+                config
+                    .research
+                    .web
+                    .clone()
+                    .ok_or("web ingestion is not configured")?,
+            )?;
+            let document = web.fetch(&args[3], &args[1], &args[2]).await?;
+            let snapshot = rag::ingest(&corpus, document, &WindowChunker::default(), None).await?;
+            output(
+                &serde_json::json!({"revision":snapshot.revision,"documents":snapshot.documents.len(),"chunks":snapshot.chunks.len()}),
+            )?;
+            return Ok(());
+        }
+        "web-search" if args.len() == 2 => {
+            let search = config
+                .research
+                .search
+                .clone()
+                .ok_or("web search is not configured")?;
+            let key = super::config::secret(&search.key_env)?;
+            output(
+                &rag::WebSearch::new(search, &key)?
+                    .search(&args[1], 5)
+                    .await?,
             )?;
             return Ok(());
         }

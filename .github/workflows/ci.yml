@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features: ["", "openai", "anthropic", "schemars", "runtime", "runtime,openai", "runtime,anthropic", "mcp", "app"]
+        features: ["", "openai", "anthropic", "schemars", "runtime", "runtime,openai", "runtime,anthropic", "mcp", "research", "app"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,4 +67,10 @@ jobs:
       - run: cargo run --locked --features runtime --example agent_session
       - run: cargo run --locked --features runtime --example agent_peer
       - run: cargo run --locked --features runtime --example agent_research
+      - name: Install explicit PDF extractor
+        run: sudo apt-get update && sudo apt-get install --yes poppler-utils
+      - name: Exercise real PDF extraction
+        env:
+          TASKLOOM_TEST_PDFTOTEXT: /usr/bin/pdftotext
+        run: cargo test --locked --features research --test agent_pdf -- --ignored
       - run: cargo package --locked --all-features

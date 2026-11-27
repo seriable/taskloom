@@ -13,10 +13,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::mcp::{McpClient, McpHttpConfig};
-use super::rag::{Citation, CitedReport, FileCorpusStore, LexicalRetriever, RagTool, SearchResult};
+use super::rag::{
+    Citation, CitedReport, FileCorpusStore, LexicalRetriever, PdfLoader, RagTool, Retriever,
+    SearchResult, WebClient, WebFetchTool, WebSearch, WebSearchTool,
+};
 use super::*;
 use crate::CancelToken;
-pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppRole};
+pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppResearch, AppRole};
 pub use orchestration::AppWorkflowRequest;
 pub use service::{router, serve};
 
@@ -26,6 +29,10 @@ pub struct Application {
     pub corpus: Arc<FileCorpusStore>,
     pub workflows: workflow::FileWorkflowStore,
     pub sessions: FileSessionStore,
+    web: Option<Arc<WebClient>>,
+    search: Option<Arc<WebSearch>>,
+    pdf: Option<PdfLoader>,
+    retriever: Arc<dyn Retriever>,
     model: Arc<dyn Model>,
     tools: ToolRegistry,
     policy: ToolPolicy,
@@ -67,8 +74,19 @@ impl Application {
     pub async fn with_model(
         config: AppConfig,
         model: Arc<dyn Model>,
+        tools: ToolRegistry,
+        policy: ToolPolicy,
+    ) -> Result<Arc<Self>, RuntimeError> {
+        Self::with_retriever(config, model, tools, policy, Arc::new(LexicalRetriever)).await
+    }
+    /// The operator search API and model knowledge tool share this retriever.
+    /// Build/load paid embedding indexes explicitly before opening the host.
+    pub async fn with_retriever(
+        config: AppConfig,
+        model: Arc<dyn Model>,
         mut tools: ToolRegistry,
         mut policy: ToolPolicy,
+        retriever: Arc<dyn Retriever>,
     ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
         let label = config.label()?;
@@ -80,9 +98,39 @@ impl Application {
             tools.register(RagTool::new(
                 "knowledge_search",
                 corpus.clone(),
-                Arc::new(LexicalRetriever),
+                retriever.clone(),
             ))?;
             policy = policy.allow("knowledge_search").grant("knowledge:read");
+        }
+        let web = config
+            .research
+            .web
+            .clone()
+            .map(WebClient::new)
+            .transpose()?
+            .map(Arc::new);
+        let search = config
+            .research
+            .search
+            .clone()
+            .map(|cfg| {
+                let key = config::secret(&cfg.key_env)?;
+                WebSearch::new(cfg, &key).map(Arc::new)
+            })
+            .transpose()?;
+        let pdf = config
+            .research
+            .pdf
+            .clone()
+            .map(PdfLoader::new)
+            .transpose()?;
+        if let Some(web) = &web {
+            tools.register(WebFetchTool(web.clone()))?;
+            policy = policy.allow("web_fetch").grant("web:fetch");
+        }
+        if let Some(search) = &search {
+            tools.register(WebSearchTool(search.clone()))?;
+            policy = policy.allow("web_search").grant("web:search");
         }
         let mut clients = Vec::new();
         for endpoint in &config.mcp {
@@ -119,6 +167,10 @@ impl Application {
             corpus,
             workflows,
             sessions,
+            web,
+            search,
+            pdf,
+            retriever,
             model,
             tools,
             policy,

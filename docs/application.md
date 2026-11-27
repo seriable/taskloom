@@ -32,6 +32,10 @@ to crates.io. Install from the development checkout, or from a verified future
 release commit containing this feature. Do not install the old tag expecting
 these commands.
 
+Optional web search, webpage ingestion, PDF upload/import and host-injected
+hybrid retrieval are described in [research tools](research-tools.md). They
+require explicit source/service/extractor configuration; defaults grant none.
+
 All commands accept `--config FILE` before the command. Relative `state_dir`
 paths resolve against the configuration file's directory. `inspect`, `events`,
 `list`, `report`, `knowledge`, `search` and `import` do not initialize a provider

@@ -23,19 +23,19 @@ for provider execution; tool permissions and citation checks remain the same.
 | `CorpusStore` | `FileCorpusStore`: atomic versioned local snapshots | Consistent snapshots and atomic replacement/removal; enforce revision CAS when requested |
 | `Retriever` | `LexicalRetriever`: deterministic BM25-style scores | Rank IDs in the exact supplied snapshot; obey top_k; finite nonnegative scores, no duplicate/unknown IDs |
 
-The existing embedding gateway can be used by a custom vector retriever;
-embedding/index services, their credentials and charges belong to that
-implementation. The built-in retrieval path requires no embeddings or external
-service. The lexical tokenizer supports basic Unicode words and individual
-CJK characters; language-specific segmentation, reranking and semantic/hybrid
-retrieval are extension work. It is a baseline, not a claim of benchmark parity
-with a dedicated vector/search system.
+The default lexical path requires no embeddings or external service and supports
+basic Unicode words and individual CJK characters. Optional snapshot-bound vector
+indexes and reciprocal-rank hybrid retrieval are described in
+[research tools](research-tools.md). Embedding/index service credentials and
+charges remain separate from generation budgets. Language-specific segmentation
+and reranking remain extension work; no benchmark parity is claimed.
 
 `Document` contains host-assigned `id`, `title`, display `source`, UTF-8 `text`
 and bounded metadata. The plain loader accepts at most 8 MiB, rejects invalid
-UTF-8, and does not execute Markdown/HTML or fetch URLs. Supply format-specific
-loaders for PDFs, Office documents and HTML. Sources are data; the library does
-not follow their references. This library does not sandbox custom loaders.
+UTF-8, and does not execute Markdown/HTML or fetch URLs. The optional `research`
+feature adds bounded HTML/web and trusted Poppler PDF extraction. Office formats
+still require a host loader. Sources are data; their references are not
+automatically followed. This library does not sandbox custom loaders.
 
 `ingest` validates document and plugin chunks before changing storage. Importing
 the same document ID atomically replaces its prior chunks; it does not append

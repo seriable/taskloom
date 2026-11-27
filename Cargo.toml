@@ -26,8 +26,10 @@ schemars = ["dep:schemars"]
 runtime = ["dep:jsonschema", "dep:uuid"]
 # Explicitly configured MCP Streamable HTTP tool clients.
 mcp = ["runtime", "dep:reqwest"]
+# Opt-in bounded web ingestion/search and a configured PDF text extractor.
+research = ["runtime", "dep:reqwest", "dep:scraper", "tokio/net", "tokio/process", "tokio/io-util"]
 # Local API/CLI/UI host; library-only users retain the minimal default build.
-app = ["mcp", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
+app = ["mcp", "research", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"], optional = true }
@@ -41,6 +43,7 @@ uuid = { version = "=1.18.1", default-features = false, optional = true }
 fs2 = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
 schemars = { version = "1", optional = true }
+scraper = { version = "0.23", optional = true }
 serde = { version = "1", features = ["derive"] }
 # Persisted tool values participate in exact context/approval fingerprints.
 # Parse decimal f64 values with round-trip precision across checkpoint reloads.

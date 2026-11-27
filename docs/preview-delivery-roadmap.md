@@ -30,9 +30,9 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
 
 ## 4. Research capabilities and isolated execution
 
-- [ ] Configured web search and bounded webpage ingestion.
-- [ ] PDF text extraction with explicit source provenance and failure behavior.
-- [ ] Pluggable semantic retrieval and a tested hybrid ranking path.
+- [x] Configured web search and bounded webpage ingestion (local HTTP acceptance).
+- [x] PDF text extraction with source provenance and real Linux Poppler acceptance.
+- [x] Pluggable semantic retrieval and a tested hybrid ranking path (fixture embeddings).
 - [ ] Explicitly isolated code-execution interface; no unsafe host-shell fallback.
 - [ ] End-to-end examples, extension docs and relevant security/recovery checks.
 

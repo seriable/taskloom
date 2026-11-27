@@ -1,7 +1,12 @@
 //! Pluggable ingestion, chunking and retrieval with verifiable source excerpts.
 //! Retrieved text is untrusted data, never tool permission or system policy.
 mod corpus;
+mod hybrid;
+#[cfg(feature = "research")]
+mod pdf;
 mod retrieval;
+#[cfg(feature = "research")]
+mod web;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -12,9 +17,19 @@ use sha2::{Digest, Sha256};
 
 use super::RuntimeError;
 pub use corpus::{CorpusSnapshot, CorpusStore, FileCorpusStore, CORPUS_VERSION};
+pub use hybrid::{
+    EmbeddingBatch, EmbeddingIndex, EmbeddingModel, HybridRetriever, ProviderEmbeddingModel,
+    VectorRetriever,
+};
+#[cfg(feature = "research")]
+pub use pdf::{PdfConfig, PdfLoader};
 pub use retrieval::{
     search, Citation, CitedReport, Evidence, LexicalRetriever, RagTool, RetrievalQuery, Retriever,
     ScoredChunk, SearchResult, VerifiedReport,
+};
+#[cfg(feature = "research")]
+pub use web::{
+    WebAccess, WebClient, WebFetchTool, WebSearch, WebSearchConfig, WebSearchHit, WebSearchTool,
 };
 
 pub const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;

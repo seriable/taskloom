@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Opt-in `research` sources: origin-granted DNS-pinned web fetch, configured
+  Brave-compatible search and bounded trusted Poppler PDF extraction. Added
+  CLI/API/UI imports with source hashes, UTF-8 extraction provenance and
+  explicit unsupported-format behavior. Search credentials never follow redirects.
+- Snapshot-bound vector indexes, provider embedding adapter and weighted
+  reciprocal-rank hybrid retrieval. Stale/invalid indexes fail before query
+  dispatch; custom application retrieval is shared by tools and operator search.
+  Local HTTP/citation tests and actual Linux Poppler acceptance are documented
+  separately from unexecuted hosted search/embedding/model quality validation.
+
 - Workflow/session operator APIs and UI: host-defined roles, persisted DAG or
   PEER creation, exact child-controller approvals/recovery, session turn binding
   and explicit failed-turn acknowledgement. Shared typed admission bounds all
