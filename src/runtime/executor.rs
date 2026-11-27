@@ -193,6 +193,7 @@ pub struct AgentLoop<'a> {
     pub(super) context_policy: Option<ContextPolicy>,
     pub(super) compressor: &'a dyn ContextCompressor,
     pub(super) output_policy: Option<super::FinalOutputPolicy>,
+    pub(super) skill_binding: Option<super::skills::SkillBinding>,
 }
 
 static EXTRACTIVE: ExtractiveCompressor = ExtractiveCompressor;
@@ -213,6 +214,7 @@ impl<'a> AgentLoop<'a> {
             context_policy: None,
             compressor: &EXTRACTIVE,
             output_policy: None,
+            skill_binding: None,
         }
     }
 
@@ -261,6 +263,14 @@ impl<'a> AgentLoop<'a> {
     }
     pub fn without_output_policy(mut self) -> Self {
         self.output_policy = None;
+        self
+    }
+    pub fn with_skill_binding(mut self, binding: super::skills::SkillBinding) -> Self {
+        self.skill_binding = Some(binding);
+        self
+    }
+    pub fn without_skill_binding(mut self) -> Self {
+        self.skill_binding = None;
         self
     }
     pub(super) fn active_policy(&self, report: &RunReport) -> ToolPolicy {
@@ -370,6 +380,9 @@ impl<'a> AgentLoop<'a> {
         Ok(())
     }
     pub(super) fn validate(&self, report: &RunReport) -> Result<(), RuntimeError> {
+        if let Some(binding) = &self.skill_binding {
+            binding.validate()?;
+        }
         self.validate_output_policy()?;
         if let Some(policy) = &self.context_policy {
             policy.validate()?;

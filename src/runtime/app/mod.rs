@@ -5,6 +5,7 @@ mod memory;
 mod orchestration;
 pub mod retrieval;
 mod service;
+mod skills;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,7 @@ pub use memory::{AppMemory, MemoryEdit, MemoryExtract, MemoryForget, MemoryRevie
 pub use orchestration::AppWorkflowRequest;
 pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
 pub use service::{router, serve};
+pub use skills::{AppSkill, AppTemplateRequest};
 
 pub struct Application {
     pub config: AppConfig,
@@ -44,6 +46,10 @@ pub struct Application {
     clients: Vec<McpClient>,
     jobs: Mutex<BTreeMap<String, Job>>,
     label: String,
+    skills: Vec<skills::LoadedSkill>,
+    skill_roles: Vec<AppRole>,
+    skill_bindings: BTreeMap<String, super::skills::SkillBinding>,
+    recovery_roles: std::collections::BTreeSet<String>,
 }
 #[derive(Clone)]
 struct Job {
@@ -177,6 +183,7 @@ impl Application {
                 }
             }
         }
+        let compiled = skills::load(&config, &tools, &policy).await?;
         let app = Arc::new(Self {
             config,
             runs,
@@ -194,6 +201,10 @@ impl Application {
             clients,
             jobs: Mutex::new(BTreeMap::new()),
             label,
+            skills: compiled.skills,
+            skill_roles: compiled.roles,
+            skill_bindings: compiled.bindings,
+            recovery_roles: compiled.recovery_roles,
         });
         // Validate output schemas before the server begins accepting requests.
         let roles = app.role_agents();

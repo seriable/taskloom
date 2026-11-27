@@ -31,6 +31,10 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   memory-edit FILE.json             edit active memory with operator provenance\n\
   memory-forget FILE.json           erase all versions of a memory slot\n\
   memory-extract FILE.json          explicit metered extraction from a closed session turn\n\
+  skills                            inspect installed/retired package catalog\n\
+  skill-install FILE.tar REV         install inert bounded USTAR package (no hooks/services)\n\
+  skill-inspect PIN.json             inspect an exact content-addressed package\n\
+  skill-retire PIN.json REV          retire package; retain content for explicit recovery\n\
   index-status                      inspect index/config/embedding spending\n\
   index-build REV BINDING            explicit full build/update; may incur embedding charges\n\
   benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
@@ -125,6 +129,46 @@ pub async fn run(
     // Inspection/import do not initialize a model or contact MCP services.
     let runs = super::super::FileRunStore::new(config.state_dir.join("runs"));
     let corpus = super::super::rag::FileCorpusStore::new(config.state_dir.join("knowledge"));
+    if args[0] == "skills" || args[0].starts_with("skill-") {
+        use super::super::skills::*;
+        let store = FileSkillStore::new(config.state_dir.join("skills"));
+        match args[0].as_str() {
+            "skills" if args.len() == 1 => output(&store.catalog().await?)?,
+            "skill-install" if args.len() == 3 => {
+                let path = PathBuf::from(&args[1]);
+                let bytes = super::super::store::blocking(move || {
+                    use std::io::Read;
+                    let mut bytes = Vec::new();
+                    std::fs::File::open(path)
+                        .map_err(super::super::store::storage)?
+                        .take(8 * 1024 * 1024 + 1)
+                        .read_to_end(&mut bytes)
+                        .map_err(super::super::store::storage)?;
+                    if bytes.len() > 8 * 1024 * 1024 {
+                        return Err(super::config::config_error("skill archive exceeds 8 MiB"));
+                    }
+                    Ok(bytes)
+                })
+                .await?;
+                let package = read_skill_archive(&bytes)?;
+                let reference = package.reference()?;
+                let catalog = store.install(package, args[2].parse()?).await?;
+                output(
+                    &serde_json::json!({"package":reference,"catalog_revision":catalog.revision,"activated":false}),
+                )?;
+            }
+            "skill-inspect" if args.len() == 2 => {
+                let reference: SkillRef = decision_file(&args[1]).await?;
+                output(&store.inspect(&reference).await?)?;
+            }
+            "skill-retire" if args.len() == 3 => {
+                let reference: SkillRef = decision_file(&args[1]).await?;
+                output(&store.retire(&reference, args[2].parse()?).await?)?;
+            }
+            _ => return Err(HELP.into()),
+        }
+        return Ok(());
+    }
     if args[0].starts_with("memory") {
         use super::super::memory::*;
         let memory = config

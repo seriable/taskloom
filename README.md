@@ -26,6 +26,9 @@ preferences, explicit native extraction, operator conflict review and erasure,
 with bounded recall into new sessions. [Final-output contracts](docs/final-output.md)
 validate JSON or exact citation provenance before success and bound repairs
 within the original model budget and narrowed permissions.
+[Data-only skill packages](docs/skill-packages.md) add exact dependency/content
+pins, explicit host grants and reusable role/workflow templates. Source MCP
+examples exercise live repository metadata and approved, recoverable note writes.
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
 retrieval and exact source citations (`agent_research`). See the
 [roadmap](docs/agent-roadmap.md) for acceptance checks and external validation.

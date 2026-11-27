@@ -129,13 +129,29 @@ See `long-term-memory.md` and `acceptance/p1-memory-20261128.json`.
 
 ## P1.2 — Skills, templates and connectors
 
-- [ ] Versioned installable packages declaring tools, dependencies and required
+- [x] Versioned installable packages declaring tools, dependencies and required
   credential names; reject archive traversal, symlinks and oversized contents.
-- [ ] Host validation and grants before activation. Skill content cannot execute
+- [x] Host validation and grants before activation. Skill content cannot execute
   host commands, reveal secrets or enlarge permissions on its own.
-- [ ] Frozen package identity in durable runs; explicit upgrade/removal behavior.
+- [x] Frozen package identity in durable runs; explicit upgrade/removal behavior.
 - [ ] Useful task templates and working connector examples with reproducible
   installation, execution and failure/recovery acceptance.
+
+2026-11-28 skill increment: inert USTAR imports, immutable version/digest objects,
+exact dependency/resource resolution, host tool/credential-name grants, mounted
+workflow templates and recovery-only retired pins are integrated through SDK,
+CLI and API. Tests cover malformed archives, authority/effect mismatches, exact
+approvals, upgrades and recovery admission. Actual Qwen/MCP runs matched live
+GitHub repository/license data and retained a response-lost filesystem append
+as uncertain until explicit observation/reconciliation, with one write total.
+The connector templates have native execution/recovery evidence, but the
+source-summary template still failed native exact-citation acceptance. Complete
+template acceptance and the corresponding P0 research-quality gate therefore
+remain open; the failure is not relabelled as a passing installation result.
+Retirement affects new activation; loaded processes keep frozen snapshots and
+recovery still requires original host contracts. These are data packages and
+single-operator examples, not a package registry trust service or P2 multi-user
+authorization. See `skill-packages.md` and `acceptance/p1-skills-20261128.json`.
 
 ## P1.3 — Observability and diagnosis
 

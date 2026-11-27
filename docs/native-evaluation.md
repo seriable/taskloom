@@ -314,3 +314,40 @@ authorization. For example, the French proposal retained the language but did
 not separately retain the source's `concise` style preference. No full-preference
 coverage is inferred. See `long-term-memory.md` and
 `acceptance/p1-memory-20261128.json` for commands, transcripts and limits.
+
+## Installed skill/template and MCP connector campaign (2026-11-28)
+
+The final source-package campaign installed evidence-base, research-brief and
+connector-notes as inert archives with generation/connector credentials removed
+from the installation subprocesses. Host activation separately pinned their
+content/dependencies and granted tools/credential names. The source example MCP
+service then read live public GitHub metadata for `seriable/taskloom` and served
+a bounded owned note store. Model decisions came from the actual local Qwen API.
+
+Three connector templates completed: repository summary matched the observed
+repository name and `Apache-2.0` license, note status read the actual empty
+store, and note append completed after explicit observed-outcome reconciliation.
+The research template failed exact citation identity after two bounded repairs.
+Thus the **complete campaign remains failed, with 3/4 template outcomes**;
+complete template acceptance and P0 research quality remain open.
+
+The append case proposed the exact requested payload and waited for approval
+with zero writes. The host stopped, retired the original package and restarted
+with the original exact pin in recovery-only mode. New use was denied. After
+explicit approval, the service persisted one note and deliberately lost its
+response; the child retained an uncertain effect. An extra resume sent no new
+write/model request. The harness operator read the actual external record and
+recorded an explicitly labelled observed result, then the native role produced
+`{"saved":true}`. Completed reentry remained unchanged with one note total.
+This demonstrates controlled recovery with operator actions, not autonomous
+reconciliation or exactly-once external effects.
+
+The final campaign took 19,744 ms, with ten native model requests, 6,823 input /
+450 output tokens and four model-requested tool attempts. It made one public
+GitHub metadata request; separate operator status reads are not model tool
+attempts. Generation/public API prices were explicitly zero, with a zero-micro-
+USD generation cap and twenty-request GitHub process cap. Local hosting/electricity
+and chat usage remain unmetered. There is no competitor/latency ranking here.
+Twelve lifecycle/control checks passed, but the retained citation failure is
+not relabelled as success. See `skill-packages.md` and
+`acceptance/p1-skills-20261128.json` for source/artifact pins and transcripts.

@@ -22,6 +22,7 @@ pub mod rag;
 #[cfg(feature = "sandbox")]
 pub mod sandbox;
 mod session;
+pub mod skills;
 mod state;
 mod store;
 mod tool;

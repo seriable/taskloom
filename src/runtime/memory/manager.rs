@@ -430,6 +430,7 @@ impl<'a> MemoryManager<'a> {
         let schema = json!({"type":"object","properties":{"memories":{"type":"array","maxItems":16,"items":{"type":"object","properties":{"kind":{"enum":["fact","preference"]},"key":{"type":"string","pattern":"^[a-z0-9._-]{1,96}$"},"value":{"type":"string","minLength":1,"maxLength":2048},"quote":{"type":"string","minLength":4,"maxLength":4096}},"required":["kind","key","value","quote"],"additionalProperties":false}}},"required":["memories"],"additionalProperties":false});
         let configured = agent
             .clone()
+            .without_skill_binding()
             .with_policy(ToolPolicy::default())
             .with_label(format!("{}:memory-extraction-v1", agent.label))
             .with_output_policy(FinalOutputPolicy::JsonSchema {

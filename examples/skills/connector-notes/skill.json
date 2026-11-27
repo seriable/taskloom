@@ -1,0 +1,251 @@
+{
+  "format": 1,
+  "name": "connector-notes",
+  "version": "1.0.0",
+  "description": "Host-bound MCP repository metadata and durable local notes examples.",
+  "files": {
+    "append.md": "7e9f5865c7f805a4cd3971a326b21a2217b2e94ce4d086200b94ba52e4608951",
+    "connector.example.json": "c0c55605f5e66ddc4cd3cefa0880bd60c03f5840e64b492964ecff1fba368c63",
+    "repository.md": "fcec2a35ef5c29864e63bab59abf31ba913f2e068b5aecbddc6b316119512353",
+    "status.md": "b29f5002bfa7750997b607e51b5cd8586ac923add4b21b091b2dc3ac5a567139"
+  },
+  "dependencies": [],
+  "tools": {
+    "repo_metadata": {
+      "effect": "read_only",
+      "permissions": [
+        "repository:read"
+      ]
+    },
+    "notes_status": {
+      "effect": "read_only",
+      "permissions": [
+        "notes:read"
+      ]
+    },
+    "notes_append": {
+      "effect": "non_idempotent",
+      "permissions": [
+        "notes:write"
+      ]
+    }
+  },
+  "credentials": [
+    {
+      "name": "TASKLOOM_EXAMPLE_CONNECTOR_TOKEN",
+      "purpose": "Host-configured bearer token for the explicitly started local example MCP service."
+    }
+  ],
+  "roles": [
+    {
+      "name": "repository",
+      "instructions": "repository.md",
+      "includes": [],
+      "tools": [
+        "repo_metadata"
+      ],
+      "output": {
+        "type": "validated",
+        "policy": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "repository",
+              "license",
+              "summary"
+            ],
+            "additionalProperties": false
+          },
+          "max_repairs": 1
+        }
+      }
+    },
+    {
+      "name": "append",
+      "instructions": "append.md",
+      "includes": [],
+      "tools": [
+        "notes_append"
+      ],
+      "output": {
+        "type": "validated",
+        "policy": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "saved": {
+                "const": true
+              }
+            },
+            "required": [
+              "saved"
+            ],
+            "additionalProperties": false
+          },
+          "max_repairs": 1
+        }
+      }
+    },
+    {
+      "name": "status",
+      "instructions": "status.md",
+      "includes": [],
+      "tools": [
+        "notes_status"
+      ],
+      "output": {
+        "type": "validated",
+        "policy": {
+          "type": "json_schema",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "entries": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "entries"
+            ],
+            "additionalProperties": false
+          },
+          "max_repairs": 1
+        }
+      }
+    }
+  ],
+  "templates": [
+    {
+      "id": "repository-summary",
+      "title": "Inspect the host-pinned GitHub repository",
+      "description": "Inspect the host-pinned GitHub repository",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "workflow": {
+        "type": "dag",
+        "definition": {
+          "nodes": [
+            {
+              "id": "result",
+              "task": "repository",
+              "depends_on": [],
+              "params": null,
+              "condition": {
+                "type": "always"
+              },
+              "allow_skipped_dependencies": false,
+              "select": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "record-note",
+      "title": "Append one exact approved note",
+      "description": "Append one exact approved note",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "workflow": {
+        "type": "dag",
+        "definition": {
+          "nodes": [
+            {
+              "id": "result",
+              "task": "append",
+              "depends_on": [],
+              "params": null,
+              "condition": {
+                "type": "always"
+              },
+              "allow_skipped_dependencies": false,
+              "select": {}
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "notes-status",
+      "title": "Inspect existing local notes",
+      "description": "Inspect existing local notes",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "workflow": {
+        "type": "dag",
+        "definition": {
+          "nodes": [
+            {
+              "id": "result",
+              "task": "status",
+              "depends_on": [],
+              "params": null,
+              "condition": {
+                "type": "always"
+              },
+              "allow_skipped_dependencies": false,
+              "select": {}
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connectors": [
+    {
+      "id": "local-notes-github",
+      "configuration_example": "connector.example.json",
+      "tools": [
+        "repo_metadata",
+        "notes_status",
+        "notes_append"
+      ],
+      "credentials": [
+        "TASKLOOM_EXAMPLE_CONNECTOR_TOKEN"
+      ],
+      "description": "Run the source example MCP service on loopback; repository identity and note directory are host-owned. No service is started or configured by installing this package."
+    }
+  ]
+}

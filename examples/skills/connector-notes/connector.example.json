@@ -1,0 +1,38 @@
+{
+  "mcp": [
+    {
+      "endpoint": "http://127.0.0.1:18084/mcp",
+      "token_env": "TASKLOOM_EXAMPLE_CONNECTOR_TOKEN",
+      "namespace": "example-notes-and-pinned-repository-v1",
+      "bindings": [
+        {
+          "name": "repo_metadata",
+          "remote_name": "repo_metadata",
+          "effect": "read_only",
+          "permissions": [
+            "repository:read"
+          ],
+          "description": null
+        },
+        {
+          "name": "notes_status",
+          "remote_name": "notes_status",
+          "effect": "read_only",
+          "permissions": [
+            "notes:read"
+          ],
+          "description": null
+        },
+        {
+          "name": "notes_append",
+          "remote_name": "notes_append",
+          "effect": "non_idempotent",
+          "permissions": [
+            "notes:write"
+          ],
+          "description": null
+        }
+      ]
+    }
+  ]
+}

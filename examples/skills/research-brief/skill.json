@@ -1,0 +1,87 @@
+{
+  "format": 1,
+  "name": "research-brief",
+  "version": "1.0.0",
+  "description": "Search a host-owned corpus and return a bounded cited brief.",
+  "files": {
+    "analyst.md": "2e98f0ff7ecbe5a1dd972423ba741360dd21160c59ab8407f2548e699426b307"
+  },
+  "dependencies": [
+    {
+      "digest": "6f21c4b2360e3d48b2c63bc9e36c2a307a276a51ec3cedd244d5ec58c79daf61",
+      "name": "evidence-base",
+      "version": "1.0.0"
+    }
+  ],
+  "tools": {
+    "knowledge_search": {
+      "effect": "read_only",
+      "permissions": [
+        "knowledge:read"
+      ]
+    }
+  },
+  "credentials": [],
+  "roles": [
+    {
+      "name": "analyst",
+      "instructions": "analyst.md",
+      "includes": [
+        {
+          "dependency": "evidence-base",
+          "path": "guidance.md"
+        }
+      ],
+      "tools": [
+        "knowledge_search"
+      ],
+      "output": {
+        "type": "validated",
+        "policy": {
+          "type": "cited_report",
+          "max_repairs": 2
+        }
+      }
+    }
+  ],
+  "templates": [
+    {
+      "id": "source-summary",
+      "title": "Cited local source summary",
+      "description": "Cited local source summary",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        },
+        "required": [
+          "goal"
+        ],
+        "additionalProperties": false
+      },
+      "workflow": {
+        "type": "dag",
+        "definition": {
+          "nodes": [
+            {
+              "id": "result",
+              "task": "analyst",
+              "depends_on": [],
+              "params": null,
+              "condition": {
+                "type": "always"
+              },
+              "allow_skipped_dependencies": false,
+              "select": {}
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connectors": []
+}

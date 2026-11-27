@@ -1,0 +1,15 @@
+{
+  "format": 1,
+  "name": "evidence-base",
+  "version": "1.0.0",
+  "description": "Reusable source and permission guidance; data-only dependency.",
+  "files": {
+    "guidance.md": "1c8d1b27bdf1a69590c4a0229fabf777b852a624ef7773da975b43839c737f3d"
+  },
+  "dependencies": [],
+  "tools": {},
+  "credentials": [],
+  "roles": [],
+  "templates": [],
+  "connectors": []
+}

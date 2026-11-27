@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Data-only versioned skills: bounded USTAR validation, immutable content pins,
+  exact dependencies, tool/credential declarations and separate host grants.
+  CLI install/inspect/retire and mounted API templates preserve durable package
+  identities; explicit recovery-only mounts cannot create new workflows. Source
+  MCP examples read GitHub metadata and reconcile a real response-lost note
+  append. Native citation failure remains visible. See `docs/skill-packages.md`.
+- Workflow child approval/reconciliation now uses the same role-selected final
+  output contract as child execution, including validated packaged roles, instead
+  of inheriting a top-level session contract or omitting the role validator.
 - Opt-in cross-session memory: scoped file snapshots, source-linked native
   extraction candidates, operator review/conflict replacement, versioned edits,
   export and erasure with anti-resurrection bindings. SDK/API/CLI and explicit

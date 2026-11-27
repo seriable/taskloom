@@ -53,6 +53,8 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/runs/{id}/reconcile/{call}", post(reconcile))
         .route("/runs/{id}/report", get(report))
         .route("/roles", get(roles))
+        .route("/templates", get(templates))
+        .route("/templates/{mount}/{template}/runs", post(start_template))
         .route("/workflows", get(workflows).post(start_workflow))
         .route("/workflows/{id}", get(workflow))
         .route("/workflows/{id}/events", get(workflow_events))
@@ -272,7 +274,21 @@ async fn report(State(app): State<Arc<Application>>, Path(id): Path<String>) -> 
     ))
 }
 async fn roles(State(app): State<Arc<Application>>) -> ApiResult {
-    Ok(Json(json!({"roles":app.config.roles})))
+    Ok(Json(
+        json!({"roles":app.registered_roles().collect::<Vec<_>>()}),
+    ))
+}
+async fn templates(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(app.skill_templates()))
+}
+async fn start_template(
+    State(app): State<Arc<Application>>,
+    Path((mount, template)): Path<(String, String)>,
+    Json(input): Json<super::AppTemplateRequest>,
+) -> ApiResult {
+    Ok(Json(
+        json!({"state":app.start_skill_template(&mount,&template,input).await?}),
+    ))
 }
 async fn workflows(State(app): State<Arc<Application>>) -> ApiResult {
     Ok(Json(

@@ -535,6 +535,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 .as_ref()
                 .map(|_| self.agent.compressor.id().into()),
             output_policy: self.agent.output_policy.clone(),
+            skill_binding: self.agent.skill_binding.clone(),
         }
     }
 

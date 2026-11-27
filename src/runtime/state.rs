@@ -60,6 +60,8 @@ pub struct RunConfig {
     pub compressor_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_policy: Option<super::FinalOutputPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_binding: Option<super::skills::SkillBinding>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -265,6 +267,9 @@ impl RunState {
             .get(..self.initial_message_count)
             .ok_or_else(|| invalid("initial input boundary is outside the transcript"))?;
         validate_history(initial).map_err(|error| invalid(&error.to_string()))?;
+        if let Some(binding) = &self.config.skill_binding {
+            binding.validate().map_err(|e| invalid(&e.to_string()))?;
+        }
         if let Some(policy) = &self.config.output_policy {
             policy.validate().map_err(|e| invalid(&e.to_string()))?;
             if policy.max_repairs() > 0 && self.config.limits.max_cost_micros.is_none() {

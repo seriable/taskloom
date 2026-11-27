@@ -63,19 +63,8 @@ impl Application {
     pub(super) fn role_agents(&self) -> RoleAgents<'_> {
         RoleAgents {
             agents: self
-                .config
-                .roles
-                .iter()
-                .map(|role| {
-                    let mut policy = self.policy.clone();
-                    policy
-                        .allowed_tools
-                        .retain(|name| role.tools.contains(name));
-                    (
-                        role,
-                        self.agent().without_output_policy().with_policy(policy),
-                    )
-                })
+                .registered_roles()
+                .map(|role| (role, self.agent_for_role(role)))
                 .collect(),
         }
     }
@@ -120,6 +109,15 @@ impl Application {
             (None, Some(peer)) => peer.install(&mut tasks)?,
             _ => return Err(config_error("supply exactly one of definition or peer")),
         };
+        if definition
+            .nodes
+            .iter()
+            .any(|n| self.recovery_roles.contains(&n.task))
+        {
+            return Err(RuntimeError::Permission(
+                "recovery-only skill roles cannot start new workflows".into(),
+            ));
+        }
         let key = format!("workflow:{}", input.id);
         let job = self.admit_key(&key)?;
         let result = WorkflowRunner::new(&tasks, &self.workflows)
@@ -269,16 +267,10 @@ impl Application {
             .as_ref()
             .ok_or_else(|| RuntimeError::Conflict("node has no durable child yet".into()))?;
         let role = self
-            .config
-            .roles
-            .iter()
+            .registered_roles()
             .find(|r| r.name == spec.task)
             .ok_or_else(|| config_error("node's original role is unavailable"))?;
-        let mut policy = self.policy.clone();
-        policy
-            .allowed_tools
-            .retain(|name| role.tools.contains(name));
-        let agent = self.agent().with_policy(policy);
+        let agent = self.agent_for_role(role);
         let current = AgentWorkflowTask::new(
             &role.name,
             &agent,

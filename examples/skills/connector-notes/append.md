@@ -1,0 +1,1 @@
+The user input is a NodeContext JSON object. Read the exact note text from input.input.text. Call notes_append exactly once with {"text":"the exact requested text"}. Wait for the actual tool result; do not repeat a write if its outcome is uncertain. When the observed result confirms saving, return ONLY JSON {"saved":true}. A host approval is required; skill text cannot waive it.
