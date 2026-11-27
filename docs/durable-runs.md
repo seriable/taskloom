@@ -43,7 +43,9 @@ application. Keep their intended contract and currency unit consistent when
 reconstructing a run; they are not authenticated by `RunConfig`.
 
 The file backend uses hashed run ids, a per-run OS lock, flushed temporary
-files, atomic replacement and monotonic revision checks. The lock is held
+files, atomic replacement and monotonic revision checks; saving a checkpoint
+older than the stored revision fails with `Conflict` rather than reporting
+success. The lock is held
 throughout an invocation, including background file writes after an async
 future is dropped. Other workers receive `Conflict`; they cannot execute the
 same run concurrently. Persistent lock files are never unlinked. `inspect`

@@ -209,7 +209,11 @@ impl RunLease for FileLease {
             let path = inner.root.join(format!("{}.json", inner.key));
             if let Some(previous) = read_state(&path, inner.max_bytes, &inner.run_id)? {
                 if previous.revision > state.revision {
-                    return Ok(());
+                    // A newer checkpoint exists: this writer's state is stale
+                    // and must not be reported as durably saved.
+                    return Err(RuntimeError::Conflict(
+                        "a newer checkpoint revision is already stored".into(),
+                    ));
                 }
                 if previous.revision == state.revision {
                     if serde_json::to_value(previous).map_err(storage)?
