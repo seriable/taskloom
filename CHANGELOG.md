@@ -16,7 +16,8 @@ Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaki
   (with `CIRCUIT_OPEN_MARKER`) again. A declared whole-call timeout still covers
   queueing.
 - **(breaking for stores)** The transport cache namespace keeps only
-  answer-affecting settings (endpoint, explicit namespace, seeds). Tuning
+  answer-affecting settings (endpoint, explicit namespace, seeds, schema/image
+  capabilities and fallback routing). Tuning
   timeouts, retries, concurrency or budgets no longer invalidates recordings
   and cached steps; recordings made with 0.2.0-alpha.1 must be regenerated once.
 - `RequestKey::for_transport` builds the key the runner stores a request
@@ -36,8 +37,14 @@ Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaki
   outcome unknown), so the turn can be closed.
 - **(breaking)** New `RuntimeError::StorageLimit` / `StopReason::StorageLimit`
   (HTTP 507): a turn or dispatch that could not be committed under the store
-  size cap is refused before any work; cancel, reconcile and abandon are never
-  blocked by size. Stores report their cap through `max_bytes()`.
+  size cap is refused before dispatch. Stores report their cap through
+  `max_bytes()`; writes, including operator notes, always obey it.
+- **(breaking for Rust RunLimits literals)** `max_model_result_bytes` bounds
+  serialized native replies (64 KiB by default, also defaulted in old JSON).
+  Admission reserves declared reply limits, duplicated tool state and actual
+  session commit metadata. Oversized custom replies leave a terminal record
+  with observed charges instead of an in-flight checkpoint eligible for replay.
+  Oversized session input is refused before binding a turn.
 - A stale checkpoint or workflow save returns `RuntimeError::Conflict` instead
   of reporting success.
 - The context summary of dropped current-turn blocks follows the current
@@ -59,8 +66,9 @@ Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaki
   or replaced by a host-authored `McpToolBinding::description`; SSE parsing is
   linear and accepts bare CR; proxies are disabled; a session id first sent
   after `initialize` is rejected.
-- Web: HTML nesting over 512 is rejected before parsing; extraction is one
-  pass in `spawn_blocking` under the request deadline.
+- Web: bounded incremental HTML5 tokenization/tree building checks deadlines
+  and caps live parser references at 512, including quoted attributes and raw
+  text; four workers cap concurrent CPU work. Extraction traverses once.
 - Sandbox: the supervisor verifies the code's byte length and SHA-256 before
   running it (the image digest changes); Docker's own error wins over a broken
   stdin pipe; `python_sandbox` is offered to top-level runs and sessions only

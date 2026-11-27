@@ -60,10 +60,14 @@ result. If persistence fails, no subsequent operation is dispatched. A result
 that exists only in memory is not treated as durably complete. Malformed,
 inconsistent or future-version checkpoints are rejected rather than reset.
 The default maximum file size is 64 MiB, configurable on `FileRunStore`.
-A run stops with `StopReason::StorageLimit` before dispatching a model or tool
-operation when its checkpoint is within a quarter of that limit; operator
-operations (cancel, rejection, reconciliation) are not blocked. See
-[sessions and context](sessions-and-context.md#session-size-limit).
+Before dispatch, a run reserves its declared maximum reply size plus duplicate
+tool state, context and terminal metadata. It stops with `StorageLimit` if that
+allowance cannot fit. Native model replies are capped by
+`RunLimits::max_model_result_bytes` (64 KiB by default); tool outputs use
+`max_tool_result_bytes`. A reply that violates its declared byte ceiling is
+not retained: the saved run is terminal, observed charges remain, and resume
+cannot replay the call. See [session storage admission](sessions-and-context.md#session-size-limit)
+for parent commit reservations and small-store configuration.
 
 This provides process-crash recovery on a local filesystem, not a distributed
 lease or an atomic transaction with an external service. Power-loss durability

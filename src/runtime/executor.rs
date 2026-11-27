@@ -21,6 +21,11 @@ pub struct RunLimits {
     pub max_duration: Duration,
     pub tool_timeout: Duration,
     pub max_tool_result_bytes: usize,
+    /// Maximum serialized native model reply (turn and serving model).
+    /// Durable runs reserve capacity before dispatch and reject larger replies
+    /// with a persisted terminal error instead of replaying an unrecorded call.
+    #[serde(default = "default_model_result_bytes")]
+    pub max_model_result_bytes: usize,
     /// Model costs only, in the gateway price table's micro-units. The built-in
     /// model adapter requires known valid prices and reserves the model's
     /// configured maximum input/output cost before every attempt.
@@ -35,9 +40,14 @@ impl Default for RunLimits {
             max_duration: Duration::from_secs(300),
             tool_timeout: Duration::from_secs(30),
             max_tool_result_bytes: 64 * 1024,
+            max_model_result_bytes: default_model_result_bytes(),
             max_cost_micros: None,
         }
     }
+}
+
+fn default_model_result_bytes() -> usize {
+    64 * 1024
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -321,6 +331,7 @@ impl<'a> AgentLoop<'a> {
             || self.max_output_tokens == 0
             || self.limits.tool_timeout.is_zero()
             || self.limits.max_tool_result_bytes < 4
+            || self.limits.max_model_result_bytes < 64
             || Instant::now()
                 .checked_add(self.limits.max_duration)
                 .is_none()
@@ -392,6 +403,15 @@ impl<'a> AgentLoop<'a> {
                 max_output_tokens: self.max_output_tokens,
             };
             let output = self.model.generate(&request, budget).await?;
+            if serde_json::to_vec(&output)
+                .map_err(|e| RuntimeError::Protocol(e.to_string()))?
+                .len()
+                > self.limits.max_model_result_bytes
+            {
+                return Err(RuntimeError::StorageLimit(
+                    "model reply exceeded max_model_result_bytes; reply not retained, usage charged, no tools dispatched".into(),
+                ));
+            }
             if let Some(detail) = budget.snapshot().denial {
                 return Err(RuntimeError::Budget(detail));
             }

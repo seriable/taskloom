@@ -100,9 +100,18 @@ impl WebClient {
         let text = match mime.as_str() {
             "text/plain" | "text/markdown" => text,
             "text/html" | "application/xhtml+xml" => {
+                static HTML_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
                 let max = self.access.max_text_bytes;
                 let remaining = deadline.saturating_duration_since(std::time::Instant::now());
-                let task = tokio::task::spawn_blocking(move || extract_html(&text, max, deadline));
+                let permit = tokio::time::timeout(remaining, HTML_WORKERS.acquire())
+                    .await
+                    .map_err(|_| invalid("HTML extraction exceeded total deadline"))?
+                    .map_err(|_| invalid("HTML extraction workers unavailable"))?;
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                let task = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    extract_html(&text, max, deadline)
+                });
                 tokio::time::timeout(remaining, task)
                     .await
                     .map_err(|_| invalid("HTML extraction exceeded total deadline"))?
@@ -318,95 +327,99 @@ fn public_ip(ip: IpAddr) -> bool {
 }
 /// Maximum element nesting accepted by HTML extraction.
 const MAX_HTML_DEPTH: usize = 512;
-/// Cheap linear pre-parse estimate of element nesting. The HTML parser's
-/// scope checks cost O(depth) per tag, so deep input must be refused before
-/// parsing; once started, parsing cannot be interrupted. Optional-end-tag
-/// elements (p, li, td, ...) and raw-text elements do not count; self-closing
-/// syntax is honoured only inside svg/math, as the HTML parser does.
-fn nesting_exceeds(html: &str, cap: usize) -> bool {
-    const VOID: &[&str] = &[
-        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source",
-        "track", "wbr", "param", "keygen",
-    ];
-    const OPTIONAL_END: &[&str] = &[
-        "p", "li", "dt", "dd", "option", "optgroup", "tr", "td", "th", "thead", "tbody", "tfoot",
-        "rb", "rt", "rp", "rtc", "colgroup", "caption", "html", "head", "body",
-    ];
-    const RAW_TEXT: &[&str] = &[
-        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript",
-    ];
-    let lower = html.to_ascii_lowercase();
-    let bytes = lower.as_bytes();
-    let find = |from: usize, needle: &[u8]| {
-        bytes
-            .get(from..)
-            .and_then(|tail| tail.windows(needle.len()).position(|w| w == needle))
-            .map(|at| from + at)
-    };
-    let mut stack: Vec<&str> = Vec::new();
-    let mut foreign = 0usize;
-    let mut at = 0usize;
-    while let Some(open) = find(at, b"<") {
-        at = open + 1;
-        if bytes[at..].starts_with(b"!--") {
-            match find(at + 3, b"-->") {
-                Some(end) => at = end + 3,
-                None => return false,
-            }
-            continue;
+// The tokenizer, rather than a second tag scanner, defines attribute/raw-text/
+// foreign-content boundaries. Stop feeding the tree builder once its live
+// handle set or the deadline is exceeded; never run an uninterruptible parse.
+type HtmlHandle = <scraper::HtmlTreeSink as html5ever::tree_builder::TreeSink>::Handle;
+struct HandleCount(std::cell::Cell<usize>);
+impl html5ever::tree_builder::Tracer for HandleCount {
+    type Handle = HtmlHandle;
+    fn trace_handle(&self, _: &HtmlHandle) {
+        self.0.set(self.0.get().saturating_add(1));
+    }
+}
+struct BoundedTreeBuilder {
+    inner: html5ever::tree_builder::TreeBuilder<HtmlHandle, scraper::HtmlTreeSink>,
+    deadline: std::time::Instant,
+    failure: std::cell::Cell<Option<&'static str>>,
+}
+impl html5ever::tokenizer::TokenSink for BoundedTreeBuilder {
+    type Handle = HtmlHandle;
+    fn process_token(
+        &self,
+        token: html5ever::tokenizer::Token,
+        line: u64,
+    ) -> html5ever::tokenizer::TokenSinkResult<HtmlHandle> {
+        if std::time::Instant::now() >= self.deadline {
+            self.failure
+                .set(Some("HTML extraction exceeded total deadline"));
         }
-        let closing = bytes.get(at) == Some(&b'/');
-        let start = at + usize::from(closing);
-        let mut end = start;
-        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'-') {
-            end += 1;
+        if self.failure.get().is_some() {
+            return html5ever::tokenizer::TokenSinkResult::Continue;
         }
-        let Some(close) = find(end, b">") else {
-            return false;
-        };
-        if end == start {
-            // `<!doctype>`, `<?...>` and stray `<` are not elements.
-            at = if matches!(bytes.get(at), Some(b'!' | b'?')) {
-                close + 1
-            } else {
-                at
-            };
-            continue;
+        let result = self.inner.process_token(token, line);
+        let handles = HandleCount(std::cell::Cell::new(0));
+        self.inner.trace_handles(&handles);
+        // Includes open elements and active formatting elements. Counting all
+        // live references is conservative and bounds both parser work lists.
+        if handles.0.get() > MAX_HTML_DEPTH {
+            self.failure.set(Some("HTML nesting exceeds depth limit"));
         }
-        let name = &lower[start..end];
-        at = close + 1;
-        if closing {
-            if let Some(position) = stack.iter().rposition(|open| *open == name) {
-                foreign -= stack[position..]
-                    .iter()
-                    .filter(|n| matches!(**n, "svg" | "math"))
-                    .count();
-                stack.truncate(position);
-            }
-            continue;
-        }
-        if VOID.contains(&name) || OPTIONAL_END.contains(&name) {
-            continue;
-        }
-        if foreign > 0 && bytes[close - 1] == b'/' {
-            continue;
-        }
-        if RAW_TEXT.contains(&name) {
-            match find(at, format!("</{name}").as_bytes()) {
-                Some(end) => at = end,
-                None => return false,
-            }
-            continue;
-        }
-        if matches!(name, "svg" | "math") {
-            foreign += 1;
-        }
-        stack.push(name);
-        if stack.len() > cap {
-            return true;
+        result
+    }
+    fn end(&self) {
+        if self.failure.get().is_none() {
+            self.inner.end();
         }
     }
-    false
+    fn adjusted_current_node_present_but_not_in_html_namespace(&self) -> bool {
+        self.inner
+            .adjusted_current_node_present_but_not_in_html_namespace()
+    }
+}
+fn parse_html_bounded(
+    html: &str,
+    deadline: std::time::Instant,
+) -> Result<scraper::Html, RuntimeError> {
+    use html5ever::tree_builder::TreeSink;
+    let sink = BoundedTreeBuilder {
+        inner: html5ever::tree_builder::TreeBuilder::new(
+            scraper::HtmlTreeSink::new(scraper::Html::new_document()),
+            Default::default(),
+        ),
+        deadline,
+        failure: std::cell::Cell::new(None),
+    };
+    let tokenizer = html5ever::tokenizer::Tokenizer::new(sink, Default::default());
+    let input = html5ever::buffer_queue::BufferQueue::default();
+    let check = || {
+        if let Some(detail) = tokenizer.sink.failure.get() {
+            Err(invalid(detail))
+        } else if std::time::Instant::now() >= deadline {
+            Err(invalid("HTML extraction exceeded total deadline"))
+        } else {
+            Ok(())
+        }
+    };
+    let mut offset = 0;
+    while offset < html.len() {
+        check()?;
+        let mut end = (offset + 1024).min(html.len());
+        while !html.is_char_boundary(end) {
+            end -= 1;
+        }
+        input.push_back(html5ever::tendril::StrTendril::from_slice(
+            &html[offset..end],
+        ));
+        while let html5ever::tokenizer::TokenizerResult::Script(_) = tokenizer.feed(&input) {
+            check()?;
+        }
+        check()?;
+        offset = end;
+    }
+    tokenizer.end();
+    check()?;
+    Ok(tokenizer.sink.inner.sink.finish())
 }
 /// Synchronous (CPU-bound) extraction; callers run it on a blocking thread.
 /// The traversal checks `deadline` so abandoned work stops promptly.
@@ -415,13 +428,7 @@ fn extract_html(
     max: usize,
     deadline: std::time::Instant,
 ) -> Result<String, RuntimeError> {
-    if nesting_exceeds(html, MAX_HTML_DEPTH) {
-        return Err(invalid("HTML nesting exceeds depth limit"));
-    }
-    if std::time::Instant::now() >= deadline {
-        return Err(invalid("HTML extraction exceeded total deadline"));
-    }
-    let parsed = scraper::Html::parse_document(html);
+    let parsed = parse_html_bounded(html, deadline)?;
     let selector = scraper::Selector::parse("body").expect("static selector");
     let body = parsed
         .select(&selector)
@@ -658,6 +665,34 @@ impl Tool for WebSearchTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn real_tokenization_handles_quotes_and_bounds_deadlines_during_parsing() {
+        let far = std::time::Instant::now() + Duration::from_secs(30);
+        for tag in ["<div title=\"> </div>\">", "<div title='> </div>'>"] {
+            let html = format!("<body>{}ok</body>", tag.repeat(12000));
+            assert!(extract_html(&html, 1024, far)
+                .unwrap_err()
+                .to_string()
+                .contains("depth limit"));
+        }
+        assert_eq!(
+            extract_html(
+                "<body><p title='> </p>'>kept</p><script>ignored <div></script> text</body>",
+                1024,
+                far
+            )
+            .unwrap(),
+            "kept text"
+        );
+        let html = format!(
+            "<body><div {}>text</div></body>",
+            (0..50000).map(|i| format!("a{i}='x' ")).collect::<String>()
+        );
+        let start = std::time::Instant::now();
+        let error = parse_html_bounded(&html, start + Duration::from_millis(2)).unwrap_err();
+        assert!(error.to_string().contains("deadline"));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
     #[test]
     fn deeply_nested_html_is_rejected_quickly_and_exclusions_are_skipped() {
         let far = std::time::Instant::now() + Duration::from_secs(60);

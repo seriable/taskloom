@@ -265,6 +265,26 @@ pub struct ModelRegistry {
 }
 
 impl ModelRegistry {
+    /// Only protocol and model-routing settings belong in answer-store keys.
+    /// Keep every prefix (including operational-only overrides), since a more
+    /// specific override shadows all fields of a less specific one.
+    pub(crate) fn answer_settings(&self) -> String {
+        let overrides = self
+            .overrides
+            .iter()
+            .map(|item| {
+                (
+                    item.id.trim().to_ascii_lowercase(),
+                    item.supports_json_schema,
+                    item.supports_images,
+                    item.max_images,
+                    &item.fallback_chain,
+                )
+            })
+            .collect::<Vec<_>>();
+        format!("{:?}|{:?}", overrides, self.default_fallback_chain)
+    }
+
     /// The built-in profiles only.
     pub fn new() -> Self {
         Self::default()

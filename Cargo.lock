@@ -1675,6 +1675,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "hex",
+ "html5ever",
  "jsonschema",
  "reqwest",
  "schemars",

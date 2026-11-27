@@ -400,10 +400,11 @@ impl<P: Provider> Transport for GatewayTransport<P> {
         // retry counts, concurrency and budgets do not, so tuning them keeps
         // recordings and cached steps valid.
         let settings = format!(
-            "taskloom-store-v3|{}|{}|{}",
+            "taskloom-store-v4|{}|{}|{}|{}",
             self.provider.cache_namespace(),
             self.cache_namespace,
             self.seeds,
+            self.gateway.config().models.answer_settings(),
         );
         Some(hex::encode(Sha256::digest(settings.as_bytes())))
     }

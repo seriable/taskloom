@@ -63,10 +63,14 @@ Responses have total deadlines, hop limits and streamed byte limits, even
 without Content-Length. Only UTF-8 HTML/plain text/Markdown is accepted.
 HTML extraction excludes scripts, styles, templates, SVGs and frames; it never
 executes JavaScript or fetches subresources. `timeout_ms` covers the whole
-fetch including extraction: HTML is parsed on a blocking thread under the
-remaining deadline, in one linear pass. Pages nested more than 512 elements
-deep (estimated before parsing; optional-end-tag elements such as `p`/`li` do
-not count) are rejected rather than parsed. Script-rendered pages, login flows,
+fetch including extraction. At most four HTML workers run concurrently.
+The HTML5 tokenizer handles quoted attributes, raw text and foreign content;
+a guarded tree builder checks the deadline per token and bounds its live
+open-element/formatting references to 512. Input is fed in bounded UTF-8 chunks
+with deadline checks, so tokenization also stops without requiring a closing
+tag. An expired request cannot leave an unrestricted full-document parse
+running. Text extraction then traverses the tree once, skipping excluded
+subtrees. Script-rendered pages, login flows,
 OCR, bot challenges and other encodings are unsupported and require a suitable
 host-controlled loader. Sources remain untrusted data.
 

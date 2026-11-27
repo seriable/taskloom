@@ -69,13 +69,26 @@ refused **before** it starts:
 - `begin_turn` (and so `run_turn`) rejects a new turn with
   `RuntimeError::StorageLimit` once the serialized session exceeds half of the
   session store's limit. Nothing is bound or dispatched.
-- A durable run stops with `StopReason::StorageLimit` before a model request
-  or tool dispatch when its checkpoint is within a quarter of the run store's
-  limit. Close that turn with `abandon_turn` as for any failed run.
+- The new input and the metadata needed to close its turn must also fit;
+  oversized input is rejected before the active binding is written.
+- Managed execution subtracts the complete session commit metadata from its
+  byte allowance. A durable run reserves the largest declared model/tool
+  response, duplicated tool state, context projection and a terminal-record
+  margin before dispatch. Insufficient space produces `StorageLimit` without
+  a model/tool call. Close that turn with `abandon_turn` as for any failed run.
+
+`RunLimits::max_model_result_bytes` caps the serialized native `ModelOutput`
+(turn plus serving model) at 64 KiB by default. Small custom stores should
+configure a smaller ceiling, for example 512 bytes for bounded short answers;
+`max_tool_result_bytes` also contributes to tool admission. Existing limit JSON
+without the new field receives the default. A custom model that violates its
+byte ceiling receives a persisted terminal `StorageLimit`: its reply is not
+retained, observed cost stays charged, and reentry does not call it again.
 
 Cancellation, approval rejection, `RecordResult`/`Abort` reconciliation and
-`abandon_turn` are never blocked by these checks, so an operator can still
-close a run near the limit. When the limit is reached, start a new session
+`abandon_turn` do not run dispatch-admission checks. Actual writes still obey
+store byte limits, including operator-supplied notes; use a bounded note that
+fits, or explicitly enlarge the trusted store's cap. When the limit is reached, start a new session
 (optionally seeding it with a summary from the old one); the existing session
 and its history are kept unchanged. Custom `SessionStore`/`RunLease`
 implementations opt in by returning their limit from `max_bytes`.

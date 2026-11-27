@@ -365,6 +365,20 @@ impl<'a> SessionManager<'a> {
                 base_message_count: session.messages.len(),
             };
             let prepared = session.input(&binding)?;
+            if let Some(max) = self.store.max_bytes() {
+                let initial = serde_json::to_vec(&prepared.messages)
+                    .map_err(storage)?
+                    .len() as u64;
+                if initial
+                    .saturating_add(commit_metadata_bytes(&session, &binding)?)
+                    .saturating_add(512)
+                    > max
+                {
+                    return Err(RuntimeError::StorageLimit(
+                        "new turn input and commit metadata cannot fit the session store; no turn was bound".into(),
+                    ));
+                }
+            }
             let revision = session.revision;
             session.revision = revision
                 .checked_add(1)
@@ -461,7 +475,16 @@ impl<'a> SessionManager<'a> {
         id: &str,
         input: SessionInput,
     ) -> Result<SessionRun, RuntimeError> {
-        let run = durable
+        let session = self.load(id).await?;
+        let mut bounded = durable.clone();
+        if let (Some(max), Some(binding)) = (self.store.max_bytes(), &session.active) {
+            // A committed session consists of the run's messages plus this
+            // exact metadata. Reserve it before dispatch; a run checkpoint
+            // always contains at least its serialized messages.
+            let metadata = commit_metadata_bytes(&session, binding)?;
+            bounded = bounded.with_checkpoint_limit(max.saturating_sub(metadata));
+        }
+        let run = bounded
             .start_or_resume(&input.run_id, input.messages)
             .await?;
         let session = if run.status == RunStatus::Finished
@@ -599,6 +622,24 @@ impl<'a> SessionManager<'a> {
             "session metadata is busy; retry the operation".into(),
         ))
     }
+}
+
+fn commit_metadata_bytes(session: &Session, binding: &SessionBinding) -> Result<u64, RuntimeError> {
+    let mut committed = session.clone();
+    committed.active = None;
+    committed.messages.clear();
+    // Use the longest integer encodings; these are a size estimate, not a
+    // checkpoint to save or a replacement for Session::validate.
+    committed.revision = u64::MAX;
+    committed.turns.push(SessionTurn {
+        binding: binding.clone(),
+        message_end_count: usize::MAX,
+        report_fingerprint: "0".repeat(64),
+        outcome: StopReason::Completed,
+        actor: None,
+        note: None,
+    });
+    Ok(serde_json::to_vec(&committed).map_err(storage)?.len() as u64)
 }
 
 fn validate_binding(id: &str, binding: &SessionBinding, base: usize) -> Result<(), RuntimeError> {

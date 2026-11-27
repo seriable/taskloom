@@ -17,12 +17,14 @@ use crate::{ledger::Usage, CancelToken, TaskError};
 /// Checkpointed execution using the same model/tool contracts as [`AgentLoop`].
 /// A lease covers the whole invocation. Approval and reconciliation only
 /// update state; a separate explicit `resume` performs further work.
+#[derive(Clone)]
 pub struct DurableAgent<'a, 'model> {
     agent: &'a AgentLoop<'model>,
     store: &'a dyn RunStore,
     approvals: ApprovalPolicy,
     pause: Option<&'a CancelToken>,
     cancel_reason: Option<&'a CancelReason>,
+    checkpoint_limit: Option<u64>,
 }
 
 /// Who cancelled a live run and why. Record it before firing the worker's
@@ -60,12 +62,42 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             approvals: ApprovalPolicy::default(),
             pause: None,
             cancel_reason: None,
+            checkpoint_limit: None,
         }
     }
 
     pub fn with_approvals(mut self, approvals: ApprovalPolicy) -> Self {
         self.approvals = approvals;
         self
+    }
+
+    /// A parent may reserve part of its own storage capacity for the run's
+    /// transcript. This is an operational admission limit, not a new run input.
+    pub(crate) fn with_checkpoint_limit(mut self, bytes: u64) -> Self {
+        self.checkpoint_limit = Some(self.checkpoint_limit.map_or(bytes, |old| old.min(bytes)));
+        self
+    }
+
+    fn check_capacity(
+        &self,
+        state: &RunState,
+        lease: &Arc<dyn RunLease>,
+        additional: usize,
+    ) -> Result<(), RuntimeError> {
+        let max = match (lease.max_bytes(), self.checkpoint_limit) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => return Ok(()),
+        };
+        let size = serde_json::to_vec(state)
+            .map_err(|e| corrupt(&e.to_string()))?
+            .len() as u64;
+        if size.saturating_add(additional as u64).saturating_add(1024) > max {
+            return Err(RuntimeError::StorageLimit(format!(
+                "run needs {additional} bytes for its bounded response and terminal record beyond its {size}-byte checkpoint; effective storage limit is {max} bytes; start a new session/run or configure smaller result limits"
+            )));
+        }
+        Ok(())
     }
 
     /// Graceful pause: finish/checkpoint the current operation, then stop
@@ -695,8 +727,42 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
-        check_capacity(state, lease)?;
-        state.report.steps += 1;
+        // Build the context without emitting events or changing the live state
+        // until its checkpoint and the largest legal reply have been admitted.
+        let mut candidate = state.clone();
+        candidate.report.steps += 1;
+        let messages = self
+            .agent
+            .prepare_context(&mut candidate.report, &candidate.config.tools)?;
+        let max_definition = candidate
+            .config
+            .tools
+            .iter()
+            .try_fold(0, |largest, definition| {
+                serde_json::to_vec(definition).map(|bytes| largest.max(bytes.len()))
+            })
+            .map_err(|e| corrupt(&e.to_string()))?;
+        let batch = if candidate.config.tools.is_empty() {
+            0
+        } else {
+            self.agent
+                .limits
+                .max_tool_calls
+                .saturating_sub(candidate.report.tool_calls)
+        };
+        let reserve = self
+            .agent
+            .limits
+            .max_model_result_bytes
+            .saturating_mul(2)
+            .saturating_add(batch.saturating_mul(max_definition.saturating_add(256)))
+            .saturating_add(
+                serde_json::to_vec(&self.agent.model_id)
+                    .map_err(|e| corrupt(&e.to_string()))?
+                    .len(),
+            );
+        self.check_capacity(&candidate, lease, reserve)?;
+        *state = candidate;
         self.event(
             state,
             clock,
@@ -705,9 +771,6 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 model: self.agent.model_id.clone(),
             },
         );
-        let messages = self
-            .agent
-            .prepare_context(&mut state.report, &state.config.tools)?;
         if let Some(record) = state.report.contexts.last() {
             self.event(
                 state,
@@ -770,6 +833,15 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                     .await
             }
         };
+        if serde_json::to_vec(&output)
+            .map_err(|e| corrupt(&e.to_string()))?
+            .len()
+            > self.agent.limits.max_model_result_bytes
+        {
+            return Err(RuntimeError::StorageLimit(
+                "model reply exceeded max_model_result_bytes; reply not retained, usage charged, no tools dispatched".into(),
+            ));
+        }
         if let Some(detail) = budget.snapshot().denial {
             return Err(RuntimeError::Budget(detail));
         }
@@ -905,12 +977,23 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 )
                 .await;
         }
-        check_capacity(state, lease)?;
         let step = &state.tool_steps[index];
         let call = step.call.clone();
         let effect = step.definition.effect;
         let prepared = self.agent.tools.prepare(&call, &self.agent.policy)?;
         let request = step.request(&state.report.run_id, step.attempts + 1)?;
+        let request_bytes = serde_json::to_vec(&request)
+            .map_err(|e| corrupt(&e.to_string()))?
+            .len();
+        self.check_capacity(
+            state,
+            lease,
+            self.agent
+                .limits
+                .max_tool_result_bytes
+                .saturating_mul(2)
+                .saturating_add(request_bytes.saturating_mul(2)),
+        )?;
         if self.approvals.requires(&step.definition)
             && !step
                 .approvals
@@ -1167,25 +1250,6 @@ fn unix_ms() -> Result<u64, RuntimeError> {
         .as_millis()
         .try_into()
         .map_err(|_| corrupt("wall clock exceeds the persistent timestamp range"))
-}
-
-/// Refuse to dispatch when the checkpoint is within a quarter of the store's
-/// byte limit. The headroom lets the dispatched operation, its result and any
-/// later cancel/reconcile/stop checkpoint still be saved; those operator paths
-/// are never blocked by this check.
-fn check_capacity(state: &RunState, lease: &Arc<dyn RunLease>) -> Result<(), RuntimeError> {
-    let Some(max) = lease.max_bytes() else {
-        return Ok(());
-    };
-    let size = serde_json::to_vec(state)
-        .map_err(|e| corrupt(&e.to_string()))?
-        .len() as u64;
-    if size.saturating_add(max / 4) > max {
-        return Err(RuntimeError::StorageLimit(format!(
-            "run checkpoint is {size} bytes, too close to the {max}-byte store limit to dispatch more work; start a new session or run (existing history is kept)"
-        )));
-    }
-    Ok(())
 }
 
 fn validate_actor(actor: &str, note: &str) -> Result<(), RuntimeError> {

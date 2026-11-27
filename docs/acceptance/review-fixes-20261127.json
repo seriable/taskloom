@@ -1,0 +1,44 @@
+{
+  "date": "2026-11-27",
+  "previous_head": "b1f09a287609c2b56b30aac971fb43389c7565a0",
+  "scope": "Three review findings: incremental bounded HTML parsing, protocol/routing cache identity, bounded model/tool and session-commit storage admission. Includes the owner's preceding local updates.",
+  "source_blobs": {
+    "Cargo.toml": "a2680e0e29dd72ce85d34cd19f9e3f16f0c025fb",
+    "Cargo.lock": "d418c731c26b2f105db3f28829e46b649c4a8232",
+    "src/gateway/profiles.rs": "43ee3ab9ee094224fe5ac91db335590eebd76c44",
+    "src/provider.rs": "019a08ada163e8556b08d514ba32f467411e4ea4",
+    "src/runtime/durable.rs": "633b0613f8c9f5c7a18373db2fb8521567125714",
+    "src/runtime/executor.rs": "aa838c436d9c879a4091e3a23698a6af76256698",
+    "src/runtime/rag/web.rs": "0f9b25c8582b375090be47604962fb37edc6a02d",
+    "src/runtime/session.rs": "7b16afdb0f599debcac6d2a5f8cac091a4a08710",
+    "tests/review_regressions.rs": "b92fe109b665e38a52cd9a9916e00d3a0fc3a68d",
+    "sandbox/python/supervisor.py": "04c7dd9620880669e4ee937944cbfb179bcb593f"
+  },
+  "validation": {
+    "all_features": {
+      "passed": 265,
+      "failed": 0,
+      "ignored": 6
+    },
+    "new_integration_regressions": 10,
+    "default_features": {
+      "passed": 84,
+      "failed": 0,
+      "ignored": 0
+    },
+    "clippy": "cargo clippy --locked --all-targets --all-features -j 1 -- -D warnings: passed",
+    "msrv": "cargo +1.86.0 check --locked --all-features --target-dir target/msrv-runtime -j 1: passed",
+    "docs": "RUSTDOCFLAGS=-D warnings cargo doc --locked --no-deps --all-features -j 1: passed",
+    "format": "cargo fmt --all -- --check: passed",
+    "real_docker": {
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "engine": "Docker Desktop Linux/amd64",
+      "image": "sha256:857c72d95d723254b38ee66eed7b71a34e4d00748cc32bc6f60c6f85bb6d1d06",
+      "duration_seconds": 6.51,
+      "note": "Existing audited supervisor image rebuilt from current sources; the five ignored environment tests were separately invoked."
+    }
+  },
+  "limits": "Model tests use fixtures, not a live paid model. One real Poppler case remains ignored in the all-feature run. Hosted Actions are optional for source-only publication and no hosted CI success is claimed."
+}

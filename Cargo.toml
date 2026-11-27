@@ -27,7 +27,7 @@ runtime = ["dep:jsonschema", "dep:uuid"]
 # Explicitly configured MCP Streamable HTTP tool clients.
 mcp = ["runtime", "dep:reqwest"]
 # Opt-in bounded web ingestion/search and a configured PDF text extractor.
-research = ["runtime", "dep:reqwest", "dep:scraper", "tokio/net", "tokio/process", "tokio/io-util"]
+research = ["runtime", "dep:reqwest", "dep:scraper", "dep:html5ever", "tokio/net", "tokio/process", "tokio/io-util"]
 # Explicit Linux-container Python execution, never a host-shell fallback.
 sandbox = ["runtime", "dep:base64", "tokio/process", "tokio/io-util"]
 # Local API/CLI/UI host; library-only users retain the minimal default build.
@@ -38,6 +38,7 @@ axum = { version = "0.8", default-features = false, features = ["http1", "json",
 base64 = { version = "0.22", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
+html5ever = { version = "0.29", optional = true }
 jsonschema = { version = "0.29", default-features = false, optional = true }
 # jsonschema accepts newer uuid releases whose MSRV exceeds Rust 1.86.
 # Constrain downstream resolution too, not only this repository's lockfile.
