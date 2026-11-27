@@ -14,6 +14,11 @@ use super::{BudgetSnapshot, RunState, RuntimeError};
 /// asynchronous checkpoint writes. Implementations must provide equivalent
 /// exclusion and atomic, monotonic replacement semantics.
 pub trait RunLease: Send + Sync {
+    /// Revalidate immediately before a model/tool callback. The default is for
+    /// non-expiring structural locks; renewable stores must check their fence.
+    fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
+        Box::pin(async { Ok(()) })
+    }
     fn load(&self) -> BoxFuture<'_, Result<Option<RunState>, RuntimeError>>;
     /// Preserve a run's original `trace_binding`, including legacy None.
     fn save<'a>(&'a self, state: &'a RunState) -> BoxFuture<'a, Result<(), RuntimeError>>;

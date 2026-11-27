@@ -12,6 +12,8 @@ pub mod app;
 pub mod benchmark;
 mod budget;
 mod context;
+#[cfg(feature = "database")]
+pub mod database;
 mod durable;
 mod executor;
 #[cfg(feature = "mcp")]

@@ -12,6 +12,11 @@ use crate::runtime::{
 };
 
 pub trait WorkflowLease: Send + Sync {
+    /// Non-expiring file locks need no extra query. Renewable stores must
+    /// revalidate their fencing epoch before a scheduled callback is polled.
+    fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
+        Box::pin(async { Ok(()) })
+    }
     fn load(&self) -> BoxFuture<'_, Result<Option<WorkflowState>, RuntimeError>>;
     fn save<'a>(&'a self, state: &'a WorkflowState) -> BoxFuture<'a, Result<(), RuntimeError>>;
 }

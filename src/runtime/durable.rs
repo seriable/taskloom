@@ -859,6 +859,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             temperature: self.agent.temperature,
             max_output_tokens: self.agent.max_output_tokens,
         };
+        lease.verify_ownership().await?;
         let (output, usage) = crate::ledger::metered(controlled(
             self.agent.model.generate(&request, budget),
             clock,
@@ -1145,6 +1146,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             },
         );
         self.save(state, lease, budget, clock).await?;
+        lease.verify_ownership().await?;
         let result = controlled(
             self.agent
                 .execute_tool(prepared, call.clone(), state.report.run_id.clone()),

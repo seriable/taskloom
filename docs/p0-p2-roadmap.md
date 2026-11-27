@@ -338,6 +338,19 @@ goal; P0 and every P2.2 box below remain open.
 
 ## P2.2 — Service capabilities
 
+2026-11-28 SQL SDK foundation: opt-in SQLite/PostgreSQL run, workflow, session
+and budget journals have transactional schema v1, namespace-bound envelopes,
+CAS and database-clock renewable/fenced ownership. Actual SQLite and official
+PostgreSQL 16.15 each passed eleven native lifecycle controls, including killed
+generation recovery and unchanged terminal reentry; quiescent backup/restore
+passed three controls. The interrupted response usage remains unknown and
+the recovery output truncates to model_error, so this is not long-task quality
+acceptance. File stores still back the local Application/CLI/UI, and SQL corpus,
+memory, skills, embedding ledger, authentication, quotas and queue/worker
+integration are unfinished. Earlier native shutdown failures remain retained.
+All P2.2 boxes stay unchecked. See `sql-storage.md` and
+`acceptance/p2-sql-stores-20261128.json` for migration and reproducible evidence.
+
 - [ ] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
 - [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.

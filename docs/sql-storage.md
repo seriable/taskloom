@@ -1,0 +1,134 @@
+# SQL runtime stores (SDK foundation)
+
+The opt-in `database` feature supplies SQLite and PostgreSQL implementations
+of `RunStore`, `WorkflowStore` and `SessionStore`. Default features remain
+empty and the supported Rust version remains 1.86. The local Application,
+HTTP API, CLI and UI still select file stores. This increment does not supply
+multi-user authentication, quotas, a durable queue or distributed workers.
+P2.2 therefore remains unfinished.
+
+## Explicit setup
+
+```toml
+taskloom = { version = "0.2.0-alpha.1", features = ["database"] }
+```
+
+```rust,no_run
+use taskloom::runtime::database::{DatabaseNamespace, DatabaseOptions, SqlDatabase};
+# async fn example() -> Result<(), taskloom::runtime::RuntimeError> {
+let db = SqlDatabase::sqlite("runtime.sqlite", DatabaseOptions::default()).await?;
+db.migrate().await?; // explicit transaction; no migration during a model call
+let scope = DatabaseNamespace::new("tenant-a", "project-a")?;
+let runs = db.runs(scope.clone());
+let workflows = db.workflows(scope.clone());
+let sessions = db.sessions(scope);
+// Pass these stores to the existing durable agent/workflow/session APIs.
+// Stop and await active invocations, then drop their leases before closing:
+db.close().await;
+# Ok(()) }
+```
+
+For PostgreSQL, read a host-managed credential environment locally and call
+`SqlDatabase::connect(&url, options)`. Never log the URL or put it in a model
+prompt. The native example uses `TASKLOOM_DATABASE_URL`; tests use
+`TASKLOOM_TEST_POSTGRES_URL`. `DatabaseNamespace` is selected by the trusted
+host after authorization. A caller-provided namespace is not authentication.
+The example's tenant/project arguments are trusted local operator input only.
+
+`SqlDatabase::sqlite(path, options)` freezes the absolute path and escapes
+Windows drive names, spaces and Unicode. `sqlite_url(path)` returns the same
+explicit file URL for other SQL clients. Generic SQLite URLs must name a file;
+memory mode and custom VFS are refused. Keep database files and WAL/SHM files
+out of the source repository.
+
+## Transactions, ownership and limits
+
+Schema version 1 contains `taskloom_meta`, `taskloom_records` and
+`taskloom_leases`. Versioned JSON TEXT envelopes bind the namespace, record
+family and object ID. Checkpoints and budget generations advance monotonically;
+equal revisions require identical content. Trace parent bindings are immutable.
+Session updates use append-only compare-and-swap. Large integers and decimal
+values retain the runtime's existing JSON semantics.
+
+SQLite uses WAL, synchronous FULL and immediate write transactions. PostgreSQL
+uses synchronous commit and five-second statement/lock timeouts. The default
+pool has four connections (allowed 2–32); records are bounded to 64 MiB, and
+record IDs to 256 UTF-8 bytes. Tenant/project identifiers each accept 1–64
+ASCII letters, digits, dots, underscores and hyphens.
+
+Database-clock leases renew every third of their TTL (default ten seconds,
+allowed 100 ms–300 s). An expired owner cannot revive its lease. Successors
+increase a fencing epoch; delayed old-owner release cannot unlock the successor.
+Writes verify the live fence within their transaction before committing.
+Durable model/tool and workflow dispatch also verifies ownership after saving
+intent and before invoking the callback. A loss of ownership stops new dispatch.
+An external service cannot be made transactional by a database fence: a crash
+after invocation may leave an unknown effect. Original exact approvals,
+durable pre-dispatch spending reservations and explicit reconciliation still
+apply. No exactly-once external-effect guarantee is added.
+
+Drop the invocation/lease before `close()`. The pool drains already-enqueued
+conditional releases for up to five seconds; an actually killed process relies
+on lease expiry. Closing a pool while still running invocations is unsupported.
+`SqlRunStore::inspect_budget` reads the raw reservation journal. A later saved
+checkpoint may contain a newer settled generation, so these observations must
+not be summed or interpreted as independent charges.
+
+## Migration and backup
+
+Existing file-based users need no change. Enabling the Cargo feature does not
+change their store. `migrate()` explicitly creates schema v1 in a transaction;
+an unsupported version is refused. There is currently no supported bulk
+file-to-SQL import, no SQL corpus/memory/skills/embedding ledger, and no automatic
+schema downgrade. Keep existing file state until a separately verified importer
+is available. Take a backup before future schema changes.
+
+Stop writers and wait for ownership to drain before the reproducible backup
+procedure. Use SQLite's online backup API rather than copying a live database
+file without its WAL. For PostgreSQL use `pg_dump -Fc`, then restore into a new
+database with `pg_restore --exit-on-error --single-transaction --no-owner`.
+Verify cold runtime snapshots before admitting new work. Leases retained in a
+restored database must expire before takeover. Database clocks and permissions
+remain operational responsibilities. These procedures cover the three core
+tables only; they are not backups of model weights, uploaded files, corpus,
+memory, skills or the whole application.
+
+## Reproduction and acceptance
+
+```powershell
+cargo test --locked --features database --test database sqlite
+python examples/database/postgres_fixture.py --help
+python examples/database/postgres_fixture.py create target/my-owned-postgres
+# Load TASKLOOM_TEST_POSTGRES_URL privately from the fixture credentials file.
+cargo test --locked --features database --test database postgres -- --ignored
+cargo build --locked --features database,openai --example database_native
+python examples/database/accept_native.py target/my-native-sql --config target/native-generation-4b-config.json --example target/debug/examples/database_native.exe --postgres-fixture target/my-owned-postgres --model-log target/my-model.log
+python examples/database/backup_acceptance.py target/my-backup-check --native target/my-native-sql --postgres-fixture target/my-owned-postgres --example target/debug/examples/database_native.exe
+python examples/database/postgres_fixture.py remove target/my-owned-postgres
+```
+
+The fixture helper validates ownership before removal and never prints its
+password. It uses the exact cached official image digest declared in its source
+and refuses an absent or mismatched image; it never pulls an image. Do not publish its private
+`credentials.json`, database files or dumps. Native generation requires an
+already-running explicit zero-priced loopback API, its configured key
+environment and prices; the harness refuses paid endpoints. See
+`native-evaluation.md` for the separately retained model manifest/startup.
+
+`acceptance/p2-sql-stores-20261128.json` retains actual SQLite and official
+PostgreSQL 16.15 tests, native two-role workflows/two-turn sessions, separate
+cold readers, scope isolation, actual process death with persisted spending,
+TTL takeover, unknown usage and backup/restore snapshots. Each backend passed
+11 lifecycle controls. Each interrupted request retains unknown response usage;
+the recovery generation deliberately truncates at 128 tokens and stops with
+`model_error`. That is storage/recovery evidence, not a successful long-task
+quality result. All native API prices/caps are explicitly zero; hardware,
+electricity and the current chat are excluded. No embedding/tool billing or
+framework ranking is inferred.
+
+Earlier Windows URL handling and immediate-reentry shutdown failures remain
+recorded. The first native campaign passed its core operations but failed
+terminal reentry due to an asynchronous release/pool shutdown race. The final
+campaign reran both backends after the release-draining fix. Broad concurrent
+service/load acceptance, authenticated isolation and application integration
+remain open in `p0-p2-roadmap.md`.

@@ -556,9 +556,18 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
                         .ok_or_else(|| config("handler disappeared"))?
                         .task;
                     let token = workers.clone();
+                    let owner = Arc::clone(&lease);
                     let deadline = Instant::now() + clock.remaining(state.limits.max_duration);
                     pending.push(Box::pin(async move {
                         if token.is_cancelled() || Instant::now() >= deadline {
+                            (
+                                index,
+                                false,
+                                Err(RuntimeError::Model(crate::TaskError::Cancelled)),
+                            )
+                        } else if let Err(error) = owner.verify_ownership().await {
+                            (index, false, Err(error))
+                        } else if token.is_cancelled() || Instant::now() >= deadline {
                             (
                                 index,
                                 false,
