@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "reviewer": {
+    "kind": "Codex current-session assisted source review",
+    "blinded": false,
+    "independence": "different reviewing session model from the native Qwen generator, with task, sources and expected requirements visible",
+    "native_judge_api": false,
+    "fees_and_latency": "current-chat usage unmetered; excluded from native API, cost and latency comparisons"
+  },
+  "suite_sha256": "1afcd8746b7823f7a92e174bfc804faed562ea234701cacf76dd77005cb4aa00",
+  "method": "Split completed final prose into factual atomic claims. Check support from its attached exact citation separately from truth against the supplied corpus. Record omissions separately. Review the seeded bad draft verdict against the explicit source statements. Labels are supplied judgments, not proved by the aggregation script.",
+  "cases": [
+    {
+      "id": "parallel-policy-brief",
+      "response_sha256": "926928d623a8ecfe1a0758489344fd166ee3bef1035f62c5e41ab182898cd2c2",
+      "claims": [
+        {
+          "start": 0,
+          "end": 50,
+          "span": "Approval is bound to exact tool name and arguments",
+          "citation_ids": [
+            "25842b475a5ecd4faf59c325f4ddd218a5a298fcdb87ddbfd78dc7cb8c419530"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The cited approval source explicitly binds the exact tool and arguments."
+        },
+        {
+          "start": 52,
+          "end": 89,
+          "span": "changing payload invalidates decision",
+          "citation_ids": [
+            "25842b475a5ecd4faf59c325f4ddd218a5a298fcdb87ddbfd78dc7cb8c419530"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The same source states that changed payload invalidates the decision."
+        },
+        {
+          "start": 160,
+          "end": 216,
+          "span": "Interrupted non-idempotent writes require reconciliation",
+          "citation_ids": [
+            "5f982cbb461ebc99ea09d46e5328ef06451657426f8a61db1d9c03c744ffdcc8"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The recovery source states this requirement verbatim."
+        },
+        {
+          "start": 218,
+          "end": 232,
+          "span": "not repetition",
+          "citation_ids": [
+            "5f982cbb461ebc99ea09d46e5328ef06451657426f8a61db1d9c03c744ffdcc8"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The recovery source explicitly forbids silently repeating the write."
+        }
+      ],
+      "omissions": [],
+      "reviewer_assessment": {
+        "scope": "final model review",
+        "reference_judgment": "approval consistent with these four factual claims; not independent reviewer reliability evidence"
+      }
+    },
+    {
+      "id": "peer-initial-draft-audit",
+      "response_sha256": "2a669122aae02575c474b2b70b0a768c4d7ef96b9c64b16f064f8ea50844f637",
+      "claims": [
+        {
+          "start": 0,
+          "end": 54,
+          "span": "Approval is bound to the exact tool name and arguments",
+          "citation_ids": [
+            "25842b475a5ecd4faf59c325f4ddd218a5a298fcdb87ddbfd78dc7cb8c419530"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The approval quote supports this atomic claim."
+        },
+        {
+          "start": 60,
+          "end": 116,
+          "span": "interrupted non-idempotent writes require reconciliation",
+          "citation_ids": [
+            "25842b475a5ecd4faf59c325f4ddd218a5a298fcdb87ddbfd78dc7cb8c419530"
+          ],
+          "cited_support": "insufficient",
+          "corpus_factuality": "supported",
+          "reason": "Fact supported by the recovery corpus document, but the attached approval citation does not support recovery."
+        },
+        {
+          "start": 120,
+          "end": 172,
+          "span": "confirming the original operation's external outcome",
+          "citation_ids": [
+            "25842b475a5ecd4faf59c325f4ddd218a5a298fcdb87ddbfd78dc7cb8c419530"
+          ],
+          "cited_support": "insufficient",
+          "corpus_factuality": "supported",
+          "reason": "Fact supported by the recovery document; it is not present in the attached approval quote."
+        },
+        {
+          "start": 243,
+          "end": 279,
+          "span": "Generation budgets exclude embedding",
+          "citation_ids": [
+            "36d43ac569825890fdac914242bc9975f5e091698f3490a7e26b5b6e741ad5b6"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The cited budget document explicitly excludes embedding charges."
+        },
+        {
+          "start": 284,
+          "end": 304,
+          "span": "tool-service charges",
+          "citation_ids": [
+            "36d43ac569825890fdac914242bc9975f5e091698f3490a7e26b5b6e741ad5b6"
+          ],
+          "cited_support": "supported",
+          "corpus_factuality": "supported",
+          "reason": "The same budget sentence explicitly excludes tool-service charges."
+        }
+      ],
+      "omissions": [
+        "The requested reservation-before-dispatch explanation is absent from the final prose.",
+        "The final citations omit the required recovery governing document."
+      ],
+      "reviewer_assessment": {
+        "scope": "submitted deliberately defective initial report and final report",
+        "initial_native_verdict": {
+          "approved": true,
+          "feedback": "The report correctly states that 'Saving approval executes any later changed payload. Repeat uncertain writes automatically. Embedding charges are included in generation budgets.' This aligns with the knowledge search results, which confirm that 'Generation budgets exclude embedding and tool-service charges.' The feedback and corrections are accurate and consistent with the provided information."
+        },
+        "reference_judgment": "false acceptance of three contradicted seeded claims: changed-payload approval execution, automatic uncertain writes and embedding included in generation",
+        "final_citation_support": "two true recovery claims are attached to the wrong source; exact quote validation alone did not detect this"
+      }
+    }
+  ],
+  "limitations": [
+    "Small visible maintainer-authored policy corpus, not held out or a general factual benchmark.",
+    "This session-assisted annotation is not blind human review or an independently metered native judge API.",
+    "Factuality is relative to the supplied corpus, not independently established real-world truth.",
+    "Missing final reports remain unscored for claim precision and count as failed native cases.",
+    "No superiority, reviewer reliability, latency or cost ranking is inferred."
+  ]
+}

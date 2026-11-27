@@ -514,3 +514,18 @@ not an in-flight session crash, W3C service propagation, live subscriber,
 multi-user service or task-quality benchmark. P0 quality/comparison and P2 gates
 remain open. Raw evidence and failed probes:
 `acceptance/p1-trace-binding-20261128.json`.
+
+## Larger native model and qualified PEER comparison
+
+See `collaboration-comparison.md` for the later verified Qwen3-4B V5 campaign:
+1/3 native task passes, actual overlapping analysts, a false initial reviewer
+acceptance and explicit missing-source/reservation failures. The corresponding
+real agentUniverse PEER task completed its native roles but failed quality 0/1.
+Both its shared retrieval/role I/O adapter limits and Taskloom's earlier failure
+stage remain visible. Nine final claims have separately pinned non-blind
+session-assisted source-support labels (seven attached-citation supports, two
+insufficient, nine corpus-relative agreements), excluded from native judge API
+cost/latency and superiority claims. The V4 guidance error, first adapter HTTP
+422 probe and original agentUniverse dependency resolution failure are retained.
+This adds evidence, not full P0 acceptance; DeerFlow, complex LangGraph, long
+tasks, broader semantic/retrieval and native multi-agent recovery gates remain.

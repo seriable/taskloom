@@ -67,6 +67,24 @@ performed no work on terminal reentry. Its second generation was truncated and
 failed; no native uncertain-tool-effect or multi-agent process-death acceptance
 is claimed. See `final-output.md` and `acceptance/p0-output-20261128.json`.
 
+Later 2026-11-28 collaboration increment: explicit verified Qwen3-4B weights
+and V5 role/graph guidance produced 1/3 native passes, with overlapping analysts
+in all three cases. The PEER case still failed analyst marker repairs; the
+submitted-draft audit completed but failed review rejection/source coverage.
+Separate non-blind session-assisted labels cover nine final claims: seven
+supported by their attached citation, two insufficient, with corpus-relative
+agreement on nine and explicit task omissions. Those supplied labels are not
+native judge API or blind truth measurements. An actual agentUniverse
+PeerWorkPattern/ExecutingAgentTemplate adapter completed all native roles on
+the corresponding PEER task but scored 0/1 for missing reservation/source
+coverage; Taskloom's corresponding PEER task also failed. Other DAGs are marked
+not comparable in this PEER-only adapter. Native search uses shared Taskloom
+retrieval, with wrapper/repair/retry differences, so no leadership or identical
+conditioning claim is made. Retained V4 guidance errors, a first adapter HTTP
+422 harness failure and the original dependency resolver conflict are recorded.
+DeerFlow and broader complex/long/recovery comparisons remain open. See
+`collaboration-comparison.md` and `acceptance/p0-collaboration-20261128.json`.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,

@@ -4,12 +4,26 @@
 use serde::Deserialize;
 use std::io::Read;
 use taskloom::runtime::rag::{CitedReport, SearchResult};
+use taskloom::runtime::{FinalOutputPolicy, RunReport};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Input {
+#[serde(untagged)]
+enum Input {
+    Citations(Citations),
+    Policy(Box<Policy>),
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Citations {
     report: CitedReport,
     evidence: Vec<SearchResult>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Policy {
+    policy: FinalOutputPolicy,
+    run: RunReport,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut bytes = Vec::new();
@@ -20,7 +34,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("evidence exceeds 2 MiB".into());
     }
     let input: Input = serde_json::from_slice(&bytes)?;
-    let verified = SearchResult::verify_all(&input.evidence, input.report)?;
-    println!("{}", serde_json::to_string(&verified)?);
+    let value = match input {
+        Input::Citations(input) => {
+            serde_json::to_value(SearchResult::verify_all(&input.evidence, input.report)?)?
+        }
+        Input::Policy(input) => {
+            input.policy.validate()?;
+            input.policy.validated_value(&input.run)?
+        }
+    };
+    println!("{}", serde_json::to_string(&value)?);
     Ok(())
 }

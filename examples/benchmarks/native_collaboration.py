@@ -23,7 +23,7 @@ def node(name, task, dependencies=(), params=None, select=None):
 def run_case(case, api, root, verifier):
     started = time.perf_counter()
     request = {"id": case["id"], "input": {"goal": case["goal"]}, "definition": None, "peer": None,
-        "limits": {"max_nodes": 32, "max_parallel": 2, "max_dispatches": 64, "max_duration": {"secs": 300, "nanos": 0},
+        "limits": {"max_nodes": 32, "max_parallel": case.get("max_parallel", 2), "max_dispatches": 64, "max_duration": {"secs": 300, "nanos": 0},
                    "shutdown_grace": {"secs": 5, "nanos": 0}, "max_output_bytes": 131072, "max_cost_micros": 1}}
     if case["kind"] == "peer":
         request["peer"] = {"planner": "planner", "executor": "analyst", "writer": "writer", "reviewer": "reviewer",
@@ -31,10 +31,16 @@ def run_case(case, api, root, verifier):
         final_node = "result"
     else:
         branches = [node(b["id"], "analyst", params={"instructions": b["instructions"]}) for b in case["branches"]]
-        request["definition"] = {"nodes": branches + [node("draft", "writer", [b["id"] for b in case["branches"]]),
+        dependencies = [b["id"] for b in case["branches"]]
+        if case.get("initial_draft"):
+            branches.append(node("review-initial", "reviewer", params={"candidate": case["initial_draft"]}))
+            dependencies.append("review-initial")
+        request["definition"] = {"nodes": branches + [node("draft", "writer", dependencies),
             node("review", "reviewer", ["draft"], select={"draft": {"node": "draft", "pointer": ""}})]}
         final_node = "draft"
     result = {"id": case["id"], "request": request, "failures": [], "children": [], "model_steps": 0, "tool_attempts": 0,
+              "requested_tool_calls": 0, "tool_errors": 0,
+              "native_usage": {"requests": 0, "input_tokens": 0, "output_tokens": 0, "cost_micros": 0},
               "output_rejections": 0, "output_repairs_admitted": 0, "output_validations": 0}
     directory = root / case["id"]
     directory.mkdir()
@@ -59,7 +65,11 @@ def run_case(case, api, root, verifier):
                 child = api("/runs/" + item["child"]["run_id"])["state"]
                 result["children"].append(child)
                 result["model_steps"] += child["report"]["steps"]
-                result["tool_attempts"] += child["report"]["tool_calls"]
+                result["requested_tool_calls"] += child["report"]["tool_calls"]
+                result["tool_attempts"] += sum(t["attempts"] for t in child["tool_steps"])
+                result["tool_errors"] += sum(t["progress"].get("result", {}).get("is_error") is True for t in child["tool_steps"])
+                for key in result["native_usage"]:
+                    result["native_usage"][key] += child["report"]["usage"][key]
                 for event in child["report"]["events"]:
                     kind = event["kind"]
                     if kind["type"] == "output_rejected":
@@ -86,11 +96,17 @@ def run_case(case, api, root, verifier):
                 maximum = max(maximum, len(active))
         result["maximum_concurrent_analysts"] = maximum
         result["review_rework_exercised"] = any(n["id"] == "draft-1" and n["status"] == "complete" for n in state["nodes"])
+        if case.get("initial_draft"):
+            initial_review = next((n.get("output") for n in state["nodes"] if n["id"] == "review-initial"), None)
+            result["initial_review"] = initial_review
+            result["review_rework_exercised"] = (isinstance(initial_review, dict) and initial_review.get("approved") is False
+                and bool(initial_review.get("feedback", "").strip())
+                and any(n["id"] == "draft" and n["status"] == "complete" for n in state["nodes"]))
         if case["require_parallel"] and maximum < 2:
             result["failures"].append("two actual analyst executions did not overlap")
         if case["require_rework"] and not result["review_rework_exercised"]:
             result["failures"].append("required reviewer rejection/rewrite not exercised")
-        if case["kind"] == "dag":
+        if case["kind"] != "peer":
             review = next((n.get("output") for n in state["nodes"] if n["id"] == "review"), None)
             if not isinstance(review, dict) or review.get("approved") is not True:
                 result["failures"].append("reviewer did not approve the report")
@@ -153,7 +169,7 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] not in {1, 2, 3} or not suite["cases"]:
+    if suite["version"] not in {1, 2, 3, 4, 5} or not suite["cases"]:
         raise ValueError("unsupported suite")
     ids = [case["id"] for case in suite["cases"]]
     if len(set(ids)) != len(ids) or any(not 1 <= len(value) <= 64 or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in value) for value in ids):
@@ -167,7 +183,7 @@ def main():
         "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
     # A model-only config is reused, never its production tool grants/services.
     config.update(state_dir=str(root / "state"), roles=suite["roles"], knowledge=True,
-                  mcp=[], research={}, sandbox=None, sandbox_top_level=False,
+                  mcp=[], skills=[], memory=None, final_output=None, research={}, sandbox=None, sandbox_top_level=False,
                   retrieval={"mode": "lexical"})
     # Every native role has a separate durable run. Reserve zero API fees per
     # role under the campaign's explicit one-micro-unit admission cap.

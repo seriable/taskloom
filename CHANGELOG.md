@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Native collaboration V5 adds explicit submitted-draft review and corrected
+  bounded role guidance, with a pinned optional Qwen3-4B download profile. Real
+  local results remain 1/3, not general quality acceptance. An actual upstream
+  agentUniverse PEER/parallel-executor adapter records a qualified 0/1 shared
+  task result with native traffic and protocol differences. Separate non-blind
+  session-assisted claim annotations distinguish citation support from
+  corpus-relative factuality. Failed harness/dependency probes remain visible;
+  see `docs/collaboration-comparison.md`.
+
 - Journal diagnostics project validated run/workflow/session records into parent
   traces with model/tool/retrieval, approval, reconciliation and output checks.
   Explicit OTLP/HTTP JSON export sends bounded allowlisted spans and gauges;

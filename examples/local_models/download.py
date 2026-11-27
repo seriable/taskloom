@@ -12,8 +12,10 @@ from pathlib import Path
 import urllib.parse
 import urllib.request
 
-MODELS = ("Qwen/Qwen3-1.7B", "Qwen/Qwen3-Embedding-0.6B")
-MAX_TOTAL_BYTES = 7 * 1024**3
+PROFILES = {
+    "standard": (("Qwen/Qwen3-1.7B", "Qwen/Qwen3-Embedding-0.6B"), 7 * 1024**3),
+    "generation-4b": (("Qwen/Qwen3-4B",), 10 * 1024**3),
+}
 SMALL_FILES = {"config.json", "generation_config.json", "tokenizer.json",
                "tokenizer_config.json", "vocab.json", "merges.txt",
                "model.safetensors.index.json", "LICENSE"}
@@ -27,9 +29,10 @@ def digest(path):
     return h.hexdigest()
 
 
-def prepare(root):
+def prepare(root, profile="standard"):
+    models, _ = PROFILES[profile]
     manifest = {"version": 1, "source": "https://modelscope.cn", "models": {}}
-    for model in MODELS:
+    for model in models:
         url = f"https://modelscope.cn/api/v1/models/{model}/repo/files?Revision=master&Recursive=true"
         with urllib.request.urlopen(url, timeout=30) as response:
             data = json.loads(response.read(1024 * 1024))
@@ -43,7 +46,7 @@ def prepare(root):
                 files.append({"path": name, "revision": item["Revision"],
                               "bytes": item["Size"], "sha256": item["Sha256"]})
         manifest["models"][model] = files
-    validate(manifest)
+    validate(manifest, profile)
     root.mkdir(parents=True, exist_ok=True)
     # Never overwrite an established identity when a source's master moves.
     path = root / "models.lock.json"
@@ -53,8 +56,9 @@ def prepare(root):
     return manifest
 
 
-def validate(manifest):
-    if manifest["version"] != 1 or manifest["source"] != "https://modelscope.cn" or set(manifest["models"]) != set(MODELS):
+def validate(manifest, profile="standard"):
+    models, max_total_bytes = PROFILES[profile]
+    if manifest["version"] != 1 or manifest["source"] != "https://modelscope.cn" or set(manifest["models"]) != set(models):
         raise ValueError("unsupported model manifest")
     total = 0
     for model, files in manifest["models"].items():
@@ -68,10 +72,10 @@ def validate(manifest):
                 value = item[key]
                 if len(value) != size or any(c not in "0123456789abcdef" for c in value):
                     raise ValueError("unbound revision or hash")
-            if not 0 < item["bytes"] <= MAX_TOTAL_BYTES:
+            if not 0 < item["bytes"] <= max_total_bytes:
                 raise ValueError("invalid model file size")
             total += item["bytes"]
-    if total > MAX_TOTAL_BYTES:
+    if total > max_total_bytes:
         raise ValueError("model artifacts exceed download limit")
 
 
@@ -110,11 +114,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path)
     parser.add_argument("--prepare", action="store_true")
+    parser.add_argument("--profile", choices=sorted(PROFILES), default="standard",
+                        help="explicit model set and download byte ceiling; use a separate root per profile")
     args = parser.parse_args()
     root = args.root.resolve()
     path = root / "models.lock.json"
-    manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else prepare(root)
-    validate(manifest)
+    manifest = json.loads(path.read_text(encoding="utf-8")) if path.exists() else prepare(root, args.profile)
+    validate(manifest, args.profile)
     total = sum(f["bytes"] for files in manifest["models"].values() for f in files)
     print(f"pinned {total} bytes across {len(manifest['models'])} public models", flush=True)
     if args.prepare:
