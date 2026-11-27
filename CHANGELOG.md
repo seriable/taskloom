@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Durable agent execution: versioned checkpoints and budget journals, per-run
+  filesystem ownership, graceful pause/resume, exact-input approval tickets,
+  auditable reconciliation of uncertain tool effects, and a restart example.
+  Crash tests terminate child processes after writes/reservations; interrupted
+  non-idempotent tools are never automatically repeated.
+
 - Optional `runtime` feature: typed native tool conversations, JSON Schema
   tool validation, explicit permission grants, bounded sequential agent loops,
   run events/reports and model-spend reservations across retries/fallbacks.

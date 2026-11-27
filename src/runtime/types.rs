@@ -140,6 +140,8 @@ pub enum RuntimeError {
     Configuration(String),
     Tool(String),
     Permission(String),
+    Storage(String),
+    Conflict(String),
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -150,7 +152,9 @@ impl std::fmt::Display for RuntimeError {
             | Self::Protocol(detail)
             | Self::Configuration(detail)
             | Self::Tool(detail)
-            | Self::Permission(detail) => f.write_str(detail),
+            | Self::Permission(detail)
+            | Self::Storage(detail)
+            | Self::Conflict(detail) => f.write_str(detail),
         }
     }
 }
@@ -167,6 +171,17 @@ impl std::error::Error for RuntimeError {
 /// Validates complete history, including globally unique call ids and one
 /// result per outstanding call, before it can be sent to a provider.
 pub(crate) fn validate_history(messages: &[Message]) -> Result<(), RuntimeError> {
+    if !pending_calls(messages)?.is_empty() {
+        return Err(RuntimeError::Protocol(
+            "missing tool results in history".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn pending_calls(
+    messages: &[Message],
+) -> Result<std::collections::BTreeSet<String>, RuntimeError> {
     use std::collections::BTreeSet;
     let mut seen = BTreeSet::new();
     let mut pending = BTreeSet::new();
@@ -211,10 +226,10 @@ pub(crate) fn validate_history(messages: &[Message]) -> Result<(), RuntimeError>
             }
         }
     }
-    if !has_user || !pending.is_empty() {
+    if !has_user {
         return Err(RuntimeError::Protocol(
             "history needs a user message and complete tool results".into(),
         ));
     }
-    Ok(())
+    Ok(pending)
 }

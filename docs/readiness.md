@@ -11,8 +11,9 @@
 默认 API 的 Agent 负责执行单个结构化任务，调用方决定任务间的业务流程。
 开发分支新增可选 `runtime` 层：原生工具消息、工具注册与权限、受限 AgentLoop、
 事件轨迹和运行级模型预算。它不改变单任务 API，也不复用单任务答案缓存来执行工具。
-持久化恢复、人工审批、会话、多 Agent 工作流和应用交付仍在开发；不能把第一阶段
-的工具循环描述为三个阶段均已完成。详见 [开发清单](agent-roadmap.md) 与 [运行时指南](agent-runtime.md)。
+新增 `DurableAgent` 提供检查点、暂停恢复、人工审批、预算日志和不确定副作用核对。
+会话、上下文压缩、多 Agent 工作流和应用交付仍在开发；第二阶段尚未全部完成。
+详见 [开发清单](agent-roadmap.md)、[运行时指南](agent-runtime.md) 与 [恢复指南](durable-runs.md)。
 
 ## 本次已修复
 
@@ -64,17 +65,20 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 
 验证环境：Windows（Rust/Cargo 1.99 和真实 1.86）；WSL Debian Linux（Rust/Cargo 1.95）。
 
-- 单任务基线为 101 个测试；加入 runtime 后的全 feature 为 86 个单元测试、39 个集成测试，共 125 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
+- 单任务基线为 101 个测试；当前全 feature 为 87 个单元测试、54 个集成测试，共 141 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
 - feature 组合增加 runtime、runtime + openai、runtime + anthropic，分别验证测试和文档。
 - 格式检查、全目标/全 feature Clippy（warnings 视为错误）。
 - 全 feature 和上述各单 feature 文档构建（warnings 视为错误）。
-- basic、record_replay、production、eval 及新增 agent_loop 离线示例。
+- basic、record_replay、production、eval、agent_loop 和 agent_resume 六个离线示例。
 
 新增测试位于 `tests/gateway_regressions.rs`、`tests/reliability.rs` 和 `tests/step_cache.rs`。
 Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测试模块。
 运行时回归测试位于 `tests/agent_runtime.rs`；`tests/agent_runtime_http.rs` 用本地 HTTP
 验证两个原生 Provider 的完整工具往返，包含真实结果的下一轮消息。新增 Schema 依赖的 UUID
 版本同时在清单中约束，避免下游解析到要求 Rust 1.89 的版本，继续支持 Rust 1.86。
+`tests/agent_durable.rs` 包含进程实际退出后的恢复、审批绑定、幂等重试去重、写入失败、
+取消、预算日志和原子检查点验证。锁的最后持有者会显式解锁；重复句柄回归与 Linux
+连续十轮恢复测试覆盖了运行返回后锁短暂残留的问题。
 GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
 当前托管 CI 尚未完成验证；发布验证通过的是本地 Windows、真实最低 Rust 版本，以及独立 Linux 环境。
 不能把本地通过的结果描述为 GitHub CI 已通过。

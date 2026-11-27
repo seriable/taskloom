@@ -59,5 +59,9 @@ required-features = ["runtime"]
 name = "agent_openai"
 required-features = ["runtime", "openai"]
 
+[[example]]
+name = "agent_resume"
+required-features = ["runtime"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }

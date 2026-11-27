@@ -13,7 +13,7 @@ use crate::{ledger::Usage, CancelToken};
 
 /// Limits apply to the entire run. A step is one model decision (gateway
 /// retries are charged individually but belong to that decision).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunLimits {
     pub max_steps: usize,
     pub max_tool_calls: usize,
@@ -53,17 +53,54 @@ pub enum StopReason {
     ToolError,
     PermissionDenied,
     ConfigurationError,
+    Paused,
+    ApprovalRequired,
+    Uncertain,
+    StorageError,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunEventKind {
     Started,
-    ModelStarted { step: usize, model: String },
-    ModelFinished { step: usize, model: String },
-    ToolStarted { call_id: String, name: String },
-    ToolFinished { call_id: String, is_error: bool },
-    Stopped { reason: StopReason },
+    ModelStarted {
+        step: usize,
+        model: String,
+    },
+    ModelFinished {
+        step: usize,
+        model: String,
+    },
+    ToolStarted {
+        call_id: String,
+        name: String,
+    },
+    ToolFinished {
+        call_id: String,
+        is_error: bool,
+    },
+    Stopped {
+        reason: StopReason,
+    },
+    Resumed,
+    ApprovalRequested {
+        request_id: String,
+        call_id: String,
+    },
+    ApprovalDecided {
+        request_id: String,
+        approved: bool,
+        actor: String,
+    },
+    RecoveryRequired {
+        call_id: String,
+    },
+    RecoveredModel,
+    ToolReconciled {
+        call_id: String,
+        actor: String,
+        action: String,
+    },
 }
 
 /// Events contain correlation/ordering data; content is kept in the report's
@@ -111,15 +148,15 @@ impl RunReport {
 /// Sequential, bounded model/tool execution. A whole tool batch is preflighted
 /// before any tool is dispatched; requested tools are executed in order.
 pub struct AgentLoop<'a> {
-    model: &'a dyn Model,
-    tools: &'a ToolRegistry,
-    policy: ToolPolicy,
-    limits: RunLimits,
-    model_id: String,
-    label: String,
-    temperature: f32,
-    max_output_tokens: u32,
-    cancel: Option<&'a CancelToken>,
+    pub(super) model: &'a dyn Model,
+    pub(super) tools: &'a ToolRegistry,
+    pub(super) policy: ToolPolicy,
+    pub(super) limits: RunLimits,
+    pub(super) model_id: String,
+    pub(super) label: String,
+    pub(super) temperature: f32,
+    pub(super) max_output_tokens: u32,
+    pub(super) cancel: Option<&'a CancelToken>,
     events: Option<&'a EventSink<'a>>,
 }
 
@@ -220,6 +257,9 @@ impl<'a> AgentLoop<'a> {
                     RuntimeError::Tool(_) => StopReason::ToolError,
                     RuntimeError::Permission(_) => StopReason::PermissionDenied,
                     RuntimeError::Configuration(_) => StopReason::ConfigurationError,
+                    RuntimeError::Storage(_) | RuntimeError::Conflict(_) => {
+                        StopReason::StorageError
+                    }
                 };
                 report.detail = Some(error.to_string());
             }
@@ -231,7 +271,7 @@ impl<'a> AgentLoop<'a> {
         report
     }
 
-    fn validate(&self, report: &RunReport) -> Result<(), RuntimeError> {
+    pub(super) fn validate(&self, report: &RunReport) -> Result<(), RuntimeError> {
         if report.run_id.trim().is_empty()
             || self.model_id.trim().is_empty()
             || self.label.trim().is_empty()
@@ -345,47 +385,12 @@ impl<'a> AgentLoop<'a> {
                     },
                 );
                 tokio::task::yield_now().await;
-                let context = ToolContext {
-                    run_id: report.run_id.clone(),
-                    call_id: call.id.clone(),
-                };
-                let execution = tokio::time::timeout(
-                    self.limits.tool_timeout,
-                    tool.executor.execute(call.arguments, context),
-                )
-                .await;
-                let (mut value, is_error) = match execution {
-                    Ok(Ok(value))
-                        if serde_json::to_vec(&value)
-                            .map_or(true, |v| v.len() > self.limits.max_tool_result_bytes) =>
-                    {
-                        (
-                            json!({"error": "tool result exceeded the byte limit"}),
-                            true,
-                        )
-                    }
-                    Ok(Ok(value)) => (value, false),
-                    Ok(Err(error)) => (
-                        json!({"error": error.to_string().chars().take(1024).collect::<String>()}),
-                        true,
-                    ),
-                    Err(_) => (
-                        json!({"error": "tool timed out; external effects may be uncertain"}),
-                        true,
-                    ),
-                };
-                if serde_json::to_vec(&value)
-                    .map_or(true, |v| v.len() > self.limits.max_tool_result_bytes)
-                {
-                    value = serde_json::Value::Null;
-                }
-                report.messages.push(Message::Tool {
-                    result: ToolResult {
-                        call_id: call.id.clone(),
-                        output: value,
-                        is_error,
-                    },
-                });
+                let effect = tool.effect;
+                let result = self
+                    .execute_tool(tool, call.clone(), report.run_id.clone())
+                    .await;
+                let is_error = result.is_error;
+                report.messages.push(Message::Tool { result });
                 self.emit(
                     report,
                     started,
@@ -394,17 +399,67 @@ impl<'a> AgentLoop<'a> {
                         is_error,
                     },
                 );
-                if is_error && tool.effect != ToolEffect::ReadOnly {
+                if is_error && effect != ToolEffect::ReadOnly {
                     return Err(RuntimeError::Tool("tool with external effects did not produce a usable result; continuation stopped to avoid repeating effects".into()));
                 }
             }
         }
     }
 
+    pub(super) async fn execute_tool(
+        &self,
+        tool: super::tool::PreparedTool,
+        call: super::ToolCall,
+        run_id: String,
+    ) -> ToolResult {
+        let context = ToolContext {
+            run_id,
+            call_id: call.id.clone(),
+        };
+        let execution = tokio::time::timeout(
+            self.limits.tool_timeout,
+            tool.executor.execute(call.arguments, context),
+        )
+        .await;
+        let (mut value, is_error) = match execution {
+            Ok(Ok(value))
+                if serde_json::to_vec(&value)
+                    .map_or(true, |v| v.len() > self.limits.max_tool_result_bytes) =>
+            {
+                (
+                    json!({"error": "tool result exceeded the byte limit"}),
+                    true,
+                )
+            }
+            Ok(Ok(value)) => (value, false),
+            Ok(Err(error)) => (
+                json!({"error": error.to_string().chars().take(1024).collect::<String>()}),
+                true,
+            ),
+            Err(_) => (
+                json!({"error": "tool timed out; external effects may be uncertain"}),
+                true,
+            ),
+        };
+        if serde_json::to_vec(&value).map_or(true, |v| v.len() > self.limits.max_tool_result_bytes)
+        {
+            value = serde_json::Value::Null;
+        }
+        ToolResult {
+            call_id: call.id,
+            output: value,
+            is_error,
+        }
+    }
+
     fn emit(&self, report: &mut RunReport, started: Instant, kind: RunEventKind) {
+        self.emit_at(report, millis(started.elapsed()), kind);
+    }
+
+    pub(super) fn emit_at(&self, report: &mut RunReport, elapsed_ms: u64, kind: RunEventKind) {
         let event = RunEvent {
             sequence: report.events.len(),
-            elapsed_ms: millis(started.elapsed()),
+            elapsed_ms,
             kind,
         };
         tracing::debug!(run_id = %report.run_id, sequence = event.sequence, kind = ?event.kind, "agent runtime event");

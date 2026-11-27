@@ -12,6 +12,9 @@ impl<P: Provider> Model for GatewayTransport<P> {
             let timeout = self.gateway.task_profile(&request.label).timeout;
             match tokio::time::timeout(timeout, self.agent_request(request, budget)).await {
                 Ok(Ok(output)) => Ok(output),
+                Ok(Err(_)) if budget.journal_failure().is_some() => {
+                    Err(RuntimeError::Storage(budget.journal_failure().unwrap()))
+                }
                 Ok(Err(error)) => match budget.snapshot().denial {
                     Some(detail) => Err(RuntimeError::Budget(detail)),
                     None => Err(RuntimeError::Model(error.into())),
@@ -92,7 +95,8 @@ impl<P: Provider> GatewayTransport<P> {
                         0
                     };
                     let reservation = budget
-                        .reserve(ceiling)
+                        .reserve_before_dispatch(ceiling)
+                        .await
                         .map_err(|error| ModelError::misconfigured(error.to_string()))?;
                     let attempt = ModelRequest {
                         model: model.clone(),

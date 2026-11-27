@@ -28,18 +28,26 @@ Hosted CI and paid provider validation are separate external checks.
 
 ## Phase 2: state, recovery and collaboration
 
-- [ ] Versioned run/step state, atomic persistent checkpoints, ownership of
+- [x] Versioned run/step state, atomic persistent checkpoints, ownership of
   concurrent runs and crash recovery semantics.
-- [ ] Pause/resume and human approval, with approval bound to exact tool input.
-- [ ] Explicit handling of uncertain tool side effects; no automatic retry of
+- [x] Pause/resume and human approval, with approval bound to exact tool input.
+- [x] Explicit handling of uncertain tool side effects; no automatic retry of
   non-idempotent operations after an interruption.
 - [ ] Sessions, context limits and compression with preserved tool correlation.
 - [ ] Sequential/parallel/conditional workflows and planner/executor/reviewer
   collaboration, with bounded revision and clear result handoff.
-- [ ] Restart and approval examples, including injected failures and tests.
+- [x] Restart and approval examples, including injected failures and tests.
 
 Acceptance: restart an interrupted job, continue from recorded state, and
 demonstrate review-driven bounded revision without silently duplicating effects.
+
+Recovery increment: `DurableAgent`, `RunState`, `RunStore`/`FileRunStore`,
+versioned budget journals, exact-input approval and operator reconciliation
+are implemented. Actual child-process termination tests cover write/model
+interruption, and injected storage failures prevent further dispatch. A lock
+release regression is covered with a duplicate descriptor and repeated Linux
+recovery runs. See [the recovery guide](durable-runs.md). Session/context and
+workflow/collaboration acceptance is still outstanding; phase 2 is not complete.
 
 ## Phase 3: knowledge and application delivery
 

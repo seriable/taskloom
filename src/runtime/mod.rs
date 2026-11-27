@@ -6,14 +6,24 @@
 //! Tools execute in process; this library does not create a security sandbox.
 
 mod budget;
+mod durable;
 mod executor;
+mod state;
+mod store;
 mod tool;
 pub(crate) mod types;
 
-pub use budget::{BudgetSnapshot, Reservation, RunBudget};
+pub use budget::{BudgetJournal, BudgetSnapshot, Reservation, RunBudget};
+pub use durable::DurableAgent;
 pub use executor::{
     AgentLoop, EventSink, RunEvent, RunEventKind, RunLimits, RunReport, StopReason,
 };
+pub use state::{
+    ApprovalDecision, ApprovalPolicy, ApprovalRecord, ApprovalRequest, RecoveryDecision,
+    RecoveryRecord, RunConfig, RunCursor, RunState, RunStatus, ToolProgress, ToolStep,
+    RUN_STATE_VERSION,
+};
+pub use store::{FileRunStore, RunLease, RunStore};
 pub use tool::{FnTool, Tool, ToolContext, ToolEffect, ToolError, ToolPolicy, ToolRegistry};
 pub use types::{
     AssistantTurn, Message, Model, ModelOutput, ModelReply, ModelRequest, RuntimeError, ToolCall,

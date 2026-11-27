@@ -82,14 +82,18 @@ whereas budget commitments include uncertain attempts.
 These limits depend on correct model profiles, prices and provider billing
 behavior. They do not cap external tool charges or guarantee a provider's
 invoice. An implementation of the public `Model` trait must honor the same
-reservation contract for all of its paid attempts. The built-in
+reservation contract for all of its paid attempts. Use the async
+`reserve_before_dispatch` method for persistent runs. The built-in
 `GatewayTransport` implementation handles that contract automatically.
 
 ## Current development boundary
 
-This first runtime increment has no durable run checkpoints, approval resume,
-session compression, workflow orchestration, RAG or application server/UI.
-A stopped transcript can contain unfinished tool calls; do not use it as an
-automatic crash-recovery plan. Single-task answer recording/replay does not
-record native agent turns or tool side effects. Those capabilities are tracked
-explicitly in [the three-phase roadmap](agent-roadmap.md).
+`DurableAgent` now provides versioned checkpoints, exact-input approval,
+graceful pause/resume and explicit reconciliation of uncertain effects. See
+[the recovery guide](durable-runs.md) and the offline `agent_resume` example.
+An ordinary `AgentLoop::run` report alone remains insufficient for crash
+recovery; use the persistent controller for that contract. Single-task answer
+recording/replay does not record native agent turns or tool side effects.
+
+Sessions/context compression, workflow orchestration, RAG and application
+server/UI remain under development in [the three-phase roadmap](agent-roadmap.md).

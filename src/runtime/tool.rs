@@ -171,6 +171,10 @@ impl ToolRegistry {
             .collect()
     }
 
+    pub fn definition(&self, name: &str) -> Option<&ToolDefinition> {
+        self.tools.get(name).map(|tool| &tool.definition)
+    }
+
     pub(crate) fn prepare(
         &self,
         call: &ToolCall,
