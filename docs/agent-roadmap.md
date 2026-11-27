@@ -33,7 +33,7 @@ Hosted CI and paid provider validation are separate external checks.
 - [x] Pause/resume and human approval, with approval bound to exact tool input.
 - [x] Explicit handling of uncertain tool side effects; no automatic retry of
   non-idempotent operations after an interruption.
-- [ ] Sessions, context limits and compression with preserved tool correlation.
+- [x] Sessions, context limits and compression with preserved tool correlation.
 - [ ] Sequential/parallel/conditional workflows and planner/executor/reviewer
   collaboration, with bounded revision and clear result handoff.
 - [x] Restart and approval examples, including injected failures and tests.
@@ -46,8 +46,13 @@ versioned budget journals, exact-input approval and operator reconciliation
 are implemented. Actual child-process termination tests cover write/model
 interruption, and injected storage failures prevent further dispatch. A lock
 release regression is covered with a duplicate descriptor and repeated Linux
-recovery runs. See [the recovery guide](durable-runs.md). Session/context and
-workflow/collaboration acceptance is still outstanding; phase 2 is not complete.
+recovery runs. See [the recovery guide](durable-runs.md).
+
+Session/context increment: persistent turn binding and compare-and-swap
+session commits, idempotent durable re-entry, bounded context projections,
+pluggable extractive compression and exact projection recovery are implemented.
+The original transcript remains intact. See [sessions and context](sessions-and-context.md).
+Workflow/collaboration acceptance is still outstanding; phase 2 is not complete.
 
 ## Phase 3: knowledge and application delivery
 

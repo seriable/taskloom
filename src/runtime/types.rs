@@ -142,6 +142,7 @@ pub enum RuntimeError {
     Permission(String),
     Storage(String),
     Conflict(String),
+    Context(String),
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -154,7 +155,8 @@ impl std::fmt::Display for RuntimeError {
             | Self::Tool(detail)
             | Self::Permission(detail)
             | Self::Storage(detail)
-            | Self::Conflict(detail) => f.write_str(detail),
+            | Self::Conflict(detail)
+            | Self::Context(detail) => f.write_str(detail),
         }
     }
 }

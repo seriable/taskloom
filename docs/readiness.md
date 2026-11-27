@@ -12,7 +12,8 @@
 开发分支新增可选 `runtime` 层：原生工具消息、工具注册与权限、受限 AgentLoop、
 事件轨迹和运行级模型预算。它不改变单任务 API，也不复用单任务答案缓存来执行工具。
 新增 `DurableAgent` 提供检查点、暂停恢复、人工审批、预算日志和不确定副作用核对。
-会话、上下文压缩、多 Agent 工作流和应用交付仍在开发；第二阶段尚未全部完成。
+会话和上下文压缩已接入持久化运行，保留完整历史并限制模型输入；
+多 Agent 工作流和应用交付仍在开发，第二阶段尚未全部完成。
 详见 [开发清单](agent-roadmap.md)、[运行时指南](agent-runtime.md) 与 [恢复指南](durable-runs.md)。
 
 ## 本次已修复
@@ -65,11 +66,11 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 
 验证环境：Windows（Rust/Cargo 1.99 和真实 1.86）；WSL Debian Linux（Rust/Cargo 1.95）。
 
-- 单任务基线为 101 个测试；当前全 feature 为 87 个单元测试、54 个集成测试，共 141 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
+- 单任务基线为 101 个测试；当前全 feature 为 87 个单元测试、69 个集成测试，共 156 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
 - feature 组合增加 runtime、runtime + openai、runtime + anthropic，分别验证测试和文档。
 - 格式检查、全目标/全 feature Clippy（warnings 视为错误）。
 - 全 feature 和上述各单 feature 文档构建（warnings 视为错误）。
-- basic、record_replay、production、eval、agent_loop 和 agent_resume 六个离线示例。
+- basic、record_replay、production、eval、agent_loop、agent_resume 和 agent_session 七个离线示例。
 
 新增测试位于 `tests/gateway_regressions.rs`、`tests/reliability.rs` 和 `tests/step_cache.rs`。
 Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测试模块。
@@ -79,6 +80,9 @@ Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测�
 `tests/agent_durable.rs` 包含进程实际退出后的恢复、审批绑定、幂等重试去重、写入失败、
 取消、预算日志和原子检查点验证。锁的最后持有者会显式解锁；重复句柄回归与 Linux
 连续十轮恢复测试覆盖了运行返回后锁短暂残留的问题。
+`tests/agent_context.rs` 验证有损摘录压缩、工具关联、字节限额和恢复后复用原模型输入；
+`tests/agent_session.rs` 验证多轮会话、并发绑定、审批占用和失败后的可审计关闭。
+运行状态格式更新为 2，开发中的格式 1 不会被静默迁移或重置；单任务录制格式保持不变。
 GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
 当前托管 CI 尚未完成验证；发布验证通过的是本地 Windows、真实最低 Rust 版本，以及独立 Linux 环境。
 不能把本地通过的结果描述为 GitHub CI 已通过。

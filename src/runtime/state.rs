@@ -5,11 +5,12 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::{
-    types::pending_calls, Message, RunLimits, RunReport, RuntimeError, StopReason, ToolCall,
+    types::{pending_calls, validate_history},
+    ContextPolicy, Message, RunLimits, RunReport, RuntimeError, StopReason, ToolCall,
     ToolDefinition, ToolEffect, ToolPolicy, ToolResult,
 };
 
-pub const RUN_STATE_VERSION: u32 = 1;
+pub const RUN_STATE_VERSION: u32 = 2;
 
 /// Persistent runs require approval for tools with effects by default.
 /// An application can explicitly choose a different policy at run creation.
@@ -55,6 +56,8 @@ pub struct RunConfig {
     pub policy: ToolPolicy,
     pub approvals: ApprovalPolicy,
     pub tools: Vec<ToolDefinition>,
+    pub context: Option<ContextPolicy>,
+    pub compressor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +218,8 @@ impl ToolStep {
 pub struct RunState {
     pub version: u32,
     pub revision: u64,
+    /// Exact input boundary, used to bind session turns to idempotent run ids.
+    pub initial_message_count: usize,
     pub config: RunConfig,
     pub status: RunStatus,
     pub cursor: RunCursor,
@@ -251,6 +256,50 @@ impl RunState {
             || self.config.max_output_tokens == 0
         {
             return Err(invalid("invalid run configuration"));
+        }
+        let initial = self
+            .report
+            .messages
+            .get(..self.initial_message_count)
+            .ok_or_else(|| invalid("initial input boundary is outside the transcript"))?;
+        validate_history(initial).map_err(|error| invalid(&error.to_string()))?;
+        let mut context_steps = BTreeSet::new();
+        let mut previous_context_step = 0;
+        let mut previous_source_count = self.initial_message_count;
+        for record in &self.report.contexts {
+            let Some(policy) = &self.config.context else {
+                return Err(invalid("context projection has no configured policy"));
+            };
+            if record.step == 0
+                || record.step > self.report.steps
+                || !context_steps.insert(record.step)
+                || self.config.compressor_id.as_deref() != Some(record.compressor_id.as_str())
+                || record.step <= previous_context_step
+                || record.source_message_count < previous_source_count
+            {
+                return Err(invalid("context projection identity or step is invalid"));
+            }
+            previous_context_step = record.step;
+            previous_source_count = record.source_message_count;
+            record
+                .restore(&self.report.messages, &self.config.tools, policy)
+                .map_err(|error| invalid(&error.to_string()))?;
+        }
+        if self.config.context.is_some() != self.config.compressor_id.is_some() {
+            return Err(invalid("context policy has no compressor identity"));
+        }
+        if matches!(self.cursor, RunCursor::ModelInFlight { .. })
+            && self.config.context.is_some()
+            && (!context_steps.contains(&self.report.steps)
+                || self
+                    .report
+                    .contexts
+                    .last()
+                    .is_none_or(|record| record.source_message_count != self.report.messages.len()))
+        {
+            return Err(invalid(
+                "in-flight model has no persisted context projection",
+            ));
         }
         if self.config.limits.max_cost_micros != self.report.budget.limit_micros
             || self.report.budget.uncertain_micros > self.report.budget.committed_micros

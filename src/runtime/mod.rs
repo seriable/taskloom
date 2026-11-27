@@ -6,17 +6,24 @@
 //! Tools execute in process; this library does not create a security sandbox.
 
 mod budget;
+mod context;
 mod durable;
 mod executor;
+mod session;
 mod state;
 mod store;
 mod tool;
 pub(crate) mod types;
 
 pub use budget::{BudgetJournal, BudgetSnapshot, Reservation, RunBudget};
+pub use context::{ContextCompressor, ContextPolicy, ContextRecord, ExtractiveCompressor};
 pub use durable::DurableAgent;
 pub use executor::{
     AgentLoop, EventSink, RunEvent, RunEventKind, RunLimits, RunReport, StopReason,
+};
+pub use session::{
+    FileSessionStore, Session, SessionBinding, SessionInput, SessionManager, SessionRun,
+    SessionStore, SessionTurn, SESSION_VERSION,
 };
 pub use state::{
     ApprovalDecision, ApprovalPolicy, ApprovalRecord, ApprovalRequest, RecoveryDecision,

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Persistent sessions with active-turn binding, revision CAS, idempotent run
+  re-entry, exact initial-input checks and explicit failed-turn cleanup.
+- Optional bounded context projections with pluggable compression, complete
+  tool-call/result blocks, unchanged raw archives and persisted model inputs.
+- Run-state format 2 adds initial-input/context metadata. Development format-1
+  checkpoints require the earlier checkout; single-task recordings are unchanged.
+
 - Durable agent execution: versioned checkpoints and budget journals, per-run
   filesystem ownership, graceful pause/resume, exact-input approval tickets,
   auditable reconciliation of uncertain tool effects, and a restart example.

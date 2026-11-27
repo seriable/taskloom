@@ -6,8 +6,9 @@ use serde_json::json;
 use tokio::time::Instant;
 
 use super::{
-    types::validate_history, BudgetSnapshot, Message, Model, ModelRequest, RunBudget, RuntimeError,
-    ToolContext, ToolEffect, ToolPolicy, ToolRegistry, ToolResult,
+    types::validate_history, BudgetSnapshot, ContextCompressor, ContextPolicy, ContextRecord,
+    ExtractiveCompressor, Message, Model, ModelRequest, RunBudget, RuntimeError, ToolContext,
+    ToolEffect, ToolPolicy, ToolRegistry, ToolResult,
 };
 use crate::{ledger::Usage, CancelToken};
 
@@ -57,6 +58,7 @@ pub enum StopReason {
     ApprovalRequired,
     Uncertain,
     StorageError,
+    ContextLimit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +85,11 @@ pub enum RunEventKind {
         reason: StopReason,
     },
     Resumed,
+    ContextPrepared {
+        step: usize,
+        omitted_messages: usize,
+        input_bytes: usize,
+    },
     ApprovalRequested {
         request_id: String,
         call_id: String,
@@ -131,6 +138,8 @@ pub struct RunReport {
     pub budget: BudgetSnapshot,
     pub elapsed_ms: u64,
     pub events: Vec<RunEvent>,
+    #[serde(default)]
+    pub contexts: Vec<ContextRecord>,
 }
 
 impl RunReport {
@@ -158,7 +167,11 @@ pub struct AgentLoop<'a> {
     pub(super) max_output_tokens: u32,
     pub(super) cancel: Option<&'a CancelToken>,
     events: Option<&'a EventSink<'a>>,
+    pub(super) context_policy: Option<ContextPolicy>,
+    pub(super) compressor: &'a dyn ContextCompressor,
 }
+
+static EXTRACTIVE: ExtractiveCompressor = ExtractiveCompressor;
 
 impl<'a> AgentLoop<'a> {
     pub fn new(model: &'a dyn Model, tools: &'a ToolRegistry, model_id: impl Into<String>) -> Self {
@@ -173,6 +186,8 @@ impl<'a> AgentLoop<'a> {
             max_output_tokens: 4096,
             cancel: None,
             events: None,
+            context_policy: None,
+            compressor: &EXTRACTIVE,
         }
     }
 
@@ -205,6 +220,15 @@ impl<'a> AgentLoop<'a> {
         self
     }
 
+    pub fn with_context(mut self, policy: ContextPolicy) -> Self {
+        self.context_policy = Some(policy);
+        self
+    }
+    pub fn with_context_compressor(mut self, compressor: &'a dyn ContextCompressor) -> Self {
+        self.compressor = compressor;
+        self
+    }
+
     pub async fn run(&self, run_id: impl Into<String>, messages: Vec<Message>) -> RunReport {
         let started = Instant::now();
         let budget = RunBudget::new(self.limits.max_cost_micros);
@@ -219,6 +243,7 @@ impl<'a> AgentLoop<'a> {
             budget: budget.snapshot(),
             elapsed_ms: 0,
             events: Vec::new(),
+            contexts: Vec::new(),
         };
         self.emit(&mut report, started, RunEventKind::Started);
         let validation = self
@@ -260,6 +285,7 @@ impl<'a> AgentLoop<'a> {
                     RuntimeError::Storage(_) | RuntimeError::Conflict(_) => {
                         StopReason::StorageError
                     }
+                    RuntimeError::Context(_) => StopReason::ContextLimit,
                 };
                 report.detail = Some(error.to_string());
             }
@@ -272,6 +298,14 @@ impl<'a> AgentLoop<'a> {
     }
 
     pub(super) fn validate(&self, report: &RunReport) -> Result<(), RuntimeError> {
+        if let Some(policy) = &self.context_policy {
+            policy.validate()?;
+            if self.compressor.id().trim().is_empty() {
+                return Err(RuntimeError::Configuration(
+                    "context compressor needs a stable id".into(),
+                ));
+            }
+        }
         if report.run_id.trim().is_empty()
             || self.model_id.trim().is_empty()
             || self.label.trim().is_empty()
@@ -332,11 +366,25 @@ impl<'a> AgentLoop<'a> {
             // Give deadline/cancellation priority after a sink notification,
             // even when the following model future would complete immediately.
             tokio::task::yield_now().await;
+            let tools = self.tools.definitions(&self.policy);
+            let messages = self.prepare_context(report, &tools)?;
+            if let Some(record) = report.contexts.last() {
+                self.emit(
+                    report,
+                    started,
+                    RunEventKind::ContextPrepared {
+                        step: report.steps,
+                        omitted_messages: record.omitted_messages(),
+                        input_bytes: record.input_bytes,
+                    },
+                );
+            }
+            tokio::task::yield_now().await;
             let request = ModelRequest {
                 label: self.label.clone(),
                 model: self.model_id.clone(),
-                messages: report.messages.clone(),
-                tools: self.tools.definitions(&self.policy),
+                messages,
+                tools,
                 temperature: self.temperature,
                 max_output_tokens: self.max_output_tokens,
             };
@@ -404,6 +452,31 @@ impl<'a> AgentLoop<'a> {
                 }
             }
         }
+    }
+
+    pub(super) fn prepare_context(
+        &self,
+        report: &mut RunReport,
+        tools: &[super::ToolDefinition],
+    ) -> Result<Vec<Message>, RuntimeError> {
+        let Some(policy) = &self.context_policy else {
+            return Ok(report.messages.clone());
+        };
+        if let Some(previous) = report.contexts.last() {
+            if previous.source_message_count == report.messages.len()
+                && previous.compressor_id == self.compressor.id()
+            {
+                let messages = previous.restore(&report.messages, tools, policy)?;
+                let mut record = previous.clone();
+                record.step = report.steps;
+                report.contexts.push(record);
+                return Ok(messages);
+            }
+        }
+        let (messages, record) =
+            policy.prepare(&report.messages, tools, self.compressor, report.steps)?;
+        report.contexts.push(record);
+        Ok(messages)
     }
 
     pub(super) async fn execute_tool(

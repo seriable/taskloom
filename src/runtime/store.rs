@@ -42,13 +42,16 @@ pub trait RunStore: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct FileRunStore {
     root: PathBuf,
+    root_error: Option<String>,
     max_bytes: u64,
 }
 
 impl FileRunStore {
     pub fn new(root: impl Into<PathBuf>) -> Self {
+        let (root, root_error) = absolute_root(root.into());
         Self {
-            root: root.into(),
+            root,
+            root_error,
             max_bytes: 64 * 1024 * 1024,
         }
     }
@@ -76,6 +79,9 @@ impl RunStore for FileRunStore {
         run_id: &'a str,
     ) -> BoxFuture<'a, Result<Arc<dyn RunLease>, RuntimeError>> {
         Box::pin(async move {
+            if let Some(error) = &self.root_error {
+                return Err(storage(error));
+            }
             let key = Self::key(run_id)?;
             // Bind this lease to an absolute path before crossing an await;
             // a host tool changing process cwd cannot redirect its writes.
@@ -121,6 +127,9 @@ impl RunStore for FileRunStore {
         run_id: &'a str,
     ) -> BoxFuture<'a, Result<Option<RunState>, RuntimeError>> {
         Box::pin(async move {
+            if let Some(error) = &self.root_error {
+                return Err(storage(error));
+            }
             let path = std::path::absolute(&self.root)
                 .map_err(storage)?
                 .join(format!("{}.json", Self::key(run_id)?));
@@ -266,7 +275,7 @@ impl RunLease for FileLease {
     }
 }
 
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, RuntimeError> + Send + 'static,
 ) -> Result<T, RuntimeError> {
     tokio::task::spawn_blocking(work).await.map_err(storage)?
@@ -285,7 +294,10 @@ fn read_state(path: &Path, max_bytes: u64, run_id: &str) -> Result<Option<RunSta
     Ok(state)
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path, max_bytes: u64) -> Result<Option<T>, RuntimeError> {
+pub(super) fn read_json<T: DeserializeOwned>(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<Option<T>, RuntimeError> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -303,7 +315,11 @@ fn read_json<T: DeserializeOwned>(path: &Path, max_bytes: u64) -> Result<Option<
     serde_json::from_slice(&bytes).map(Some).map_err(storage)
 }
 
-fn atomic_write<T: Serialize>(path: &Path, value: &T, max_bytes: u64) -> Result<(), RuntimeError> {
+pub(super) fn atomic_write<T: Serialize>(
+    path: &Path,
+    value: &T,
+    max_bytes: u64,
+) -> Result<(), RuntimeError> {
     let bytes = serde_json::to_vec(value).map_err(storage)?;
     if bytes.len() as u64 > max_bytes {
         return Err(RuntimeError::Storage(
@@ -340,8 +356,15 @@ fn atomic_write<T: Serialize>(path: &Path, value: &T, max_bytes: u64) -> Result<
     unreachable!()
 }
 
-fn storage(error: impl std::fmt::Display) -> RuntimeError {
+pub(super) fn storage(error: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::Storage(error.to_string())
+}
+
+pub(super) fn absolute_root(root: PathBuf) -> (PathBuf, Option<String>) {
+    match std::path::absolute(&root) {
+        Ok(absolute) => (absolute, None),
+        Err(error) => (root, Some(format!("cannot resolve store root: {error}"))),
+    }
 }
 
 #[cfg(test)]

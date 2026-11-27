@@ -30,6 +30,9 @@ events, tool attempts, approvals and operator recovery records. Definitions,
 schemas, permissions, model settings and limits must match on resume. Bump a
 tool's advertised definition when its implementation contract changes; the
 library cannot detect a code change behind identical metadata.
+Format 2 also binds the exact initial-message boundary and persists context
+projections. Development format-1 jobs require the earlier checkout; they are
+not silently migrated or reset. See [sessions and context](sessions-and-context.md).
 Provider credentials/endpoints, model profiles and prices belong to the host
 application. Keep their intended contract and currency unit consistent when
 reconstructing a run; they are not authenticated by `RunConfig`.

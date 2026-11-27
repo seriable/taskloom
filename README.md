@@ -17,8 +17,10 @@ agent loop with explicit permissions, execution events and run-wide limits.
 This runtime is unreleased development code and is not in the `v0.1.0` tag.
 See [the runtime guide](docs/agent-runtime.md) and the offline
 `agent_loop` example. Persistent checkpoints, approval and recovery are
-available through [DurableAgent](docs/durable-runs.md). Sessions, multi-agent
-workflows and an application UI are under development in the [roadmap](docs/agent-roadmap.md).
+available through [DurableAgent](docs/durable-runs.md). [Sessions and context
+compression](docs/sessions-and-context.md) retain full history across bounded
+model turns. Multi-agent workflows and an application UI are under development
+in the [roadmap](docs/agent-roadmap.md).
 
 ## What you get
 
@@ -278,6 +280,7 @@ cargo run --example basic          # a typed task with validation and fallback, 
 cargo run --example record_replay  # record once, replay offline
 cargo run --features runtime --example agent_loop  # native tool loop, offline
 cargo run --features runtime --example agent_resume # checkpoint and approval, offline
+cargo run --features runtime --example agent_session # persistent turns and compressed input
 OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
   cargo run --features openai --example openai
 ```

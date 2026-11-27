@@ -69,6 +69,37 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
 
     pub async fn resume(&self, run_id: &str) -> Result<RunState, RuntimeError> {
         let lease = self.store.acquire(run_id).await?;
+        self.resume_owned(run_id, lease).await
+    }
+
+    /// Idempotent session/workflow entry point. Reusing an id with different
+    /// initial messages is rejected before any dispatch.
+    pub async fn start_or_resume(
+        &self,
+        run_id: &str,
+        messages: Vec<Message>,
+    ) -> Result<RunState, RuntimeError> {
+        let lease = self.store.acquire(run_id).await?;
+        if let Some(existing) = lease.load().await? {
+            if existing.initial_message_count != messages.len()
+                || existing.report.messages.get(..messages.len()) != Some(messages.as_slice())
+            {
+                return Err(RuntimeError::Conflict(
+                    "run id is already bound to different initial messages".into(),
+                ));
+            }
+            self.resume_owned(run_id, lease).await
+        } else {
+            let (state, budget, clock) = self.create_owned(run_id, messages, &lease).await?;
+            self.execute_owned(state, lease, budget, clock).await
+        }
+    }
+
+    async fn resume_owned(
+        &self,
+        run_id: &str,
+        lease: Arc<dyn RunLease>,
+    ) -> Result<RunState, RuntimeError> {
         let (mut state, budget) = self.load_owned(&lease, run_id).await?;
         if state.status == RunStatus::Finished
             || state.status == RunStatus::WaitingApproval
@@ -319,6 +350,12 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             policy: self.agent.policy.clone(),
             approvals: self.approvals.clone(),
             tools: self.agent.tools.definitions(&self.agent.policy),
+            context: self.agent.context_policy.clone(),
+            compressor_id: self
+                .agent
+                .context_policy
+                .as_ref()
+                .map(|_| self.agent.compressor.id().into()),
         }
     }
 
@@ -342,6 +379,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         let mut state = RunState {
             version: RUN_STATE_VERSION,
             revision: 0,
+            initial_message_count: messages.len(),
             config: self.config(),
             status: RunStatus::Ready,
             cursor: RunCursor::ModelReady,
@@ -360,6 +398,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 },
                 elapsed_ms: 0,
                 events: Vec::new(),
+                contexts: Vec::new(),
             },
         };
         self.agent.validate(&state.report)?;
@@ -459,6 +498,23 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 _ => Err(corrupt("unexpected execution cursor")),
             };
             if let Err(error) = result {
+                if let Some(index) = state.current_tool_index() {
+                    if matches!(
+                        state.tool_steps[index].progress,
+                        ToolProgress::InFlight { .. }
+                    ) {
+                        let call_id = state.tool_steps[index].call.id.clone();
+                        state.tool_steps[index].progress = ToolProgress::Uncertain {
+                            detail: "checkpoint failed around tool dispatch".into(),
+                            reported_result: None,
+                        };
+                        self.event(
+                            &mut state,
+                            &clock,
+                            RunEventKind::RecoveryRequired { call_id },
+                        );
+                    }
+                }
                 let reason = error_reason(&error);
                 self.stop(
                     &mut state,
@@ -497,10 +553,6 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 .await;
         }
         state.report.steps += 1;
-        state.cursor = RunCursor::ModelInFlight {
-            started_unix_ms: unix_ms()?,
-            elapsed_before_ms: clock.elapsed_ms(),
-        };
         self.event(
             state,
             clock,
@@ -509,11 +561,29 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 model: self.agent.model_id.clone(),
             },
         );
+        let messages = self
+            .agent
+            .prepare_context(&mut state.report, &state.config.tools)?;
+        if let Some(record) = state.report.contexts.last() {
+            self.event(
+                state,
+                clock,
+                RunEventKind::ContextPrepared {
+                    step: state.report.steps,
+                    omitted_messages: record.omitted_messages(),
+                    input_bytes: record.input_bytes,
+                },
+            );
+        }
+        state.cursor = RunCursor::ModelInFlight {
+            started_unix_ms: unix_ms()?,
+            elapsed_before_ms: clock.elapsed_ms(),
+        };
         self.save(state, lease, budget, clock).await?;
         let request = ModelRequest {
             label: self.agent.label.clone(),
             model: self.agent.model_id.clone(),
-            messages: state.report.messages.clone(),
+            messages,
             tools: state.config.tools.clone(),
             temperature: self.agent.temperature,
             max_output_tokens: self.agent.max_output_tokens,
@@ -965,6 +1035,7 @@ fn error_reason(error: &RuntimeError) -> StopReason {
         RuntimeError::Tool(_) => StopReason::ToolError,
         RuntimeError::Permission(_) => StopReason::PermissionDenied,
         RuntimeError::Storage(_) | RuntimeError::Conflict(_) => StopReason::StorageError,
+        RuntimeError::Context(_) => StopReason::ContextLimit,
     }
 }
 

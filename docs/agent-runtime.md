@@ -95,5 +95,7 @@ An ordinary `AgentLoop::run` report alone remains insufficient for crash
 recovery; use the persistent controller for that contract. Single-task answer
 recording/replay does not record native agent turns or tool side effects.
 
-Sessions/context compression, workflow orchestration, RAG and application
-server/UI remain under development in [the three-phase roadmap](agent-roadmap.md).
+`SessionManager` now binds successive turns to durable runs, and optional
+context projections preserve full archives while limiting model input. See
+[sessions and context](sessions-and-context.md). Workflow orchestration, RAG
+and application server/UI remain under development in [the roadmap](agent-roadmap.md).
