@@ -11,7 +11,15 @@ Only code is model-controlled. The host fixes the Docker CLI, local engine
 socket/pipe, immutable audited image, platform, CPU/memory/output/time limits.
 The model cannot select an executable, image, mount, network, package, device,
 environment variable or Docker option. Code is sent through stdin, not shell
-command text or host argv interpolation.
+command text or host argv interpolation. The host passes only the code's byte
+length and SHA-256 as supervisor arguments (`--code-bytes`, `--code-sha256`).
+End of stdin alone does not prove the write completed, because an interrupted
+controller also closes stdin. The supervisor therefore refuses to run anything
+unless it received exactly the declared bytes with the declared digest. On
+refusal it returns exit code 126 with a `sandbox supervisor refused code`
+message, so an interrupted write never runs a prefix of approved code. If
+`docker run` fails before it reads stdin, the returned error carries Docker's
+exit status and stderr, not the resulting broken-pipe write error.
 Before dispatch, a bounded engine capability query requires Linux, memory/swap/
 PID/CPU limits, private cgroup namespaces and Docker's built-in seccomp profile.
 Unsupported or unverified capabilities fail instead of relying on warnings
@@ -67,6 +75,15 @@ BASE_IMAGE=$($DOCKER --host "$ENGINE" image inspect --format '{{index .RepoDiges
 $DOCKER --host "$ENGINE" build --platform linux/amd64 --build-arg BASE_IMAGE="$BASE_IMAGE" -t taskloom-sandbox:local sandbox/python
 IMAGE=$($DOCKER --host "$ENGINE" image inspect --format '{{.Id}}' taskloom-sandbox:local)
 ```
+
+The supervisor contract changed when the code-length/SHA-256 check was added:
+`supervisor.py` now requires `--code-bytes` and `--code-sha256`. Rebuild
+the image, which gives it a new digest, and update the pinned `image`. An
+image built from an older supervisor rejects the new arguments, so every call
+fails with a Docker execution error instead of running unchecked code. The 2026-11-27
+acceptance record below names the earlier image and supervisor build-context
+hash. It is historical evidence for that image, not for the current
+supervisor.
 
 Retain the resolved base and final image digests with your deployment evidence;
 repeat production builds using those exact digests. The mutable tag above is

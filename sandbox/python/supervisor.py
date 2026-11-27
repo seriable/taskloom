@@ -6,6 +6,7 @@ remaining namespace processes, including children that detached their session.
 """
 import argparse
 import base64
+import hashlib
 import json
 import os
 import resource
@@ -39,9 +40,15 @@ def emit(exit_code, stdout=b"", stderr=b"", timed_out=False, output_limited=Fals
     os._exit(0)
 
 
-def read_code(deadline):
+def refuse(reason):
+    emit(126, stderr=("sandbox supervisor refused code: " + reason).encode("utf-8"))
+
+
+def read_code(deadline, expected_bytes, expected_sha256):
     # Cover ingress too: a controller dying before EOF cannot leave a root
     # monitor blocked forever waiting for code on an open Docker stdin.
+    # EOF alone does not prove the write completed: an interrupted controller
+    # also closes stdin. Only the exact host-declared size and SHA-256 run.
     code = bytearray()
     os.set_blocking(0, False)
     with selectors.DefaultSelector() as selector:
@@ -55,10 +62,12 @@ def read_code(deadline):
                 if not block:
                     break
                 code.extend(block)
-                if len(code) > 65536:
-                    raise ValueError("code exceeds input limit")
-    if not code:
-        raise ValueError("empty code")
+                if len(code) > expected_bytes:
+                    refuse("more bytes than declared")
+    if len(code) != expected_bytes:
+        refuse("truncated input (%d of %d bytes)" % (len(code), expected_bytes))
+    if hashlib.sha256(code).hexdigest() != expected_sha256:
+        refuse("SHA-256 mismatch")
     return code.decode("utf-8")
 
 
@@ -66,13 +75,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout-ms", type=int, required=True)
     parser.add_argument("--max-output-bytes", type=int, required=True)
+    parser.add_argument("--code-bytes", type=int, required=True)
+    parser.add_argument("--code-sha256", required=True)
     args = parser.parse_args()
     if os.getpid() != 1 or os.getuid() != 0:
         raise RuntimeError("supervisor requires container PID 1 and root monitor")
     if not 1 <= args.timeout_ms <= 30000 or not 1024 <= args.max_output_bytes <= 65536:
         raise ValueError("invalid supervisor limits")
+    if not 1 <= args.code_bytes <= 65536 or len(args.code_sha256) != 64 or any(
+            c not in "0123456789abcdef" for c in args.code_sha256):
+        raise ValueError("invalid code size or digest")
     deadline = time.monotonic() + args.timeout_ms / 1000
-    code = read_code(deadline)
+    code = read_code(deadline, args.code_bytes, args.code_sha256)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     child = subprocess.Popen(
         [sys.executable, "-I", "-B", "-c", code],
