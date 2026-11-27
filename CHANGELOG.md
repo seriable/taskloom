@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Checkpointed sequential/parallel/conditional workflows with exact output
+  handoff, stable durable agent children, global spending allocations,
+  cancellation draining and explicit recovery contracts for custom handlers.
+- Bounded planner/executor/writer/reviewer collaboration with validated plans
+  and reviews, retained executor effects across rewrites and failure on review
+  exhaustion. Offline `agent_peer` demonstrates native roles, two approved
+  real file effects and a review-driven rewrite. Process-death/storage-failure
+  tests verify parent/child recovery without repeating completed effects.
+
 - Persistent sessions with active-turn binding, revision CAS, idempotent run
   re-entry, exact initial-input checks and explicit failed-turn cleanup.
 - Optional bounded context projections with pluggable compression, complete
@@ -21,8 +30,8 @@
 - OpenAI-compatible and Anthropic native tool adapters share the gateway;
   existing single-task APIs remain available without the runtime dependency.
 - Offline multi-step and live OpenAI-compatible examples, runtime guide and
-  three-phase agent framework roadmap. Durable state, workflows and application
-  delivery are still in development.
+  three-phase agent framework roadmap. Knowledge and application delivery
+  are still in development.
 
 - Normalize OpenAI `message.refusal`, streamed `delta.refusal`, refusal
   content parts and `content_filter` into typed content rejection, preserving

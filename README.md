@@ -19,8 +19,9 @@ See [the runtime guide](docs/agent-runtime.md) and the offline
 `agent_loop` example. Persistent checkpoints, approval and recovery are
 available through [DurableAgent](docs/durable-runs.md). [Sessions and context
 compression](docs/sessions-and-context.md) retain full history across bounded
-model turns. Multi-agent workflows and an application UI are under development
-in the [roadmap](docs/agent-roadmap.md).
+model turns. [Durable workflows](docs/workflows.md) add parallel/conditional
+DAGs and bounded planner/executor/writer/reviewer collaboration (`agent_peer`).
+Knowledge and application delivery remain in the [roadmap](docs/agent-roadmap.md).
 
 ## What you get
 

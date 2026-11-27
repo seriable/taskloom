@@ -34,7 +34,7 @@ Hosted CI and paid provider validation are separate external checks.
 - [x] Explicit handling of uncertain tool side effects; no automatic retry of
   non-idempotent operations after an interruption.
 - [x] Sessions, context limits and compression with preserved tool correlation.
-- [ ] Sequential/parallel/conditional workflows and planner/executor/reviewer
+- [x] Sequential/parallel/conditional workflows and planner/executor/reviewer
   collaboration, with bounded revision and clear result handoff.
 - [x] Restart and approval examples, including injected failures and tests.
 
@@ -52,7 +52,17 @@ Session/context increment: persistent turn binding and compare-and-swap
 session commits, idempotent durable re-entry, bounded context projections,
 pluggable extractive compression and exact projection recovery are implemented.
 The original transcript remains intact. See [sessions and context](sessions-and-context.md).
-Workflow/collaboration acceptance is still outstanding; phase 2 is not complete.
+Workflow/collaboration acceptance: checkpointed DAGs, exact selectors,
+parallel admission, stable durable child runs, global spending allocations
+and bounded PEER draft/review loops are implemented. The offline `agent_peer`
+example runs four native roles, two approved file effects and one rewrite.
+Actual process termination after an external write and injected parent-store
+failures verify recovery without silently repeating effects. See
+[workflows and collaboration](workflows.md).
+
+Phase 2 local acceptance (2026-11-27): 173 all-feature tests pass on Windows,
+Rust 1.86 and independent WSL Linux. Hosted CI and paid-provider acceptance
+remain external checks. Phase 3 is still outstanding.
 
 ## Phase 3: knowledge and application delivery
 

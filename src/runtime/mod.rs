@@ -14,6 +14,7 @@ mod state;
 mod store;
 mod tool;
 pub(crate) mod types;
+pub mod workflow;
 
 pub use budget::{BudgetJournal, BudgetSnapshot, Reservation, RunBudget};
 pub use context::{ContextCompressor, ContextPolicy, ContextRecord, ExtractiveCompressor};

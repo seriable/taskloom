@@ -340,7 +340,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         Ok(state)
     }
 
-    fn config(&self) -> RunConfig {
+    /// Explicit settings frozen into a run (provider-owned settings remain
+    /// the host application's responsibility).
+    pub fn configuration(&self) -> RunConfig {
         RunConfig {
             model: self.agent.model_id.clone(),
             label: self.agent.label.clone(),
@@ -380,7 +382,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             version: RUN_STATE_VERSION,
             revision: 0,
             initial_message_count: messages.len(),
-            config: self.config(),
+            config: self.configuration(),
             status: RunStatus::Ready,
             cursor: RunCursor::ModelReady,
             tool_steps: Vec::new(),
@@ -426,7 +428,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             return Err(corrupt("store returned a checkpoint for a different run"));
         }
         self.agent.validate(&state.report)?;
-        if state.config != self.config() {
+        if state.config != self.configuration() {
             return Err(RuntimeError::Configuration(
                 "resume configuration or tool definitions differ from the saved run".into(),
             ));

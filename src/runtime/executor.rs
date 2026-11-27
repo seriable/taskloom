@@ -156,6 +156,7 @@ impl RunReport {
 
 /// Sequential, bounded model/tool execution. A whole tool batch is preflighted
 /// before any tool is dispatched; requested tools are executed in order.
+#[derive(Clone)]
 pub struct AgentLoop<'a> {
     pub(super) model: &'a dyn Model,
     pub(super) tools: &'a ToolRegistry,
