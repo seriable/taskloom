@@ -1,6 +1,8 @@
 //! Opt-in SQLite/PostgreSQL runtime journals with namespace-bound keys and
 //! renewable, database-clock leases. This SDK module does not authenticate an
 //! HTTP caller, install a task queue, or select a database in the local app.
+mod knowledge;
+pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -252,6 +254,12 @@ impl SqlDatabase {
             namespace,
         }
     }
+    pub fn corpus(&self, namespace: DatabaseNamespace) -> SqlCorpusStore {
+        SqlCorpusStore::new(self.clone(), namespace)
+    }
+    pub fn memory(&self, namespace: DatabaseNamespace) -> SqlMemoryStore {
+        SqlMemoryStore::new(self.clone(), namespace)
+    }
     async fn schema(&self) -> Result<(), RuntimeError> {
         let value: Option<i64> =
             sqlx::query_scalar("SELECT version FROM taskloom_meta WHERE singleton=1")
@@ -333,6 +341,26 @@ impl SqlDatabase {
         sqlx::query("INSERT INTO taskloom_records(namespace,family,object_id,revision,body) VALUES($1,$2,$3,$4,$5) ON CONFLICT(namespace,family,object_id) DO UPDATE SET revision=excluded.revision,body=excluded.body")
             .bind(&key.namespace.0).bind(key.family).bind(&key.id).bind(sequence(revision)?).bind(body).execute(&mut **tx).await.map_err(database_error)?;
         Ok(())
+    }
+    /// Lock a bounded aggregate even when it has not been created yet. The
+    /// seed is transactional, so a refused operation leaves no empty record.
+    /// PostgreSQL's no-op update locks the row; SQLite already owns its writer.
+    async fn lock_record<T: Serialize>(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        key: &RecordKey,
+        initial: &T,
+    ) -> Result<Record, RuntimeError> {
+        let body = self.serialize(key, initial)?;
+        sqlx::query("INSERT INTO taskloom_records(namespace,family,object_id,revision,body) VALUES($1,$2,$3,0,$4) ON CONFLICT(namespace,family,object_id) DO NOTHING")
+            .bind(&key.namespace.0).bind(key.family).bind(&key.id).bind(body)
+            .execute(&mut **tx).await.map_err(database_error)?;
+        sqlx::query("UPDATE taskloom_records SET revision=revision WHERE namespace=$1 AND family=$2 AND object_id=$3")
+            .bind(&key.namespace.0).bind(key.family).bind(&key.id)
+            .execute(&mut **tx).await.map_err(database_error)?;
+        self.read_tx(tx, key)
+            .await?
+            .ok_or_else(|| storage("locked database record is absent"))
     }
     async fn acquire(&self, key: RecordKey) -> Result<Arc<Lease>, RuntimeError> {
         self.schema().await?;

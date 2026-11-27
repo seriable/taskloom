@@ -1,5 +1,6 @@
 //! Actual explicitly zero-priced local API through SQL run/workflow/session stores.
 //! TASKLOOM_DATABASE_URL is resolved locally; it is never serialized or printed.
+mod knowledge;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{path::Path, sync::Arc, time::Duration};
@@ -102,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.len() < 3 || args.len() > 4 {
         return Err(
-            "use init|run|inspect|start-long|resume-long TENANT PROJECT [native-config.json]"
+            "use init|run|inspect|knowledge-run|knowledge-inspect|start-long|resume-long TENANT PROJECT [native-config.json]"
                 .into(),
         );
     }
@@ -128,6 +129,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db.close().await;
         return Ok(());
     }
+    if args[0] == "knowledge-inspect" {
+        println!("{}", knowledge::snapshot(&db, &args[1], &args[2]).await?);
+        db.close().await;
+        return Ok(());
+    }
     let path = Path::new(
         args.get(3)
             .ok_or("provide explicit native configuration for generation")?,
@@ -149,6 +155,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ..Default::default()
         });
     let runs = db.runs(ns.clone());
+    if args[0] == "knowledge-run" {
+        knowledge::run(&db, &args[1], &args[2], &agent).await?;
+        println!("{}", knowledge::snapshot(&db, &args[1], &args[2]).await?);
+        db.close().await;
+        return Ok(());
+    }
     if args[0] == "start-long" || args[0] == "resume-long" {
         let durable = DurableAgent::new(&agent, &runs);
         let state = if args[0] == "start-long" {

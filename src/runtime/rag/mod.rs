@@ -252,7 +252,7 @@ pub async fn ingest(
     store.replace(document, chunks, expected_revision).await
 }
 
-fn validate_chunks(document: &Document, chunks: &[Chunk]) -> Result<(), RuntimeError> {
+pub(crate) fn validate_chunks(document: &Document, chunks: &[Chunk]) -> Result<(), RuntimeError> {
     if chunks.is_empty() || chunks.len() > 100_000 {
         return Err(invalid("empty or oversized chunk set"));
     }

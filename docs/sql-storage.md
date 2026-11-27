@@ -1,7 +1,7 @@
 # SQL runtime stores (SDK foundation)
 
 The opt-in `database` feature supplies SQLite and PostgreSQL implementations
-of `RunStore`, `WorkflowStore` and `SessionStore`. Default features remain
+of `RunStore`, `WorkflowStore`, `SessionStore`, `CorpusStore` and `MemoryStore`. Default features remain
 empty and the supported Rust version remains 1.86. The local Application,
 HTTP API, CLI and UI still select file stores. This increment does not supply
 multi-user authentication, quotas, a durable queue or distributed workers.
@@ -79,7 +79,7 @@ not be summed or interpreted as independent charges.
 Existing file-based users need no change. Enabling the Cargo feature does not
 change their store. `migrate()` explicitly creates schema v1 in a transaction;
 an unsupported version is refused. There is currently no supported bulk
-file-to-SQL import, no SQL corpus/memory/skills/embedding ledger, and no automatic
+file-to-SQL import, no SQL skills/embedding ledger, and no automatic
 schema downgrade. Keep existing file state until a separately verified importer
 is available. Take a backup before future schema changes.
 
@@ -90,8 +90,10 @@ database with `pg_restore --exit-on-error --single-transaction --no-owner`.
 Verify cold runtime snapshots before admitting new work. Leases retained in a
 restored database must expire before takeover. Database clocks and permissions
 remain operational responsibilities. These procedures cover the three core
-tables only; they are not backups of model weights, uploaded files, corpus,
-memory, skills or the whole application.
+tables only; they are not backups of model weights, uploaded files, skills,
+external embedding ledgers or the whole application. The initial core acceptance
+inspected only run/workflow/session state. The later `--kind knowledge` backup
+probe additionally verifies corpus, source session and memory tombstones.
 
 ## Reproduction and acceptance
 
@@ -132,3 +134,46 @@ terminal reentry due to an asynchronous release/pool shutdown race. The final
 campaign reran both backends after the release-draining fix. Broad concurrent
 service/load acceptance, authenticated isolation and application integration
 remain open in `p0-p2-roadmap.md`.
+
+## SQL corpus and memory follow-up
+
+`db.corpus(namespace)` and `db.memory(namespace)` use the same schema-v1
+record table, adding record families without DDL changes. Corpus uses a bounded
+whole-snapshot update, validated documents/chunks and optional expected-revision
+CAS. This is suitable for small collections, not a database vector search engine.
+The existing `ingest`, retrievers and `RagTool` accept it through `CorpusStore`.
+SQL mutation locks the aggregate row transactionally, including first creation;
+concurrent CAS writers cannot silently overwrite one another.
+
+Pass the SQL memory store to `MemoryManager` with a trusted `MemoryAccess`.
+Every memory scope must match the store's tenant/project namespace; the owner
+remains separately keyed and envelope-bound. The manager retains its exact
+source, candidate review, explicit conflict replacement, editing provenance,
+recall, erasure tombstone and no-new-authority rules. SQL CAS preserves immutable
+audit prefixes and monotonic forgotten-source sets. Reserve capacity for erasure
+is retained within the configured record limit. Erasure removes live record
+values; old backups/acceptance transcripts and physical database pages are not
+cryptographic erasure targets. Do not describe this as secure deletion of all
+historical copies.
+
+```powershell
+cargo test --locked --features database --test database_knowledge sqlite
+# Set TASKLOOM_TEST_POSTGRES_URL privately to the owned fixture first.
+cargo test --locked --features database --test database_knowledge postgres -- --ignored
+cargo build --locked --features database,openai --example database_native
+python examples/database/accept_knowledge.py target/my-native-knowledge --config target/native-generation-4b-config.json --example target/debug/examples/database_native.exe --postgres-fixture target/my-owned-postgres --model-log target/my-model.log
+python examples/database/backup_acceptance.py target/my-knowledge-backup --kind knowledge --native target/my-native-knowledge --postgres-fixture target/my-owned-postgres --example target/debug/examples/database_native.exe
+```
+
+The fixture-model database tests cover real concurrent transactions, cold
+connections, corrupt/transplanted envelopes, revision mismatches, owner/project
+isolation, title recall, atomic invalid/oversized admissions, extraction spending,
+review/edit/recall/erasure and unchanged session history. The separately retained
+native API campaign used actual Qwen3-4B generation for a short source turn and
+preference extraction, then labelled local operator review/edit/erasure. Each
+database passed ten controls, plus three backup/restore controls overall. Original
+model output remains distinct from the human's edited value. This visible small
+example does not accept broad extraction quality, semantic retrieval or
+authenticated multi-user isolation. See
+`acceptance/p2-sql-knowledge-20261128.json`. All P2.2 boxes remain open until
+application persistence, authenticated service control and workers are accepted.

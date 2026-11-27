@@ -351,6 +351,17 @@ integration are unfinished. Earlier native shutdown failures remain retained.
 All P2.2 boxes stay unchecked. See `sql-storage.md` and
 `acceptance/p2-sql-stores-20261128.json` for migration and reproducible evidence.
 
+Later SQL knowledge increment: namespace-bound CorpusStore and MemoryStore now
+use transactional aggregate-row locking/CAS in schema v1. Both real databases
+passed concurrent-write, cold-read, invalid/corrupt-record, scope and erasure
+controls. Actual native Qwen source/extraction plus explicitly labelled operator
+review/edit/erasure passed ten controls per backend; separate backup/restore
+verified corpus, source sessions and tombstones in three controls. Short visible
+preference examples do not imply broad semantic quality. SQL skills/embedding
+ledgers, Application/CLI/UI backend selection, multi-user identity/RBAC, quotas
+and queue/worker/load integration remain unfinished; no P2.2 box is checked.
+See `acceptance/p2-sql-knowledge-20261128.json`.
+
 - [ ] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
 - [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.

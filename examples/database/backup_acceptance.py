@@ -25,6 +25,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out',type=Path);parser.add_argument('--native',type=Path,required=True)
     parser.add_argument('--postgres-fixture',type=Path,required=True);parser.add_argument('--example',type=Path,required=True)
+    parser.add_argument('--kind',choices=['core','knowledge'],default='core')
     args=parser.parse_args();native=args.native.resolve();campaign=json.loads((native/'report.json').read_text(encoding='utf-8'))
     if not campaign['completed'] or campaign['status']!='passed':raise ValueError('completed passing native SDK campaign required')
     root=args.out.resolve();root.mkdir(parents=True,exist_ok=False)
@@ -36,16 +37,17 @@ def main():
         raise ValueError('fixture ownership/image changed')
     def inspect(url,backend):
         env=dict(os.environ,TASKLOOM_DATABASE_URL=url);env.pop(campaign['fees']['model_credential_environment'],None)
-        result=subprocess.run([str(args.example.resolve()),'inspect','native-database',cases[backend]['project']],env=env,capture_output=True,timeout=30)
+        action,tenant=('inspect','native-database') if args.kind=='core' else ('knowledge-inspect','native-knowledge')
+        result=subprocess.run([str(args.example.resolve()),action,tenant,cases[backend]['project']],env=env,capture_output=True,timeout=30)
         if result.returncode:raise RuntimeError('cold SQL inspection failed; credential value omitted')
         return json.loads(result.stdout)
     report={'version':1,'completed':False,'checks':{},'failures':[],
-        'scope':'quiescent core SQL run/workflow/session/budget tables only; no whole-app/file/knowledge/memory/skills backup or worker-service completion',
+        'scope':('quiescent core SQL run/workflow/session/budget state' if args.kind=='core' else 'quiescent SQL corpus/memory/source-session state')+'; no whole-app/files/skill/embedding-ledger backup or worker-service completion',
         'native_reference':str(native),'binary_sha256':hashlib.sha256(args.example.read_bytes()).hexdigest(),
         'model_requests_performed':False,'credential_values':'private fixture environment only; never included in output',
         'artifacts_private':'all database/dump files contain runtime data; excluded from source publication'}
     try:
-        source=native/'runtime ü space.sqlite';target=root/'restored ü space.sqlite'
+        source=native/('runtime ü space.sqlite' if args.kind=='core' else 'knowledge ü.sqlite');target=root/'restored ü space.sqlite'
         with sqlite3.connect(source.as_uri()+'?mode=ro',uri=True) as original:
             live=original.execute("SELECT count(*) FROM taskloom_leases WHERE expires_ms>CAST((julianday('now')-2440587.5)*86400000 AS BIGINT)").fetchone()[0]
             if live:raise ValueError('stop all SQLite owners before backup acceptance')
@@ -76,8 +78,11 @@ def main():
         save(root/'postgres-original-cold.json',a);save(root/'postgres-restored-cold.json',b)
         report['checks']['postgres_transactional_restore_retains_identical_native_state']=a==b
         report['postgres_backup']=digest(dump);report['restored_owned_database_name']=restored_db
-        report['checks']['unknown_model_attempts_retained_after_restore']=all(v['long_run']['report']['budget']['uncertain_attempts']==1 for v in [
-            json.loads((root/'sqlite-restored-cold.json').read_text(encoding='utf-8')),b])
+        restored=[json.loads((root/'sqlite-restored-cold.json').read_text(encoding='utf-8')),b]
+        if args.kind=='core':
+            report['checks']['unknown_model_attempts_retained_after_restore']=all(v['long_run']['report']['budget']['uncertain_attempts']==1 for v in restored)
+        else:
+            report['checks']['corpus_source_and_erasure_tombstones_retained']=all(v['corpus']['documents'] and v['source_run']['report']['stop_reason']=='completed' and not v['memory']['records'] and v['memory']['forgotten_sources'] for v in restored)
         report['completed']=True
     except Exception as error:report['failures'].append(str(error))
     report['failures'].extend('check failed: '+name for name,passed in report['checks'].items() if not passed)
