@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features: ["", "openai", "anthropic", "schemars", "runtime", "runtime,openai", "runtime,anthropic", "mcp"]
+        features: ["", "openai", "anthropic", "schemars", "runtime", "runtime,openai", "runtime,anthropic", "mcp", "app"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

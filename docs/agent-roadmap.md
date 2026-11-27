@@ -62,19 +62,19 @@ failures verify recovery without silently repeating effects. See
 
 Phase 2 local acceptance (2026-11-27): 173 all-feature tests pass on Windows,
 Rust 1.86 and independent WSL Linux. Hosted CI and paid-provider acceptance
-remain external checks. Phase 3 is still outstanding.
+remain external checks. Phase 3 acceptance is recorded below.
 
 ## Phase 3: knowledge and application delivery
 
 - [x] Pluggable document ingestion, chunking, retrieval and source citations.
-- [ ] Service API for run creation, status, events, cancellation and approvals.
-- [ ] CLI for local execution and state inspection.
-- [ ] Basic UI for run trajectories, results and approvals.
-- [ ] Necessary ecosystem integrations (including MCP tool access), documented
+- [x] Service API for run creation, status, events, cancellation and approvals.
+- [x] CLI for local execution and state inspection.
+- [x] Basic UI for run trajectories, results and approvals.
+- [x] Necessary ecosystem integrations (including MCP tool access), documented
   extension contracts and a cited research/report end-to-end example.
-- [ ] Installation, configuration, API and operator documentation.
-- [ ] Relevant automated checks, package verification and local service/UI
-  acceptance; real-provider acceptance when credentials are available.
+- [x] Installation, configuration, API and operator documentation.
+- [x] Relevant automated checks, package verification and local service/UI
+  acceptance. External real-provider/hosted acceptance is reported separately.
 
 Acceptance: a new user can install the project, connect a provider and tools,
 run a cited knowledge task, and inspect/control it through CLI and UI.
@@ -85,14 +85,32 @@ local lexical retrieval and a permissioned search tool are implemented.
 The offline `agent_research` imports two files and verifies exact quotes and
 source markers against archived evidence. Citation checks establish provenance,
 not semantic truth. See [knowledge and citations](knowledge.md).
-API/CLI/UI and ecosystem integration acceptance is still outstanding.
+The application gathers all saved knowledge-search outputs for report
+verification and retains distinct corpus revisions rather than hiding updates.
 
 MCP increment: explicit Streamable HTTP initialization, bounded paginated tool
 discovery, JSON/SSE calls and host-authored effect/permission bindings reuse
 native durable approval/recovery. Endpoint/tenant binding changes reject reentry.
 Local fixtures exercise the supported protocol surface without external service
-credentials. See [MCP integration](mcp.md). Application delivery acceptance is
-still outstanding.
+credentials. See [MCP integration](mcp.md).
+
+Application acceptance (2026-11-27): the optional `app` host provides an
+installable executable, authenticated local API, run controls and a browser
+operator console. API creation persists before dispatch; worker panics and
+server restart retain explicit durable recovery. Read-only CLI commands do
+not need provider/MCP connections. See [installation, API and operations](application.md).
+
+All 195 all-feature tests pass on Windows, Rust 1.86 and independent WSL Linux.
+Warning-free Clippy/docs, feature combinations, nine offline examples and
+package verification pass. A real local debug-profile install executes and
+verifies a cited knowledge task. Browser acceptance creates/inspects a run,
+verifies sources, reloads persisted results after restart, and approves/resumes
+one real file write. A narrow-screen check finds no horizontal overflow.
+
+The three development phases have completed local acceptance. These remain
+unreleased development-branch features; they are not in the `v0.1.0` tag.
+External provider/MCP deployment compatibility, hosted CI and production-scale
+load testing have not been established by this local acceptance.
 
 ## Verification constraints
 

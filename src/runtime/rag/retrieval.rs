@@ -214,11 +214,55 @@ pub struct CitedReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiedReport {
     pub report: CitedReport,
-    pub corpus_revision: u64,
+    /// Present only when all evidence came from one corpus revision.
+    pub corpus_revision: Option<u64>,
+    pub corpus_revisions: Vec<u64>,
     /// Original retrieved excerpts remain usable after corpus updates/deletion.
     pub sources: Vec<Chunk>,
 }
 impl SearchResult {
+    /// Verify citations across multiple actual retrieval outputs, retaining
+    /// distinct revisions rather than pretending the corpus never changed.
+    pub fn verify_all(
+        results: &[Self],
+        report: CitedReport,
+    ) -> Result<VerifiedReport, RuntimeError> {
+        if results.len() > 1024 {
+            return Err(invalid("too many evidence snapshots"));
+        }
+        let mut revisions = BTreeSet::new();
+        let mut hits = BTreeMap::<String, Evidence>::new();
+        for result in results {
+            revisions.insert(result.corpus_revision);
+            for hit in &result.hits {
+                if hits
+                    .get(&hit.chunk.id)
+                    .is_some_and(|saved| saved.chunk != hit.chunk)
+                {
+                    return Err(invalid("conflicting archived chunk identity"));
+                }
+                if !hit.score.is_finite() {
+                    return Err(invalid("non-finite evidence score"));
+                }
+                hits.insert(hit.chunk.id.clone(), hit.clone());
+                if hits.len() > 20_000 {
+                    return Err(invalid("too many evidence chunks"));
+                }
+            }
+        }
+        let combined = Self {
+            corpus_revision: 0,
+            hits: hits.into_values().collect(),
+        };
+        let mut verified = combined.verify(report)?;
+        verified.corpus_revision = if revisions.len() == 1 {
+            revisions.first().copied()
+        } else {
+            None
+        };
+        verified.corpus_revisions = revisions.into_iter().collect();
+        Ok(verified)
+    }
     /// Checks reference identity, exact quotation and marker coverage. This
     /// does not judge whether a source supports the model's interpretation.
     pub fn verify(&self, report: CitedReport) -> Result<VerifiedReport, RuntimeError> {
@@ -265,7 +309,8 @@ impl SearchResult {
         }
         Ok(VerifiedReport {
             report,
-            corpus_revision: self.corpus_revision,
+            corpus_revision: Some(self.corpus_revision),
+            corpus_revisions: vec![self.corpus_revision],
             sources,
         })
     }

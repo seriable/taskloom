@@ -662,6 +662,58 @@ async fn hashed_run_ids_and_monotonic_writes_keep_atomic_complete_checkpoints() 
     }
 }
 
+#[tokio::test]
+async fn cancel_abandoned_process_without_dispatch_preserves_cost_and_unknown_effects() {
+    for mode in ["model", "tool"] {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FileRunStore::new(dir.path().join("store"));
+        let model = TestModel::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let registry = tools(Arc::clone(&calls), ToolEffect::NonIdempotent, None, false);
+        let agent = AgentLoop::new(&model, &registry, "test")
+            .with_policy(policy())
+            .with_limits(limits());
+        let durable = DurableAgent::new(&agent, &store);
+        if mode == "tool" {
+            let waiting = durable.start("cancel-abandoned", messages()).await.unwrap();
+            durable
+                .decide(
+                    "cancel-abandoned",
+                    &waiting.pending_approval().unwrap().request_id,
+                    decision(true),
+                )
+                .await
+                .unwrap();
+        }
+        child(dir.path(), "cancel-abandoned", mode);
+        let before = model.calls.load(Ordering::SeqCst);
+        let state = durable
+            .cancel("cancel-abandoned", "operator", "stop abandoned work")
+            .await
+            .unwrap();
+        assert_eq!(state.report.stop_reason, StopReason::Cancelled);
+        assert_eq!(state.status, RunStatus::Finished);
+        assert_eq!(model.calls.load(Ordering::SeqCst), before);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        if mode == "model" {
+            assert_eq!(state.report.budget.uncertain_micros, 10);
+        } else {
+            assert!(matches!(
+                state.tool_steps[0].progress,
+                ToolProgress::Uncertain { .. }
+            ));
+            let reconciled = durable
+                .reconcile("cancel-abandoned", "write-a", recovery_result())
+                .await
+                .unwrap();
+            assert_eq!(reconciled.report.stop_reason, StopReason::Cancelled);
+        }
+        durable.resume("cancel-abandoned").await.unwrap();
+        assert_eq!(model.calls.load(Ordering::SeqCst), before);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Fault {
     BeforeModel,

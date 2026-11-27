@@ -22,10 +22,14 @@ compression](docs/sessions-and-context.md) retain full history across bounded
 model turns. [Durable workflows](docs/workflows.md) add parallel/conditional
 DAGs and bounded planner/executor/writer/reviewer collaboration (`agent_peer`).
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
-retrieval and exact source citations (`agent_research`). API/CLI/UI delivery
-remains in the [roadmap](docs/agent-roadmap.md).
+retrieval and exact source citations (`agent_research`). See the
+[roadmap](docs/agent-roadmap.md) for acceptance checks and external validation.
 The optional [`mcp` integration](docs/mcp.md) binds explicitly configured
 Streamable HTTP tools to the same permission, approval and recovery controls.
+The optional [`app` host](docs/application.md) adds an installable CLI,
+bearer-authenticated local API and operator UI. Install from this development
+checkout with `cargo install --path . --locked --features app`, then run
+`taskloom init taskloom.json`. These features are not in the `v0.1.0` tag.
 
 ## What you get
 
@@ -47,6 +51,9 @@ Streamable HTTP tools to the same permission, approval and recovery controls.
 | **Evaluation** | Re-run recorded requests with a changed prompt or model and judge the answers (`Unchanged`, or a pairwise `ModelJudge`). |
 | **Tracing** | `tracing` spans per task and per attempt, named after the OpenTelemetry GenAI conventions (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, ...). |
 | **Agent runtime (optional, unreleased)** | Native tool conversations, schema-checked tools, explicit permissions, bounded decisions/tool calls/time/model spending, execution events and reports. |
+| **Durable collaboration (optional, unreleased)** | Atomic checkpoints, exact-input approvals, explicit effect reconciliation, sessions/context, parallel/conditional workflows and bounded PEER review. |
+| **Knowledge and tools (optional, unreleased)** | Pluggable ingestion/chunking/retrieval, exact source citations, local lexical search and explicitly bound MCP HTTP tools. |
+| **Application host (optional, unreleased)** | Installable CLI, authenticated local run/knowledge API and operator UI for events, results, approvals and execution controls. |
 | **Typed errors** | `TaskError` / `ModelError` kinds (transient, context overflow, schema mismatch, auth, content rejected, misconfigured, deadline, cancelled). Branch on the kind, never on message text. |
 
 ## Quick start
@@ -286,6 +293,9 @@ cargo run --example record_replay  # record once, replay offline
 cargo run --features runtime --example agent_loop  # native tool loop, offline
 cargo run --features runtime --example agent_resume # checkpoint and approval, offline
 cargo run --features runtime --example agent_session # persistent turns and compressed input
+cargo run --features runtime --example agent_peer # four durable roles, approvals and review
+cargo run --features runtime --example agent_research # local knowledge with verified quotes
+cargo run --features app --bin taskloom -- --help # installable API/CLI/UI host
 OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
   cargo run --features openai --example openai
 ```
@@ -296,17 +306,18 @@ OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
 video pipeline that runs some sixty model tasks through it.
 
 This release is distributed on GitHub; the installation example pins its Git
-tag. It has not been published to crates.io. Input token limits and reported
-costs do not impose a whole-job currency cap. Retrying or hedging can increase
-the number of paid requests; configure task deadlines and fallback chains
-for your workload. Live-provider interoperability and large-scale load testing
-are separate from the offline CI checks.
+tag. It has not been published to crates.io. The tagged single-task API reports
+costs without imposing a whole-job currency cap. The unreleased runtime adds
+explicit model-spend reservations and workflow-wide allocations with known
+prices; independent external tool/service charges remain outside that cap.
+Live-provider interoperability and large-scale load testing are separate from
+offline checks.
 
 Local Windows and Linux all-feature tests and Rust 1.86 tests pass. Hosted
 GitHub CI has not completed validation; its live status is shown by the badge.
 
 See [the readiness assessment](docs/readiness.md) for verified checks,
-remaining release blockers and the boundary of this task-execution library.
+external validation and the boundaries of the task API and agent framework.
 
 Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 

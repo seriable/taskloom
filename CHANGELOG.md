@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- Optional `app` host with an installable CLI, authenticated local run/knowledge
+  API and browser operator console for trajectories, results, citations,
+  approvals and execution controls. Persist before scheduling; explicit reentry
+  and bounded local admission retain existing durable recovery guarantees.
+- Direct persisted cancellation handles waiting and abandoned runs without
+  further dispatch, auditing pending rejection and preserving unknown effects
+  and model spending. Host worker panics become inspectable errors rather than
+  silent replays. Read-only CLI commands require no provider/MCP connection.
+- Multi-retrieval report verification retains distinct corpus revisions;
+  local HTTP, real CLI subprocess and browser acceptance cover application
+  delivery without paid model requests. Added installation/operator/API and
+  host extension documentation and an offline approval console example.
+
 - Optional `mcp` integration: explicit HTTP session initialization, bounded
   paginated catalog discovery, JSON/SSE tool responses, host-assigned aliases,
   effect/permission contracts and frozen endpoint/tenant binding identities.
@@ -44,8 +57,7 @@
 - OpenAI-compatible and Anthropic native tool adapters share the gateway;
   existing single-task APIs remain available without the runtime dependency.
 - Offline multi-step and live OpenAI-compatible examples, runtime guide and
-  three-phase agent framework roadmap. Knowledge and application delivery
-  are still in development.
+  three-phase agent framework roadmap with explicit acceptance boundaries.
 
 - Normalize OpenAI `message.refusal`, streamed `delta.refusal`, refusal
   content parts and `content_filter` into typed content rejection, preserving

@@ -95,6 +95,11 @@ can still be audited after the corpus is updated or deleted. The durable run
 also retains the full tool result. Store these artifacts for the required
 retention period; the standalone example uses a temporary directory.
 
+For multiple searches, use `SearchResult::verify_all` with their actual archived
+outputs. Reports retain all `corpus_revisions`; `corpus_revision` is present only
+when they agree. This avoids hiding updates between retrievals. The application
+report endpoint gathers the run's recorded `knowledge_search` outputs this way.
+
 Verification establishes provenance and exact quotation. It does not establish
 that the source is correct, that a quotation supports a conclusion, or that all
 prose is supported. Evaluate those separately, optionally with the bounded

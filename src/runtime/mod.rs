@@ -5,6 +5,8 @@
 //! native provider tool calls. Only explicitly allowed tools are exposed.
 //! Tools execute in process; this library does not create a security sandbox.
 
+#[cfg(feature = "app")]
+pub mod app;
 mod budget;
 mod context;
 mod durable;

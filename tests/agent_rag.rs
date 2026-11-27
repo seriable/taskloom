@@ -302,6 +302,55 @@ async fn citations_reject_unknown_sources_forged_quotes_and_unmatched_markers() 
     assert!(forged.verify(valid).is_err());
 }
 
+#[tokio::test]
+async fn reports_can_cite_multiple_retrievals_without_hiding_changed_corpus_revisions() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    ingest(
+        &store,
+        document("a", "Alpha evidence."),
+        &WindowChunker::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let first = search(&store, &LexicalRetriever, &RetrievalQuery::new("alpha"))
+        .await
+        .unwrap();
+    ingest(
+        &store,
+        document("b", "Beta evidence."),
+        &WindowChunker::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let second = search(&store, &LexicalRetriever, &RetrievalQuery::new("beta"))
+        .await
+        .unwrap();
+    let report = CitedReport {
+        text: format!(
+            "Alpha [[{}]] and beta [[{}]].",
+            first.hits[0].chunk.id, second.hits[0].chunk.id
+        ),
+        citations: vec![
+            Citation {
+                chunk_id: first.hits[0].chunk.id.clone(),
+                quote: "Alpha evidence.".into(),
+            },
+            Citation {
+                chunk_id: second.hits[0].chunk.id.clone(),
+                quote: "Beta evidence.".into(),
+            },
+        ],
+    };
+    assert!(second.verify(report.clone()).is_err());
+    let verified = SearchResult::verify_all(&[first, second], report).unwrap();
+    assert_eq!(verified.sources.len(), 2);
+    assert_eq!(verified.corpus_revision, None);
+    assert_eq!(verified.corpus_revisions, vec![1, 2]);
+}
+
 struct ResearchModel;
 impl Model for ResearchModel {
     fn generate<'a>(

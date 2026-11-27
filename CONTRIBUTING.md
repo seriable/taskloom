@@ -22,6 +22,11 @@ cache identity and recording behavior. Keep new public APIs documented.
 Runtime changes also need coverage of dispatch permissions, tool correlation,
 limits, interrupted side effects and model-spend reservations. See
 [the development roadmap](docs/agent-roadmap.md) for phase acceptance criteria.
+Application changes should retain provider-free read-only commands, API auth,
+persist-before-dispatch behavior and source-data rendering as text. Use local
+HTTP fixtures and deterministic models for MCP/provider/application tests.
+The `app_approval` example provides a real local write for manual UI acceptance;
+its explicit state directory must remain outside committed source artifacts.
 
 Never commit API keys, local environment files, recordings or cached customer
 data. Report ordinary bugs through GitHub issues with a minimal reproduction.

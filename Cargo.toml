@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.86"
 license = "MIT OR Apache-2.0"
-description = "Typed LLM task execution: model chains, resilient JSON, deadlines, circuit breakers, call accounting, record/replay and step caching."
+description = "Typed LLM tasks and durable agents: native tools, approvals, recovery, bounded workflows, RAG, MCP and a local API/CLI/UI."
 readme = "README.md"
 keywords = ["llm", "agent", "openai", "anthropic", "gateway"]
 categories = ["api-bindings", "asynchronous"]
@@ -26,8 +26,11 @@ schemars = ["dep:schemars"]
 runtime = ["dep:jsonschema", "dep:uuid"]
 # Explicitly configured MCP Streamable HTTP tool clients.
 mcp = ["runtime", "dep:reqwest"]
+# Local API/CLI/UI host; library-only users retain the minimal default build.
+app = ["mcp", "openai", "anthropic", "dep:axum", "tokio/net", "tokio/rt-multi-thread", "tokio/signal"]
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"], optional = true }
 base64 = { version = "0.22", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
@@ -77,5 +80,14 @@ required-features = ["runtime"]
 name = "agent_research"
 required-features = ["runtime"]
 
+[[example]]
+name = "app_approval"
+required-features = ["app"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }
+
+[[bin]]
+name = "taskloom"
+path = "src/bin/taskloom.rs"
+required-features = ["app"]

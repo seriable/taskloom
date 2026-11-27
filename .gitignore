@@ -6,3 +6,5 @@ Cargo.lock.bak
 /.env.*
 /recordings
 /step-cache
+/.taskloom
+/taskloom.json

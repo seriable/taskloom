@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures_util::{future::BoxFuture, StreamExt};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -49,7 +49,7 @@ pub struct McpToolInfo {
 }
 /// Every remote tool binding requires a host-authored side-effect declaration.
 /// MCP annotations are advisory and never grant tool execution permissions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpToolBinding {
     pub name: String,
     pub remote_name: String,

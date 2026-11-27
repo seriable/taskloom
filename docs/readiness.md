@@ -14,10 +14,11 @@
 新增 `DurableAgent` 提供检查点、暂停恢复、人工审批、预算日志和不确定副作用核对。
 会话和上下文压缩已接入持久化运行，保留完整历史并限制模型输入；
 多 Agent 工作流已具备顺序/并行/条件 DAG、稳定子运行、全局预算预留和有界评审返工，
-第二阶段已通过本地验收；第三阶段的可插拔知识检索和引用核对已实现，
-MCP Streamable HTTP 工具接入也已落地；API、CLI 和 UI 仍在开发。
-详见 [开发清单](agent-roadmap.md)、[运行时指南](agent-runtime.md)、[恢复指南](durable-runs.md)
-和 [协作指南](workflows.md)。
+三个阶段均已通过本地开发验收：第三阶段补齐可插拔知识检索与引用核对、
+MCP Streamable HTTP、可安装 CLI、带认证的本地 API 和运行/审批 UI。
+这是单操作员的预览框架；真实模型兼容性、托管 CI 和生产规模验收仍需单独完成。
+详见 [开发清单](agent-roadmap.md)、[运行时指南](agent-runtime.md)、[恢复指南](durable-runs.md)、
+[协作指南](workflows.md) 和 [安装/API/操作指南](application.md)。
 
 ## 本次已修复
 
@@ -69,11 +70,13 @@ Transport 选项取值也改为显式 `as_any`，消除了源码对较新 trait 
 
 验证环境：Windows（Rust/Cargo 1.99 和真实 1.86）；WSL Debian Linux（Rust/Cargo 1.95）。
 
-- 单任务基线为 101 个测试；当前全 feature 为 87 个单元测试、99 个集成测试，共 186 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
-- feature 组合增加 runtime、runtime + openai、runtime + anthropic，分别验证测试和文档。
+- 单任务基线为 101 个测试；当前全 feature 为 87 个单元测试、108 个集成测试，共 195 个（含多进程测试子入口）。v0.1.0 标签对应此前的 94 个测试。
+- 默认空 feature、openai、anthropic、schemars、runtime、runtime + openai、runtime + anthropic、mcp、app 九种组合分别验证测试和文档。
 - 格式检查、全目标/全 feature Clippy（warnings 视为错误）。
 - 全 feature 和上述各单 feature 文档构建（warnings 视为错误）。
-- basic、record_replay、production、eval、agent_loop、agent_resume 和 agent_session 七个离线示例。
+- basic、record_replay、production、eval、agent_loop、agent_resume、agent_session、agent_peer、agent_research 九个离线示例。
+- 实际完成本地 debug profile 的 CLI 安装；安装后的程序能执行知识任务并核对引用。crate 打包和包内编译验证通过。
+- 浏览器验收覆盖任务创建、重启后查看结果、引用核对和审批后恢复真实文件写入；窄屏页面无横向溢出。
 
 新增测试位于 `tests/gateway_regressions.rs`、`tests/reliability.rs` 和 `tests/step_cache.rs`。
 Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测试模块。
@@ -85,6 +88,10 @@ Provider 协议回归测试位于 `src/openai.rs` 和 `src/anthropic.rs` 的测�
 连续十轮恢复测试覆盖了运行返回后锁短暂残留的问题。
 `tests/agent_context.rs` 验证有损摘录压缩、工具关联、字节限额和恢复后复用原模型输入；
 `tests/agent_session.rs` 验证多轮会话、并发绑定、审批占用和失败后的可审计关闭。
+工作流回归覆盖有界并行、条件分支、精确交接、全局预算预留、有限评审返工、
+子进程实际退出和父检查点故障后的安全恢复。RAG 回归覆盖 UTF-8 原文范围、
+原子替换/CAS、伪造引用拒绝和跨检索版本保留；MCP 使用本地 HTTP/SSE 协议夹具。
+应用回归包含真实 HTTP、实际 CLI 子进程、认证、审批、暂停取消、工作线程 panic 和重启恢复。
 运行状态格式更新为 2，开发中的格式 1 不会被静默迁移或重置；单任务录制格式保持不变。
 GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature 矩阵、示例和打包。
 当前托管 CI 尚未完成验证；发布验证通过的是本地 Windows、真实最低 Rust 版本，以及独立 Linux 环境。
@@ -96,4 +103,5 @@ GitHub CI 配置覆盖 Linux/Windows、真实 Rust 1.86 编译测试、feature �
 使用量只能记录 Provider 实际返回的数据；被取消的请求或未完成的流仍可能在服务端产生费用。
 
 v0.1 是 GitHub 预览版，仅发布源码和版本标签，尚未发布 crates.io 包；安装示例使用固定 Git tag。
+上述新增框架能力保存在开发分支，尚未发布到旧标签；应用安装需使用包含这些代码的 checkout。
 准备投入生产前，应在目标 Provider 上完成小规模联调及对应工作负载的压力与恢复测试。

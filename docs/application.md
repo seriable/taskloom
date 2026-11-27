@@ -1,0 +1,252 @@
+# Local application: CLI, API and operator UI
+
+The unreleased `app` feature adds a packaged `taskloom` executable and a shared
+durable run controller. It includes `runtime`, both provider adapters and MCP.
+Library-only users keep the existing minimal default feature set.
+
+## Install and run offline
+
+Use Rust 1.86 or newer. From this development checkout:
+
+```sh
+cargo install --path . --locked --features app
+taskloom init taskloom.json
+taskloom import approval "Approval guide" examples/knowledge/approval.md
+taskloom import recovery "Recovery guide" examples/knowledge/recovery.md
+taskloom run research "approval recovery"
+taskloom report research
+taskloom inspect research
+taskloom events research
+taskloom list
+```
+
+`init` creates a full editable JSON configuration and refuses to overwrite a
+file. The default model is an explicitly labelled deterministic offline demo:
+it searches local knowledge and returns source excerpts. It does not simulate
+general reasoning or claim to be a live model. `report` verifies source identity
+and exact quotes against saved tool results. Missing evidence is reported
+explicitly. See [knowledge/citations](knowledge.md) for semantic limitations.
+
+The application is not in the published `v0.1.0` tag and has not been uploaded
+to crates.io. Install from the development checkout, or from a verified future
+release commit containing this feature. Do not install the old tag expecting
+these commands.
+
+All commands accept `--config FILE` before the command. Relative `state_dir`
+paths resolve against the configuration file's directory. `inspect`, `events`,
+`list`, `report`, `knowledge`, `search` and `import` do not initialize a provider
+or contact configured MCP endpoints. They work when provider credentials are
+absent. Other commands open the configured host/model and tool bindings.
+
+`run` and `resume` wait for the local worker to reach a durable boundary, then
+print its complete state. Exit 0 means the command succeeded; a waiting approval
+or recovery boundary is not a completed answer. Inspect `status` and
+`report.stop_reason`. A finished failed/limited run exits nonzero. IDs use
+1–64 ASCII letters/digits/hyphens/underscores. Reusing an existing ID for a new
+run fails; completed resume does not dispatch again.
+
+## Configure a provider
+
+Edit the generated configuration. For OpenAI-compatible HTTP, set:
+
+```json
+{
+  "provider": {
+    "type": "openai",
+    "base_url": "https://api.openai.com/v1",
+    "key_env": "OPENAI_API_KEY",
+    "namespace": "my-provider-tenant-v1"
+  },
+  "model": "your-model-id",
+  "prices": [
+    {"prefix": "your-model-id", "input_per_million": 1.0, "output_per_million": 4.0}
+  ]
+}
+```
+
+The prices above illustrate configuration; replace them with your provider's
+actual contract. Export `OPENAI_API_KEY` in the host environment. Anthropic uses
+`type: "anthropic"`, a base URL such as `https://api.anthropic.com`, and
+`key_env: "ANTHROPIC_API_KEY"`. Set the appropriate model ID.
+
+The top-level config has defaults, so a short configuration can omit unchanged
+fields. Nested `limits` and `context` values use their full generated objects;
+edit individual values in the generated file. `output_tokens`, model limits,
+tool permissions, context policy and approval policy are frozen for each run.
+Provider configuration, tenant namespace, pricing and the system instruction
+also contribute to its frozen identity. Changing them rejects execution reentry;
+read-only inspection still works. Keys are read from environment names, not
+stored in run definitions. Use a distinct namespace for tenant/config changes.
+
+Set `limits.max_cost_micros` to bound model spending, and supply valid prices.
+The gateway reserves a conservative maximum before every paid attempt and
+counts retries/fallbacks. Unknown pricing fails before dispatch under a spending
+cap. `null` disables this optional cost cap. Tools and external MCP/retrieval
+services can have separate charges. Step/tool/time/context limits still apply.
+The native provider adapters are covered by local HTTP fixtures; run a small
+acceptance task on your intended hosted model before relying on it.
+
+## Start the operator console
+
+Set a local API token of at least 16 non-whitespace characters. For PowerShell:
+
+```powershell
+$env:TASKLOOM_API_TOKEN = 'replace-with-your-local-operator-token'
+taskloom serve 127.0.0.1:8080
+```
+
+Open `http://127.0.0.1:8080/`, enter the same token and connect. The UI provides
+document upload, run creation/list/status, final text, source verification,
+ordered events, full saved state, pause/resume/cancel and exact-input approval.
+The token stays in page memory, is cleared from the input after connection,
+and is lost on refresh. There is no browser storage of credentials, external
+asset/CDN dependency or CORS grant. Run content is rendered as text rather than
+executing source HTML. Small screens use a single-column layout.
+
+The CLI binds loopback only. The library exports `runtime::app::router` and
+`serve` for an application-specific deployment. This host is a basic single
+operator console, not a multi-tenant production control plane: it does not
+provide OAuth/RBAC, tenant isolation, TLS termination, distributed scheduling,
+database migrations, automatic retention or a visual workflow editor. Supply
+those at the deployment boundary when needed. Sessions and workflows retain
+their documented Rust APIs; the current UI controls individual durable runs.
+
+All `/api` routes require `Authorization: Bearer TOKEN`, including read access.
+The static UI shell contains no secret. Responses disable caching. Request
+bodies are limited to 1 MiB; UI uploads accept up to 750 KB. CLI file ingestion
+supports the RAG loader's 8 MiB limit. A file store is intended for small local
+collections, and listing returns at most 1,000 run summaries (scanning at most
+20,000 directory entries). Status inspection is the last atomic checkpoint,
+not speculative in-memory progress.
+
+## API contract
+
+JSON responses carry data or `{ "error": "..." }`. Bad configuration/protocol
+input returns 400, permission failures 403, missing/conflicting/owned state 409,
+and storage/internal failures 500. Invalid JSON/extractor input may return
+Axum's 400/422 response; an oversized body returns 413. Unauthorized access
+returns 401 before run inspection.
+
+| Method and path | Input / behavior |
+|---|---|
+| `POST /api/runs` | `{ "id": "research", "prompt": "approval recovery" }`; saves a new run before returning 202, then schedules its worker |
+| `GET /api/runs` | Bounded summaries and limit; each includes local worker activity/error |
+| `GET /api/runs/{id}` | `{ state, job }`, including messages, result, usage, budget and pending approval |
+| `GET /api/runs/{id}/events?after=0` | Up to 200 ordered events; `next` is the next zero-based offset, with checkpoint revision and job status |
+| `POST /api/runs/{id}/resume` | Explicitly schedules reentry; finished nodes/runs do not replay |
+| `POST /api/runs/{id}/pause` | Signal an active local worker; finish its current operation before stopping |
+| `POST /api/runs/{id}/cancel` | `{ "actor": "operator", "note": "reason" }`; signal a local worker or cancel an unowned saved run without dispatch |
+| `POST /api/runs/{id}/approvals/{ticket}` | `{ "approved": true, "actor": "operator", "note": "reviewed exact arguments" }`; records a decision only |
+| `POST /api/runs/{id}/reconcile/{call}` | A `RecoveryDecision` JSON; records observed output, safe retry eligibility or abort, without implicitly running tools |
+| `GET /api/runs/{id}/report` | Verify final `CitedReport` against all saved `knowledge_search` outputs, preserving distinct corpus revisions |
+| `GET /api/knowledge` | Revision, document summaries and chunk count |
+| `POST /api/knowledge` | `{ "document": { "id", "title", "source", "text", "metadata": {} }, "expected_revision": 0 }`; atomic import/replacement |
+| `DELETE /api/knowledge/{id}?expected_revision=1` | Atomic document/chunk removal with optional CAS |
+| `POST /api/knowledge/search` | `{ "text": "query", "top_k": 5, "max_bytes": 24576 }`; bounded source-bearing results |
+
+The event API uses polling and cursor offsets. It is not a websocket or push
+event stream. Poll inspection rather than repeatedly calling resume while a
+task awaits a human. Worker errors are retained in the local controller until
+evicted/restarted (up to 1,024 job records); saved run state remains authoritative.
+After server restart, a saved `running` state with no worker is interrupted
+work, not an automatically restarted job. Explicit resume applies durable
+recovery rules. Active worker ownership is local to this host instance; use
+its API/UI to signal cancellation rather than a separate CLI process.
+
+## Approvals, cancellation and recovery
+
+Review the pending ticket's complete tool, input, effect and permissions.
+Approval records exact input, actor and note; click **Resume** separately.
+Wrong/old tickets and decisions after cancellation fail. Approval never grants
+future changed arguments. CLI equivalents:
+
+```sh
+taskloom approve RUN_ID TICKET_ID operator "reviewed exact input"
+taskloom resume RUN_ID
+taskloom reject RUN_ID TICKET_ID operator "not authorized"
+taskloom cancel RUN_ID operator "stop unowned work"
+taskloom reconcile RUN_ID CALL_ID decision.json
+```
+
+An example `decision.json` after verifying an uncertain external operation:
+
+```json
+{
+  "type": "record_result",
+  "output": {"saved": true},
+  "is_error": false,
+  "actor": "operator",
+  "note": "confirmed the original operation in the external audit log"
+}
+```
+
+Never record an invented result to unblock a task. Safe retry is restricted
+to declared read-only/idempotent tools in nonterminal runs. Cancellation and
+process exit cannot undo remote effects. Cancelling an abandoned tool preserves
+uncertainty; a terminal cancelled run can still record its observed outcome,
+but cannot dispatch more work. Pending approvals are rejected and audited on
+direct persisted cancellation. Cancelling a crashed model retains uncertain
+reserved spending without sending another request.
+
+`serve` handles Ctrl+C by signalling local workers, waiting up to five seconds
+and closing configured MCP sessions. Interrupted effects remain subject to
+reconciliation. A direct CLI process killed during execution leaves its existing
+checkpoints for explicit recovery. Worker panics release local scheduling state;
+their last durable state is recovered explicitly rather than silently retried.
+
+For an offline approval UI with a real local file effect:
+
+```sh
+cargo run --locked --features app --example app_approval -- target/approval-demo
+```
+
+It uses `TASKLOOM_API_TOKEN`, binds `127.0.0.1:8081` by default, and demonstrates
+`Application::with_model` with a custom model, registry and policy. Create a run,
+review the known note creation, approve, then resume. A new note file is created
+once per run. The example's explicit state directory retains its evidence.
+
+## MCP and host extensions
+
+Add entries to `mcp` in configuration:
+
+```json
+[
+  {
+    "endpoint": "http://127.0.0.1:8082/mcp",
+    "token_env": "MY_MCP_TOKEN",
+    "namespace": "my-tools-tenant-v1",
+    "bindings": [
+      { "name": "lookup", "remote_name": "knowledge/search",
+        "effect": "read_only", "permissions": ["mcp:knowledge"] }
+    ]
+  }
+]
+```
+
+These explicit host bindings populate the registry/policy. Discovery alone
+does not register other remote tools. Read [MCP's contracts and supported
+protocols](mcp.md) before assigning effect metadata. Use `non_idempotent` for
+unverified effects. The offline demo only searches local knowledge; select a
+real provider or a custom model host to use arbitrary MCP tools.
+
+Custom hosts can inject a `Model`, `ToolRegistry` and `ToolPolicy` using
+`Application::with_model`; version their model/tool contracts and configuration
+identity explicitly. RAG loaders, stores/retrievers, context compressors and
+workflow tasks have separate documented Rust interfaces. API imports take text,
+not arbitrary server filesystem paths or executable plugin code.
+
+Keep state directories private. They contain prompts, raw tools/results,
+approvals, sources and complete reports. The default `.taskloom/` directory and
+root `taskloom.json` are ignored by this checkout; custom paths need the host's
+own access control, backup and retention policy.
+
+## Local verification
+
+`tests/agent_app.rs` exercises real HTTP auth/headers, create/status/events,
+archived source verification after corpus deletion, explicit approvals,
+cancellation, graceful pause, capacity, worker panic recovery, persistence after
+restart, and actual CLI subprocesses. Crash-process tests also cover cancelling
+abandoned model/tool operations without further dispatch. Browser acceptance
+checks create/view/report citation verification and approve/resume a real note
+write. Offline checks require no external keys and do not establish compatibility
+with every hosted provider or MCP service. Hosted CI remains a separate check.

@@ -72,6 +72,88 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         self.resume_owned(run_id, lease).await
     }
 
+    /// Cancel an unowned persisted run without dispatching model/tool work.
+    /// A live owner must first receive its cancellation token. Unknown effects
+    /// stay uncertain and can still be reconciled after terminal cancellation.
+    pub async fn cancel(
+        &self,
+        run_id: &str,
+        actor: &str,
+        note: &str,
+    ) -> Result<RunState, RuntimeError> {
+        validate_actor(actor, note)?;
+        let lease = self.store.acquire(run_id).await?;
+        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        if state.status == RunStatus::Finished {
+            return Ok(state);
+        }
+        if let RunCursor::ModelInFlight {
+            started_unix_ms,
+            elapsed_before_ms,
+        } = state.cursor
+        {
+            charge_interrupted_time(&mut state, started_unix_ms, elapsed_before_ms)?;
+        }
+        if let Some(index) = state.current_tool_index() {
+            if let ToolProgress::InFlight {
+                started_unix_ms,
+                elapsed_before_ms,
+            } = state.tool_steps[index].progress
+            {
+                charge_interrupted_time(&mut state, started_unix_ms, elapsed_before_ms)?;
+                state.tool_steps[index].progress = ToolProgress::Uncertain {
+                    detail:
+                        "cancelled after worker interruption; external outcome must be reconciled"
+                            .into(),
+                    reported_result: None,
+                };
+                let clock = Clock::new(state.report.elapsed_ms);
+                let call_id = state.tool_steps[index].call.id.clone();
+                self.event(
+                    &mut state,
+                    &clock,
+                    RunEventKind::RecoveryRequired { call_id },
+                );
+            }
+            if let ToolProgress::AwaitingApproval { request } =
+                state.tool_steps[index].progress.clone()
+            {
+                state.tool_steps[index].approvals.push(ApprovalRecord {
+                    request: request.clone(),
+                    decision: ApprovalDecision {
+                        approved: false,
+                        actor: actor.into(),
+                        note: note.into(),
+                    },
+                    decided_unix_ms: unix_ms()?,
+                });
+                state.tool_steps[index].progress = ToolProgress::Pending;
+                let clock = Clock::new(state.report.elapsed_ms);
+                self.event(
+                    &mut state,
+                    &clock,
+                    RunEventKind::ApprovalDecided {
+                        request_id: request.request_id,
+                        approved: false,
+                        actor: actor.into(),
+                    },
+                );
+            }
+        }
+        let clock = Clock::new(state.report.elapsed_ms);
+        self.stop(
+            &mut state,
+            &lease,
+            &budget,
+            &clock,
+            RunStatus::Finished,
+            StopReason::Cancelled,
+            Some(format!("cancelled by {actor}: {note}")),
+        )
+        .await?;
+        Ok(state)
+    }
+
     /// Idempotent session/workflow entry point. Reusing an id with different
     /// initial messages is rejected before any dispatch.
     pub async fn start_or_resume(
