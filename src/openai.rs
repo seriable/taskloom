@@ -223,11 +223,14 @@ impl OpenAiCompatible {
         let value: Value = response.json().await.map_err(|error| {
             ModelError::schema_mismatch(format!("embeddings response is not JSON: {error}"))
         })?;
-        parse_embeddings(&value)
+        parse_embeddings(&value, request.inputs.len())
     }
 }
 
-fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
+fn parse_embeddings(
+    value: &Value,
+    expected_inputs: usize,
+) -> Result<EmbeddingResponse, ModelError> {
     let mut items = value
         .get("data")
         .and_then(Value::as_array)
@@ -235,10 +238,13 @@ fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
         .iter()
         .enumerate()
         .map(|(position, item)| {
-            let index = item
-                .get("index")
-                .and_then(Value::as_u64)
-                .map_or(position, |index| index as usize);
+            let index = match item.get("index") {
+                None => position,
+                Some(value) => value
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .ok_or_else(|| ModelError::schema_mismatch("invalid embedding input index"))?,
+            };
             let vector = item
                 .get("embedding")
                 .and_then(Value::as_array)
@@ -251,6 +257,16 @@ fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
         })
         .collect::<Result<Vec<_>, ModelError>>()?;
     items.sort_by_key(|(index, _)| *index);
+    if items.len() != expected_inputs
+        || items
+            .iter()
+            .enumerate()
+            .any(|(expected, (index, _))| expected != *index)
+    {
+        return Err(ModelError::schema_mismatch(
+            "embedding input indices are missing, duplicate or out of range",
+        ));
+    }
     Ok(EmbeddingResponse {
         vectors: items.into_iter().map(|(_, vector)| vector).collect(),
         usage: value
@@ -452,16 +468,50 @@ mod tests {
 
     #[test]
     fn embeddings_come_back_in_input_order() {
-        let response = parse_embeddings(&json!({
-            "data": [
-                { "index": 1, "embedding": [0.5, 0.25] },
-                { "index": 0, "embedding": [1.0, 0.0] },
-            ],
-            "usage": { "prompt_tokens": 4, "total_tokens": 4 },
-        }))
+        let response = parse_embeddings(
+            &json!({
+                "data": [
+                    { "index": 1, "embedding": [0.5, 0.25] },
+                    { "index": 0, "embedding": [1.0, 0.0] },
+                ],
+                "usage": { "prompt_tokens": 4, "total_tokens": 4 },
+            }),
+            2,
+        )
         .unwrap();
         assert_eq!(response.vectors, vec![vec![1.0, 0.0], vec![0.5, 0.25]]);
         assert_eq!(response.usage.unwrap().prompt_tokens, Some(4));
+    }
+
+    #[test]
+    fn embeddings_reject_misaligned_input_indices() {
+        for indices in [
+            json!([0, 0]),
+            json!([0, 2]),
+            json!([0, -1]),
+            json!([0, "1"]),
+        ] {
+            let data = indices
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|index| json!({"index":index,"embedding":[1.0,0.0]}))
+                .collect::<Vec<_>>();
+            assert!(
+                parse_embeddings(&json!({"data":data}), 2).is_err(),
+                "{indices}"
+            );
+        }
+        assert!(parse_embeddings(&json!({"data":[{"index":0,"embedding":[1.0]}]}), 2).is_err());
+        assert_eq!(
+            parse_embeddings(
+                &json!({"data":[{"embedding":[1.0]},{"embedding":[2.0]}]}),
+                2
+            )
+            .unwrap()
+            .vectors,
+            vec![vec![1.0], vec![2.0]]
+        );
     }
 
     fn chat(model: &str) -> ChatRequest {

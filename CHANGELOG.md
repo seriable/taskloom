@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- P0 retrieval increment: field-aware lexical recall (body/title/selected
+  metadata), bounded host-owned query aliases, explicit application hybrid
+  configuration and CLI/API/UI index lifecycle. Embedding requests use a
+  separate durable spending ledger; unknown usage retains reservations.
+  See `docs/research-tools.md` for pricing boundaries and migration. Real
+  embedding quality and native-model/competitor effectiveness remain unverified.
+- **(durable tool binding change)** Default lexical ranking is now `lexical-v2`;
+  suspended runs using the old search definition must finish with the original
+  binary or restart as a new run. `LexicalRetriever` remains a public unit struct.
+
 Fixes from a full review of 0.2.0-alpha.1. Breaking changes are marked **(breaking)**.
 
 ### Core

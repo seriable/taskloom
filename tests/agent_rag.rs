@@ -17,6 +17,105 @@ fn document(id: &str, text: &str) -> Document {
     }
 }
 
+#[tokio::test]
+async fn title_and_curated_metadata_recall_preserve_body_only_citations() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    let mut doc = document(
+        "recovery",
+        "Interrupted non-idempotent writes require reconciliation.",
+    );
+    doc.title = "Recovery policy 恢复策略".into();
+    doc.metadata
+        .insert("tags".into(), "restart durability".into());
+    doc.metadata
+        .insert("body_sha256".into(), "internalonly".into());
+    ingest(&store, doc, &WindowChunker::default(), None)
+        .await
+        .unwrap();
+    for query in ["recovery", "恢复", "durability", "reconciliation"] {
+        let found = search(&store, &LexicalRetriever, &RetrievalQuery::new(query))
+            .await
+            .unwrap();
+        assert_eq!(found.hits.len(), 1, "{query}");
+        let chunk = &found.hits[0].chunk;
+        assert_eq!(chunk.document_id, "recovery");
+        let report = |quote: &str| CitedReport {
+            text: format!("Evidence [[{}]].", chunk.id),
+            citations: vec![Citation {
+                chunk_id: chunk.id.clone(),
+                quote: quote.into(),
+            }],
+        };
+        assert!(found
+            .verify(report("Interrupted non-idempotent writes"))
+            .is_ok());
+        assert!(found.verify(report("Recovery policy 恢复策略")).is_err());
+        assert!(found.verify(report("restart durability")).is_err());
+    }
+    let hidden = search(
+        &store,
+        &LexicalRetriever,
+        &RetrievalQuery::new("internalonly"),
+    )
+    .await
+    .unwrap();
+    assert!(hidden.hits.is_empty());
+}
+
+#[tokio::test]
+async fn host_aliases_are_bounded_nonrecursive_and_bound_to_tool_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    ingest(
+        &store,
+        document("a", "Interrupted writes need reconciliation."),
+        &WindowChunker::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let mut cfg = LexicalConfig::default();
+    cfg.query_aliases
+        .insert("restart".into(), vec!["reconciliation".into()]);
+    cfg.query_aliases
+        .insert("reconciliation".into(), vec!["neverfollow".into()]);
+    assert_eq!(
+        cfg.expanded_query(" Restart ").unwrap(),
+        " Restart  reconciliation"
+    );
+    let retriever = ConfiguredLexicalRetriever::new(cfg.clone()).unwrap();
+    assert_ne!(retriever.identity(), LexicalRetriever.identity());
+    assert_eq!(
+        ConfiguredLexicalRetriever::default().identity(),
+        LexicalRetriever.identity()
+    );
+    assert!(
+        search(&store, &LexicalRetriever, &RetrievalQuery::new("restart"))
+            .await
+            .unwrap()
+            .hits
+            .is_empty()
+    );
+    assert_eq!(
+        search(&store, &retriever, &RetrievalQuery::new("restart"))
+            .await
+            .unwrap()
+            .hits
+            .len(),
+        1
+    );
+    cfg.title_weight = f64::NAN;
+    assert!(ConfiguredLexicalRetriever::new(cfg).is_err());
+    let mut cfg = LexicalConfig::default();
+    cfg.query_aliases
+        .insert("restart".into(), vec!["x".repeat(513)]);
+    assert!(ConfiguredLexicalRetriever::new(cfg).is_err());
+    let mut cfg = LexicalConfig::default();
+    cfg.query_aliases.insert("Restart".into(), vec!["x".into()]);
+    assert!(cfg.validate().is_err());
+}
+
 #[test]
 fn unicode_windows_keep_exact_byte_ranges_and_overlap() {
     let doc = document("zh", "审批🦀与恢复\n引用：持久化状态和工具副作用。");

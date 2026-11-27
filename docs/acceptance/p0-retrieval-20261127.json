@@ -1,0 +1,551 @@
+{
+  "version": 1,
+  "date": "2026-11-27",
+  "scope": "P0 retrieval implementation increment; P0-P2 Goal remains active",
+  "baseline": "fc76e7e",
+  "parent_commit": "072a25efebf40eb8f11d79994cfce3772fd27a65",
+  "source_git_blobs": {
+    "src/openai.rs": "bf7cfc46eb6a7c65b379c4d1c0bf9fb92e9f0378",
+    "src/runtime/rag/retrieval.rs": "58fc2e126a1d188217b82b2dd2fd44b843ff1b1d",
+    "src/runtime/rag/mod.rs": "d1469f75fd84fb946eafe0e1b9bd52863691c061",
+    "src/runtime/app/retrieval.rs": "8daa9df0b948d4da9a923fe87a86d71da7cd29c9",
+    "src/runtime/app/config.rs": "3801023cf6e5656264a19f8a41c309fd6a283e3f",
+    "src/runtime/app/mod.rs": "5792b26a5552c193262e42b80d7cabe79c23306e",
+    "src/runtime/app/cli.rs": "6fd8e178062c1cb6db0be1e99f202bdbacdb7fd2",
+    "src/runtime/app/service.rs": "d88b6ea815ff0d956a6cfb07e646414b6a227bd6",
+    "src/runtime/app/research.js": "e0ef93a21251b446a8c611d87343e03002cb46b8",
+    "tests/agent_rag.rs": "6d11e41408eb6a5018aa64bc9729011056b23af9",
+    "tests/app_retrieval.rs": "0b953332142c69c03b6890fc93a25ef34b21f76e",
+    "tests/retrieval_quality.rs": "2e75a2080c9917213f4b6f9fc5b9c09326a4094a",
+    "tests/data/retrieval-quality-v1.json": "82646f1d79c9054dd7abdaae1e1107fe26b5acc1",
+    "docs/research-tools.md": "79811fc33f6b7c4df897e3286042d9f55da04c64",
+    "docs/p0-p2-roadmap.md": "97fbc0b238d2c8558c97b634aaca2cf7c75cd127",
+    "CHANGELOG.md": "0a182374f68e2cf511c81e9a6054bd76cef78cdb"
+  },
+  "checks": [
+    {
+      "command": "cargo test --locked --all-features -j 2",
+      "result": "passed",
+      "passed": 278,
+      "failed": 0,
+      "ignored": 6,
+      "ignored_environment_checks": "one Poppler and five Docker tests; not rerun in this increment"
+    },
+    {
+      "command": "cargo test --locked --all-features --test app_retrieval -j 2",
+      "result": "passed",
+      "passed": 6,
+      "note": "Repeated after adding authenticated HTTP index-build acceptance to the existing integration case"
+    },
+    {
+      "command": "cargo test --locked --no-default-features -j 2",
+      "result": "passed",
+      "passed": 84,
+      "failed": 0
+    },
+    {
+      "command": "cargo clippy --locked --all-targets --all-features -j 2 -- -D warnings",
+      "result": "passed"
+    },
+    {
+      "command": "cargo +1.86.0 check --locked --all-features -j 2",
+      "result": "passed",
+      "compile_only": true
+    },
+    {
+      "command": "RUSTDOCFLAGS=\"-D warnings\" cargo doc --locked --all-features --no-deps -j 2",
+      "result": "passed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "result": "passed"
+    },
+    {
+      "command": "node --check src/runtime/app/research.js",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "lexical_relevance": {
+    "baseline": "body-only BM25 configuration, same corpus and queries",
+    "body_only": {
+      "cases": [
+        {
+          "id": "title-recovery",
+          "query": "recovery policy",
+          "ranked": [
+            "meeting"
+          ],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-restart",
+          "query": "crash resume",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-reconcile",
+          "query": "interrupted non idempotent writes",
+          "ranked": [
+            "recovery"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "title-approval",
+          "query": "approval contract",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "approval"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-arguments",
+          "query": "exact tool arguments payload",
+          "ranked": [
+            "approval",
+            "citation"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "approval"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-budget",
+          "query": "quota accounting",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "budget"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-reserve",
+          "query": "reserve model cost durably",
+          "ranked": [
+            "budget",
+            "isolation",
+            "index"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "budget"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "embedding-title",
+          "query": "embedding spending",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "embedding"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "index-stale",
+          "query": "stale index update",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "index"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "citation-limit",
+          "query": "quotation supports claim",
+          "ranked": [
+            "citation"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "citation"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "isolation-metadata",
+          "query": "authorization access control",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "isolation"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "zh-title",
+          "query": "长任务恢复",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "zh"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "zh-body",
+          "query": "外部系统写入",
+          "ranked": [
+            "zh"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "zh"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "scheduler-meta",
+          "query": "queue fencing concurrency",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "scheduler"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "cache-title",
+          "query": "cache configuration",
+          "ranked": [
+            "logs"
+          ],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "cache"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "telemetry-meta",
+          "query": "observability trace diagnostics",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [
+            "logs"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "absent",
+          "query": "photosynthesis chloroplast",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-internals",
+          "query": "unsearchablehash",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [],
+          "skipped_oversize": 0
+        }
+      ],
+      "mrr_at_5": 0.3125,
+      "negative_correct": 2,
+      "negative_queries": 2,
+      "positive_queries": 16,
+      "recall_at_5": 0.3125
+    },
+    "dataset_version": 1,
+    "default_fields": {
+      "cases": [
+        {
+          "id": "title-recovery",
+          "query": "recovery policy",
+          "ranked": [
+            "recovery",
+            "meeting"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-restart",
+          "query": "crash resume",
+          "ranked": [
+            "recovery"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-reconcile",
+          "query": "interrupted non idempotent writes",
+          "ranked": [
+            "recovery"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "recovery"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "title-approval",
+          "query": "approval contract",
+          "ranked": [
+            "approval"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "approval"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-arguments",
+          "query": "exact tool arguments payload",
+          "ranked": [
+            "approval",
+            "citation"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "approval"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-budget",
+          "query": "quota accounting",
+          "ranked": [
+            "budget"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "budget"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "body-reserve",
+          "query": "reserve model cost durably",
+          "ranked": [
+            "budget",
+            "isolation",
+            "index"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "budget"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "embedding-title",
+          "query": "embedding spending",
+          "ranked": [
+            "embedding",
+            "budget"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "embedding"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "index-stale",
+          "query": "stale index update",
+          "ranked": [
+            "index"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "index"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "citation-limit",
+          "query": "quotation supports claim",
+          "ranked": [
+            "citation"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "citation"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "isolation-metadata",
+          "query": "authorization access control",
+          "ranked": [
+            "isolation"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "isolation"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "zh-title",
+          "query": "长任务恢复",
+          "ranked": [
+            "zh"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "zh"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "zh-body",
+          "query": "外部系统写入",
+          "ranked": [
+            "zh"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "zh"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "scheduler-meta",
+          "query": "queue fencing concurrency",
+          "ranked": [
+            "scheduler"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "scheduler"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "cache-title",
+          "query": "cache configuration",
+          "ranked": [
+            "cache",
+            "logs"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "cache"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "telemetry-meta",
+          "query": "observability trace diagnostics",
+          "ranked": [
+            "logs"
+          ],
+          "reciprocal_rank": 1.0,
+          "relevant": [
+            "logs"
+          ],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "absent",
+          "query": "photosynthesis chloroplast",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [],
+          "skipped_oversize": 0
+        },
+        {
+          "id": "metadata-internals",
+          "query": "unsearchablehash",
+          "ranked": [],
+          "reciprocal_rank": 0.0,
+          "relevant": [],
+          "skipped_oversize": 0
+        }
+      ],
+      "mrr_at_5": 1.0,
+      "negative_correct": 2,
+      "negative_queries": 2,
+      "positive_queries": 16,
+      "recall_at_5": 1.0
+    },
+    "evidence_kind": "deterministic lexical regression; no model API or competitor benchmark",
+    "provenance": "Maintainer-authored synthetic Taskloom operations corpus. Relevance labels test retrieval regressions, not model truth or competitor superiority.",
+    "semantic_claim_support": "not evaluated by retrieval rankings or exact quote checks"
+  },
+  "protocol_acceptance": {
+    "kind": "local HTTP protocol fixture; no learned embedding model",
+    "covered": [
+      "reservation saved before provider receives request",
+      "explicit authenticated API build, corpus revision and configuration binding",
+      "operator and native-loop tool share frozen hybrid retriever",
+      "stale index fails before query embedding",
+      "missing usage retains reservations across host restart",
+      "timeout keeps reservation and performs no retry",
+      "reported cost overrun blocks later calls",
+      "configuration validation/explanation and lexical startup require no embedding credentials",
+      "two separate CLI processes cannot use the same remaining reservation"
+    ],
+    "external_api_charges": "none incurred; fixture prices and usage are synthetic"
+  },
+  "browser_acceptance": {
+    "url": "http://127.0.0.1:18081/",
+    "environment": "isolated ignored target/retrieval-ui-20261127 state, offline generation",
+    "passed": [
+      "connect with local test operator token",
+      "upload actual policy.txt and import one chunk",
+      "title-only recovery query returns original body and provenance",
+      "restart query explanation displays appended reconciliation, original semantic query retained",
+      "invalid hybrid configuration displays missing-embedding error",
+      "validate and download retrieval-only JSON fragment; downloaded JSON independently parsed",
+      "index build disabled when embedding is not configured",
+      "no browser console error/warning in inspected logs",
+      "narrow viewport DOM check: document width 375 equals client width 375"
+    ],
+    "limitations": [
+      "no real embedding build or hybrid UI quality acceptance",
+      "narrow layout check covers this retrieval page state, not the full unfinished P2 experience"
+    ],
+    "cleanup": "temporary browser tab closed, viewport reset, temporary host stopped"
+  },
+  "not_verified": [
+    "native local/remote generation API effectiveness",
+    "learned embedding relevance",
+    "same-model/task/budget DeerFlow, agentUniverse and LangGraph comparisons",
+    "source claim support and factual accuracy",
+    "remaining P1 and P2 work"
+  ],
+  "environment_notes": [
+    "PyTorch and a CUDA GPU are available; no configured native model service or cached text model was found",
+    "A public Hugging Face Qwen/Qwen3-1.7B metadata request timed out after 20 seconds; no weights downloaded or native model calls made"
+  ],
+  "manual_test_interruption": "First all-features attempt could not replace taskloom.exe because the temporary browser-test host was running. Host stopped; complete rerun passed."
+}

@@ -43,16 +43,30 @@ trial is a controlled integration baseline, not an independent API benchmark.
 
 ## P0.2 — Default research retrieval
 
-- [ ] Retrieve evidence through titles and useful metadata as well as body text,
+- [x] Retrieve evidence through titles and useful metadata as well as body text,
   with bounded, deterministic ranking and meaningful quality regressions.
-- [ ] Controlled query rewriting with visible provenance and budget accounting
+- [x] Controlled query rewriting with visible provenance and budget accounting
   for any model-backed step; untrusted documents cannot issue rewrite commands.
 - [ ] Embedding/provider/index settings and explicit build/update operations in
   CLI, API and UI; index/model/corpus binding remains strict.
-- [ ] The default research host can select lexical or configured hybrid search;
+- [x] The default research host can select lexical or configured hybrid search;
   operator search and model tools use the same retriever.
 - [ ] A relevance-labelled retrieval set and real embedding acceptance report;
   preserve empty recalls, skipped evidence and stale-index failures.
+
+2026-11-27 increment: field retrieval, deterministic host aliases, configured
+hybrid loading, explicit full index build/update and an independent durable
+embedding spending ledger are implemented. CLI/API integration includes two
+separate CLI processes contending for the same remaining cap. Configuration
+validation/export, index status/build and operator search controls exist in the
+UI; browser checks covered connection, actual document upload, title-only
+recall, visible expansion, invalid hybrid settings and validated configuration
+export, not a real embedding build. The 12-document/18-query synthetic
+regression corpus improved body-only recall@5/MRR@5 from 0.3125/0.3125 to
+1.0/1.0; this visible maintainer-authored set is not a held-out quality benchmark.
+Native embedding relevance, full browser index acceptance and model/competitor
+effectiveness are still unchecked. See `research-tools.md` for migration,
+commands, billing limitations and frozen-index restart behavior.
 
 ## P1.1 — Cross-session memory
 

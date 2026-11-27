@@ -24,8 +24,9 @@ pub use hybrid::{
 #[cfg(feature = "research")]
 pub use pdf::{PdfConfig, PdfLoader};
 pub use retrieval::{
-    search, Citation, CitedReport, Evidence, LexicalRetriever, QuotePolicy, RagTool,
-    RetrievalQuery, Retriever, ScoredChunk, SearchResult, VerifiedReport,
+    search, Citation, CitedReport, ConfiguredLexicalRetriever, Evidence, LexicalConfig,
+    LexicalRetriever, QuotePolicy, RagTool, RetrievalQuery, Retriever, ScoredChunk, SearchResult,
+    VerifiedReport,
 };
 #[cfg(feature = "research")]
 pub use web::{

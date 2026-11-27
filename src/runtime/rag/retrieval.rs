@@ -59,67 +59,204 @@ pub trait Retriever: Send + Sync {
 }
 
 /// Deterministic BM25-style local lexical baseline. Basic Unicode words and
-/// individual CJK characters; no embedding model or network access required.
+/// individual CJK characters. Body, title and selected document metadata are
+/// scored separately; metadata never becomes citable body text.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LexicalRetriever;
 impl Retriever for LexicalRetriever {
+    fn identity(&self) -> Option<String> {
+        ConfiguredLexicalRetriever::default().identity()
+    }
     fn retrieve<'a>(
         &'a self,
         snapshot: &'a CorpusSnapshot,
         query: &'a RetrievalQuery,
     ) -> BoxFuture<'a, Result<Vec<ScoredChunk>, RuntimeError>> {
-        Box::pin(async move {
-            query.validate()?;
-            let terms = terms(&query.text).into_keys().collect::<Vec<_>>();
-            if terms.is_empty() || snapshot.chunks.is_empty() {
-                return Ok(Vec::new());
-            }
-            let tokens = snapshot
-                .chunks
-                .iter()
-                .map(|chunk| terms_for_chunk(&chunk.text))
-                .collect::<Vec<_>>();
-            let average = (tokens.iter().map(|(_, n)| *n).sum::<usize>() as f64
-                / snapshot.chunks.len() as f64)
-                .max(1.0);
-            let mut scores = vec![0.0; snapshot.chunks.len()];
-            let count = snapshot.chunks.len() as f64;
-            for term in terms {
-                let df = tokens
-                    .iter()
-                    .filter(|(counts, _)| counts.contains_key(&term))
-                    .count() as f64;
-                if df == 0.0 {
-                    continue;
-                }
-                let idf = (1.0 + (count - df + 0.5) / (df + 0.5)).ln();
-                for (index, (counts, length)) in tokens.iter().enumerate() {
-                    let frequency = counts.get(&term).copied().unwrap_or(0) as f64;
-                    if frequency > 0.0 {
-                        scores[index] += idf * frequency * 2.2
-                            / (frequency + 1.2 * (0.25 + 0.75 * (*length as f64) / average));
-                    }
-                }
-            }
-            let mut matches = snapshot
-                .chunks
-                .iter()
-                .zip(scores)
-                .filter(|(_, score)| *score > 0.0)
-                .map(|(chunk, score)| ScoredChunk {
-                    chunk_id: chunk.id.clone(),
-                    score,
-                })
-                .collect::<Vec<_>>();
-            matches.sort_by(|a, b| {
-                b.score
-                    .total_cmp(&a.score)
-                    .then_with(|| a.chunk_id.cmp(&b.chunk_id))
-            });
-            matches.truncate(query.top_k);
-            Ok(matches)
-        })
+        Box::pin(async move { lexical_search(snapshot, query, &LexicalConfig::default()) })
     }
+}
+
+/// Host-owned ranking settings. Only the listed metadata VALUES are searched;
+/// hashes, paths and ingestion internals do not participate by default.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LexicalConfig {
+    pub body_weight: f64,
+    pub title_weight: f64,
+    pub metadata_weight: f64,
+    pub metadata_keys: BTreeSet<String>,
+    /// Exact whole-query aliases (trimmed, lowercase keys), appended once.
+    /// This deterministic rewrite never calls a model or follows source text.
+    pub query_aliases: BTreeMap<String, Vec<String>>,
+}
+impl Default for LexicalConfig {
+    fn default() -> Self {
+        Self {
+            body_weight: 1.0,
+            title_weight: 2.0,
+            metadata_weight: 1.0,
+            metadata_keys: ["tags", "keywords", "topic", "summary", "author"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            query_aliases: BTreeMap::new(),
+        }
+    }
+}
+impl LexicalConfig {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        let weights = [self.body_weight, self.title_weight, self.metadata_weight];
+        if weights
+            .iter()
+            .any(|v| !v.is_finite() || !(0.0..=100.0).contains(v))
+            || weights.iter().sum::<f64>() <= 0.0
+            || self.metadata_keys.len() > 16
+            || self
+                .metadata_keys
+                .iter()
+                .any(|k| k.trim().is_empty() || k.len() > 256)
+            || self.query_aliases.len() > 64
+            || self.query_aliases.iter().any(|(key, values)| {
+                key.trim().is_empty()
+                    || key.len() > 512
+                    || key != &key.trim().to_lowercase()
+                    || values.is_empty()
+                    || values.len() > 8
+                    || values.iter().any(|v| v.trim().is_empty() || v.len() > 512)
+                    || key.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() > 4096
+            })
+        {
+            return Err(invalid(
+                "invalid lexical field weights, metadata keys or query aliases",
+            ));
+        }
+        Ok(())
+    }
+    /// Visible rewrite provenance for operator inspection; aliases are not
+    /// recursively expanded. The original query always remains first.
+    pub fn expanded_query(&self, text: &str) -> Result<String, RuntimeError> {
+        self.validate()?;
+        let mut expanded = text.to_string();
+        if let Some(aliases) = self.query_aliases.get(&text.trim().to_lowercase()) {
+            for alias in aliases {
+                expanded.push(' ');
+                expanded.push_str(alias);
+            }
+        }
+        if expanded.len() > 4096 {
+            return Err(invalid("expanded query exceeds 4096 bytes"));
+        }
+        Ok(expanded)
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct ConfiguredLexicalRetriever {
+    config: LexicalConfig,
+}
+impl ConfiguredLexicalRetriever {
+    pub fn new(config: LexicalConfig) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        Ok(Self { config })
+    }
+}
+impl Retriever for ConfiguredLexicalRetriever {
+    fn identity(&self) -> Option<String> {
+        Some(format!(
+            "lexical-v2:{}",
+            crate::runtime::state::fingerprint(&self.config)
+                .expect("validated lexical configuration")
+        ))
+    }
+    fn retrieve<'a>(
+        &'a self,
+        snapshot: &'a CorpusSnapshot,
+        query: &'a RetrievalQuery,
+    ) -> BoxFuture<'a, Result<Vec<ScoredChunk>, RuntimeError>> {
+        Box::pin(async move { lexical_search(snapshot, query, &self.config) })
+    }
+}
+fn lexical_search(
+    snapshot: &CorpusSnapshot,
+    query: &RetrievalQuery,
+    config: &LexicalConfig,
+) -> Result<Vec<ScoredChunk>, RuntimeError> {
+    query.validate()?;
+    let terms = terms(&config.expanded_query(&query.text)?)
+        .into_keys()
+        .collect::<Vec<_>>();
+    if terms.is_empty() || snapshot.chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scores = vec![0.0; snapshot.chunks.len()];
+    for (field, weight) in [
+        (0, config.body_weight),
+        (1, config.title_weight),
+        (2, config.metadata_weight),
+    ] {
+        if weight == 0.0 {
+            continue;
+        }
+        let tokens = snapshot
+            .chunks
+            .iter()
+            .map(|chunk| match field {
+                0 => terms_for_chunk(&chunk.text),
+                1 => terms_for_chunk(&chunk.title),
+                _ => {
+                    let mut counts = BTreeMap::<String, usize>::new();
+                    if let Some(doc) = snapshot.documents.get(&chunk.document_id) {
+                        for key in &config.metadata_keys {
+                            if let Some(value) = doc.metadata.get(key) {
+                                for (term, n) in terms_for_chunk(value).0 {
+                                    *counts.entry(term).or_default() += n;
+                                }
+                            }
+                        }
+                    }
+                    let length = counts.values().sum();
+                    (counts, length)
+                }
+            })
+            .collect::<Vec<_>>();
+        let average = (tokens.iter().map(|(_, n)| *n).sum::<usize>() as f64
+            / snapshot.chunks.len() as f64)
+            .max(1.0);
+        let count = snapshot.chunks.len() as f64;
+        for term in &terms {
+            let df = tokens
+                .iter()
+                .filter(|(counts, _)| counts.contains_key(term))
+                .count() as f64;
+            if df == 0.0 {
+                continue;
+            }
+            let idf = (1.0 + (count - df + 0.5) / (df + 0.5)).ln();
+            for (index, (counts, length)) in tokens.iter().enumerate() {
+                let frequency = counts.get(term).copied().unwrap_or(0) as f64;
+                if frequency > 0.0 {
+                    scores[index] += weight * idf * frequency * 2.2
+                        / (frequency + 1.2 * (0.25 + 0.75 * (*length as f64) / average));
+                }
+            }
+        }
+    }
+    let mut matches = snapshot
+        .chunks
+        .iter()
+        .zip(scores)
+        .filter(|(_, score)| *score > 0.0)
+        .map(|(chunk, score)| ScoredChunk {
+            chunk_id: chunk.id.clone(),
+            score,
+        })
+        .collect::<Vec<_>>();
+    matches.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then_with(|| a.chunk_id.cmp(&b.chunk_id))
+    });
+    matches.truncate(query.top_k);
+    Ok(matches)
 }
 fn terms_for_chunk(text: &str) -> (BTreeMap<String, usize>, usize) {
     let counts = terms(text);

@@ -79,6 +79,10 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/knowledge", get(knowledge).post(import))
         .route("/knowledge/{id}", axum::routing::delete(remove))
         .route("/knowledge/search", post(search))
+        .route("/retrieval", get(retrieval_status))
+        .route("/retrieval/index", post(build_index))
+        .route("/retrieval/explain", post(explain_retrieval))
+        .route("/retrieval/validate", post(validate_retrieval))
         .route("/knowledge/web", post(import_web))
         .route("/knowledge/pdf", post(import_pdf))
         .route("/research/search", post(web_search))
@@ -472,6 +476,48 @@ async fn search(
         )
         .map_err(super::super::store::storage)?,
     ))
+}
+async fn retrieval_status(State(app): State<Arc<Application>>) -> ApiResult {
+    let mut status = super::retrieval::index_status(&app.config).await?;
+    status["active_retrieval_binding"] = json!(app.retriever.identity());
+    Ok(Json(status))
+}
+async fn validate_retrieval(Json(config): Json<super::AppRetrieval>) -> ApiResult {
+    config.validate()?;
+    Ok(Json(
+        json!({"configuration":config,"configuration_binding":super::super::state::fingerprint(&config)?,
+        "applied":false,"next_step":"Replace the retrieval property in the host config and restart. No credentials were loaded and no provider was contacted."}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndexBuild {
+    expected_revision: u64,
+    expected_binding: String,
+}
+async fn build_index(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<IndexBuild>,
+) -> ApiResult {
+    Ok(Json(
+        super::retrieval::build_index(
+            &app.config,
+            input.expected_revision,
+            &input.expected_binding,
+        )
+        .await?,
+    ))
+}
+async fn explain_retrieval(
+    State(app): State<Arc<Application>>,
+    Json(query): Json<RetrievalQuery>,
+) -> ApiResult {
+    query.validate()?;
+    Ok(Json(json!({"original_query":query.text,
+        "lexical_query":app.config.retrieval.lexical.expanded_query(&query.text)?,
+        "semantic_query":query.text,"binding":app.retriever.identity(),
+        "rewrite":"host-configured exact aliases, one pass, no model call",
+        "note":"configured lexical settings; a custom host retriever may use a different algorithm"})))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

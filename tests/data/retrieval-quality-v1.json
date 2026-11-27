@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "provenance": "Maintainer-authored synthetic Taskloom operations corpus. Relevance labels test retrieval regressions, not model truth or competitor superiority.",
+  "documents": [
+    {"id":"recovery","title":"Recovery policy","source":"fixture:recovery","text":"Interrupted non-idempotent writes require reconciliation. Confirm the original operation's external outcome before deciding how to continue. Do not silently repeat the write.","metadata":{"tags":"restart crash resume","body_sha256":"unsearchablehash"}},
+    {"id":"approval","title":"Approval contract","source":"fixture:approval","text":"The operator approves the exact tool name and arguments. Changing the payload invalidates the recorded decision. A pending ticket alone never grants execution.","metadata":{"keywords":"human review permission"}},
+    {"id":"budget","title":"Generation spending","source":"fixture:budget","text":"Reserve the worst allowed model cost durably before dispatch. Settle known usage after a response. Keep the reservation when the charge is unknown.","metadata":{"topic":"quota accounting"}},
+    {"id":"embedding","title":"Embedding spending","source":"fixture:embedding","text":"A query vector request uses a separate service ledger. Generation limits do not include this service. Failed requests may still incur a charge.","metadata":{"tags":"semantic retrieval vector billing"}},
+    {"id":"index","title":"Index lifecycle","source":"fixture:index","text":"Build source vectors explicitly. A changed corpus fingerprint or model identity invalidates the saved artifact before a query is dispatched. No background rebuild occurs.","metadata":{"summary":"stale search index update"}},
+    {"id":"citation","title":"Citation checking","source":"fixture:citation","text":"A reference must use a retrieved chunk identifier and an exact quotation from its body. Matching words do not establish whether the cited passage supports the claim.","metadata":{"keywords":"provenance source evidence"}},
+    {"id":"isolation","title":"Tenant isolation","source":"fixture:isolation","text":"Authenticated host context determines the tenant and project. Model output and source documents cannot choose ownership or create a new grant.","metadata":{"topic":"authorization access control"}},
+    {"id":"zh","title":"长任务恢复操作","source":"fixture:zh","text":"先核对外部系统是否已完成写入，再记录观察到的结果。不可直接再次执行状态未知的操作。","metadata":{"tags":"断点恢复 人工核验"}},
+    {"id":"scheduler","title":"Worker scheduling","source":"fixture:scheduler","text":"The scheduler assigns a queued task to an available process. Losing its lease stops new dispatch. Ownership alone does not guarantee exactly one external side effect.","metadata":{"tags":"queue fencing concurrency"}},
+    {"id":"meeting","title":"Weekly review notes","source":"fixture:meeting","text":"The team discussed office seating, lunch choices and the next community meeting. These notes contain no operational recovery instructions.","metadata":{"author":"Community organizer"}},
+    {"id":"cache","title":"Cache configuration","source":"fixture:cache","text":"Answer identity includes settings that can change returned content. A transport timeout is an operational limit rather than an answer transformation.","metadata":{"keywords":"namespace configuration"}},
+    {"id":"logs","title":"Operational logging","source":"fixture:logs","text":"Log event type, outcome and elapsed time. Avoid exporting prompts and credentials by default. External telemetry destinations require explicit host configuration.","metadata":{"topic":"observability trace diagnostics"}}
+  ],
+  "queries": [
+    {"id":"title-recovery","text":"recovery policy","relevant":["recovery"]},
+    {"id":"metadata-restart","text":"crash resume","relevant":["recovery"]},
+    {"id":"body-reconcile","text":"interrupted non idempotent writes","relevant":["recovery"]},
+    {"id":"title-approval","text":"approval contract","relevant":["approval"]},
+    {"id":"body-arguments","text":"exact tool arguments payload","relevant":["approval"]},
+    {"id":"metadata-budget","text":"quota accounting","relevant":["budget"]},
+    {"id":"body-reserve","text":"reserve model cost durably","relevant":["budget"]},
+    {"id":"embedding-title","text":"embedding spending","relevant":["embedding"]},
+    {"id":"index-stale","text":"stale index update","relevant":["index"]},
+    {"id":"citation-limit","text":"quotation supports claim","relevant":["citation"]},
+    {"id":"isolation-metadata","text":"authorization access control","relevant":["isolation"]},
+    {"id":"zh-title","text":"长任务恢复","relevant":["zh"]},
+    {"id":"zh-body","text":"外部系统写入","relevant":["zh"]},
+    {"id":"scheduler-meta","text":"queue fencing concurrency","relevant":["scheduler"]},
+    {"id":"cache-title","text":"cache configuration","relevant":["cache"]},
+    {"id":"telemetry-meta","text":"observability trace diagnostics","relevant":["logs"]},
+    {"id":"absent","text":"photosynthesis chloroplast","relevant":[]},
+    {"id":"metadata-internals","text":"unsearchablehash","relevant":[]}
+  ]
+}

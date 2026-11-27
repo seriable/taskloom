@@ -2,6 +2,7 @@
 pub mod cli;
 mod config;
 mod orchestration;
+pub mod retrieval;
 mod service;
 
 use std::collections::BTreeMap;
@@ -14,13 +15,14 @@ use serde_json::json;
 
 use super::mcp::{McpClient, McpHttpConfig};
 use super::rag::{
-    Citation, CitedReport, FileCorpusStore, LexicalRetriever, PdfLoader, RagTool, Retriever,
-    SearchResult, WebClient, WebFetchTool, WebSearch, WebSearchTool,
+    Citation, CitedReport, FileCorpusStore, PdfLoader, RagTool, Retriever, SearchResult, WebClient,
+    WebFetchTool, WebSearch, WebSearchTool,
 };
 use super::*;
 use crate::CancelToken;
 pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppResearch, AppRole};
 pub use orchestration::AppWorkflowRequest;
+pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
 pub use service::{router, serve};
 
 pub struct Application {
@@ -78,7 +80,9 @@ impl Application {
         tools: ToolRegistry,
         policy: ToolPolicy,
     ) -> Result<Arc<Self>, RuntimeError> {
-        Self::with_retriever(config, model, tools, policy, Arc::new(LexicalRetriever)).await
+        config.validate()?;
+        let retriever = retrieval::configured(&config).await?;
+        Self::with_retriever(config, model, tools, policy, retriever).await
     }
     /// The operator search API and model knowledge tool share this retriever.
     /// Build/load paid embedding indexes explicitly before opening the host.

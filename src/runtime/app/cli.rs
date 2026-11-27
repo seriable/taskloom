@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::super::rag::{
-    self, CorpusStore, DocumentLoader, LexicalRetriever, RetrievalQuery, TextLoader, WindowChunker,
+    self, CorpusStore, DocumentLoader, RetrievalQuery, TextLoader, WindowChunker,
 };
 use super::super::{ApprovalDecision, RecoveryDecision, RunStatus, RuntimeError};
 use super::{AppConfig, Application};
@@ -26,6 +26,8 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   import-web ID TITLE URL            ingest a host-granted webpage\n\
   web-search QUERY                   query configured Brave-compatible search\n\
   knowledge | search QUERY          inspect/query local corpus\n\
+  index-status                      inspect index/config/embedding spending\n\
+  index-build REV BINDING            explicit full build/update; may incur embedding charges\n\
   benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
 Use API/UI to pause or cancel work owned by the running server.\n";
 pub async fn run(
@@ -157,9 +159,18 @@ pub async fn run(
             return Ok(());
         }
         "search" if args.len() == 2 => {
+            let retriever = super::retrieval::configured(&config).await?;
             output(
-                &rag::search(&corpus, &LexicalRetriever, &RetrievalQuery::new(&args[1])).await?,
+                &rag::search(&corpus, retriever.as_ref(), &RetrievalQuery::new(&args[1])).await?,
             )?;
+            return Ok(());
+        }
+        "index-status" if args.len() == 1 => {
+            output(&super::retrieval::index_status(&config).await?)?;
+            return Ok(());
+        }
+        "index-build" if args.len() == 3 => {
+            output(&super::retrieval::build_index(&config, args[1].parse()?, &args[2]).await?)?;
             return Ok(());
         }
         "import-pdf" if args.len() == 4 => {

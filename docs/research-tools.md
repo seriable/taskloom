@@ -172,13 +172,185 @@ compared. Unknown/duplicate IDs and invalid scores fail before fusion; ties are
 deterministic. A zero backend weight avoids its service call. A failed semantic
 backend surfaces an error; it never silently substitutes lexical retrieval.
 
-Use `Application::with_retriever` to share a host-built hybrid retriever between
-the knowledge tool and operator search API. The CLI's default local search and
-`Application::open` remain lexical; a configured hybrid host must explicitly
-build/load its index. Built-in vector/fusion identities are frozen into RAG tool
+Use `Application::with_retriever` to share a host-built custom retriever between
+the knowledge tool and operator search API. The standard CLI search and
+`Application::open` now also support the host's `retrieval` configuration below.
+The default remains local lexical search. Built-in vector/fusion identities are frozen into RAG tool
 definitions. Custom backends should implement `Retriever::identity` and version
 their own index/model/tenant contracts. Corpus updates while a hybrid host runs
 fail closed until it is reopened with the matching rebuilt index.
+
+## Default field retrieval and controlled aliases
+
+The default lexical retriever scores body, title and selected metadata values
+independently using BM25-style normalization and weights 1, 2 and 1. Default
+metadata keys are `tags`, `keywords`, `topic`, `summary` and `author`. Ingestion
+hashes, URLs and other technical metadata do not participate unless the host
+explicitly includes their keys. Field matches only locate original chunks;
+citations must still quote their **body**, not the title or metadata.
+
+```json
+{
+  "retrieval": {
+    "mode": "lexical",
+    "lexical": {
+      "body_weight": 1,
+      "title_weight": 2,
+      "metadata_weight": 1,
+      "metadata_keys": ["tags", "keywords", "topic", "summary", "author"],
+      "query_aliases": {"restart service": ["reconciliation", "interrupted writes"]}
+    }
+  }
+}
+```
+
+Aliases match the entire trimmed, lowercased query and append configured terms
+once. The original query is retained. No recursive rewrite, model call, source
+instruction or permission change occurs. Configuration allows at most 64 rules,
+8 aliases per rule, 512 bytes per alias/key and 4096 expanded query bytes.
+Only the lexical leg is expanded; the semantic leg embeds the original query.
+`POST /api/retrieval/explain` returns both queries without contacting a service.
+
+## Explicit application embedding configuration
+
+An embedding configuration can be present while mode remains `lexical`. This
+allows the application to start and build its first index before enabling
+hybrid queries. Nothing contacts the embedding service on startup, inspection,
+configuration validation or lexical search.
+
+This example uses a **zero-priced local service**, whose configured endpoint
+must actually implement the OpenAI embedding protocol. It is not an included
+model or an assumption that commercial services are free. Set the named dummy
+key locally if your server requires no authentication; credentials are never
+part of this file. Remote HTTP endpoints, URL credentials and query credentials
+are rejected; remote services require HTTPS.
+
+```json
+{
+  "retrieval": {
+    "mode": "lexical",
+    "embedding": {
+      "provider": {
+        "type": "openai",
+        "base_url": "http://127.0.0.1:8081/v1",
+        "key_env": "TASKLOOM_EMBEDDING_KEY",
+        "namespace": "my-local-embedding-version-tenant"
+      },
+      "model": "your-installed-embedding-model",
+      "currency": "USD",
+      "input_micros_per_million_tokens": 0,
+      "max_request_cost_micros": 0,
+      "max_total_cost_micros": 0,
+      "max_input_bytes": 131072,
+      "timeout_ms": 30000
+    },
+    "lexical_weight": 1,
+    "semantic_weight": 1,
+    "rank_constant": 60,
+    "candidate_k": 20
+  }
+}
+```
+
+For a paid service, configure its actual currency and input price, plus an
+explicit per-request reservation and overall cap. One micro-unit is one
+millionth of the currency unit: a price of USD 0.10 per million tokens is
+`input_micros_per_million_tokens: 100000`. Choose a request reservation covering
+the maximum accepted input under that service's documented billing contract.
+This is local admission control, **not a provider-enforced invoice ceiling**.
+If the service reports more than the reservation, the actual charge is saved
+and further dispatch is blocked. Use provider account quotas for a hard external
+billing limit. Local hardware/electricity costs are not metered here.
+
+`state_dir/retrieval/spend.json` records embedding charges independently of the
+generation `RunBudget`, web search and other tool-service charges. Each batch
+or query reservation is flushed atomically under an OS lock **before dispatch**.
+Known input-token usage settles the reservation with rounded-up micro-unit
+pricing. Absent/invalid usage, cancellation, timeout or provider errors retain
+the full reservation and remain unknown. There is no automatic retry, refund,
+model fallback or background rebuild. Reported usage relies on the configured
+service's truthfulness; a proxy identity does not attest to a particular model.
+Other provider fees are not inferred from input-token prices.
+
+The cap covers all processes sharing this state directory. Changing model,
+endpoint, tenant, currency or price requires an explicit ledger migration;
+binding mismatches fail rather than resetting spending. Do not delete a ledger
+to recover an unknown charge. Reconcile it against the provider separately;
+an operator reconciliation UI for this ledger is not yet implemented. Raising
+the overall cap deliberately permits more requests. Index construction can
+fail after paid batches; reservations and known charges remain recorded.
+
+```sh
+taskloom --config research.json index-status
+# Copy the returned corpus_revision and configuration_binding exactly:
+taskloom --config research.json index-build 3 CONFIGURATION_BINDING
+```
+
+`index-build` is also the explicit full **update** operation. It validates all
+batch input sizes before the first request, holds an index-builder OS lock,
+and saves a complete index atomically only after embedding succeeds and the
+source snapshot still matches. It does not silently reuse partial failed work.
+Saved indexes have a 128 MiB file limit and the existing vector/value limits.
+Set `retrieval.mode` to `hybrid`, then restart the host to load the saved index.
+The CLI loads the selected retriever for each invocation. In a running host,
+operator search and model tools share one immutable retriever/index. Newly
+built indexes require a host restart. Corpus changes invalidate the old index
+before any paid query embedding; failed semantic retrieval does not fall back
+silently to lexical search.
+
+| Authenticated API | Operation |
+|---|---|
+| `GET /api/retrieval` | Configuration identity, corpus/index validity, active binding and separate embedding spending; no service call |
+| `POST /api/retrieval/validate` | Validate an `AppRetrieval` JSON value without loading credentials, applying settings or contacting services |
+| `POST /api/retrieval/index` | `{expected_revision,expected_binding}`; explicit full build/update using the current host configuration, may incur charges |
+| `POST /api/retrieval/explain` | `RetrievalQuery`; inspect configured lexical expansion and original semantic query without searching |
+| `POST /api/knowledge/search` | `RetrievalQuery`; search with the same active retriever as model tools, may incur embedding charges in hybrid mode |
+
+The console can edit, validate and export the `retrieval` configuration property,
+display index/spending status, explicitly build/update, explain a query and
+search. Merge exported settings into the host configuration and restart to apply;
+the export is a configuration **fragment**, not a replacement for other settings.
+Index status is refreshed on request, not by an expensive background index scan.
+The console never accepts key values or lets a retrieved document grant service
+access. A full visual configuration wizard belongs to the unfinished P2 work.
+
+### Migration
+
+Old JSON configurations use the new lexical defaults automatically. Existing
+`AgentTask` and unit-struct `LexicalRetriever` call sites remain valid. Rust
+`AppConfig` struct literals listing every field must add `retrieval` or use
+`..Default::default()`. Ranking changes are versioned as `lexical-v2` and frozen
+into tool definitions; old suspended runs with the previous tool definition
+must not be resumed under the new search contract. Finish them on their original
+binary or start a new run. Administrative cancellation/rejection remains available.
+Custom `Application::with_retriever` hosts keep their injected algorithm; the
+explanation endpoint describes configured defaults and explicitly notes that a
+custom backend may behave differently.
+
+The OpenAI adapter now rejects wrong input counts, duplicate/gapped/out-of-range
+embedding indices and malformed explicit indices before associating vectors with
+source chunks. Responses omitting all indices retain their input-array order.
+
+### Reproducible lexical relevance check
+
+`tests/data/retrieval-quality-v1.json` contains 12 labelled operations documents,
+16 positive queries, and two negative queries, with title/metadata-only cases,
+Chinese queries and a misleading distractor. Run:
+
+```sh
+cargo test --locked --features runtime --test retrieval_quality -- --nocapture
+cargo test --locked --all-features --test app_retrieval
+```
+
+The first prints per-query rankings, document recall@5, MRR@5 and negative-query
+accuracy for the body-only and default-field configurations on the same corpus.
+This small maintainer-authored regression set is visible to implementers; it is
+not a held-out benchmark or evidence of general research quality. Quote matching
+and claim support/factual accuracy remain distinct assessments. The second uses
+real local HTTP, separate CLI processes and durable files with **protocol-fixture
+vectors** to test index, authorization, reservation, timeout and restart behavior.
+It does not establish real-model embedding relevance. Native model/embedding and
+same-condition competitor acceptance remain open P0 work.
 
 ## Validation provenance
 
