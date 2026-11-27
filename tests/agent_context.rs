@@ -107,6 +107,51 @@ fn compression_preserves_instructions_question_and_complete_tool_batches() {
 }
 
 #[test]
+fn summary_of_dropped_current_turn_blocks_follows_the_current_question() {
+    let call = |id: &str| Message::Assistant {
+        turn: AssistantTurn {
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: id.into(),
+                name: "lookup".into(),
+                arguments: json!({}),
+            }],
+        },
+    };
+    let result = |id: &str, output: serde_json::Value| Message::Tool {
+        result: ToolResult {
+            call_id: id.into(),
+            output,
+            is_error: false,
+        },
+    };
+    let original = vec![
+        Message::system("Follow host rules."),
+        Message::user("current question"),
+        call("first"),
+        result("first", json!("first observation ".repeat(50))),
+        call("second"),
+        result("second", json!("latest observation")),
+    ];
+    let policy = ContextPolicy {
+        max_input_bytes: 700,
+        keep_recent_blocks: 1,
+        max_summary_bytes: 128,
+    };
+    let (projected, record) = policy
+        .prepare(&original, &[], &ExtractiveCompressor, 1)
+        .unwrap();
+    assert_eq!(record.omitted_messages(), 2);
+    assert_eq!(projected.len(), 5);
+    assert_eq!(projected[..2], original[..2]);
+    assert!(
+        matches!(&projected[2], Message::User { content } if content.contains("untrusted historical data"))
+    );
+    assert_eq!(projected[3..], original[4..]);
+    assert_eq!(record.restore(&original, &[], &policy).unwrap(), projected);
+}
+
+#[test]
 fn byte_budgets_include_json_escaping_and_utf8_without_splitting_correlations() {
     let messages = history();
     for bytes in (500..=2000).step_by(37) {

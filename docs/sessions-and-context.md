@@ -72,7 +72,10 @@ Recent blocks are retained up to `keep_recent_blocks`; if necessary, fewer
 older blocks are kept to fit the limit. Tool calls/results are never split.
 
 Omitted history is compressed into a bounded, explicitly labeled **user-role
-data** message. It is not elevated into a system instruction. The built-in
+data** message. It is not elevated into a system instruction. The summary
+takes the position of the newest omitted message: when older tool blocks of
+the current turn are dropped, it follows the current question and precedes
+the retained recent blocks, so the chronology stays intact. The built-in
 `ExtractiveCompressor` preserves bounded excerpts of recent omitted entries,
 including tool ids/results. It is lossy: it does not guarantee retention of
 every fact or infer a semantic summary. Keep critical task state in explicit
