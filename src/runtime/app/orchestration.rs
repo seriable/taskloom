@@ -22,6 +22,23 @@ pub struct AppWorkflowRequest {
     pub limits: WorkflowLimits,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppWorkflowLaunch {
+    pub request: AppWorkflowRequest,
+    pub preview_key: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AppWorkflowPreview {
+    pub version: u32,
+    pub preview_key: String,
+    pub request: AppWorkflowRequest,
+    pub plan: WorkflowState,
+    pub dispatch_performed: bool,
+    pub identity_reserved: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkflowEnvelope {
@@ -86,10 +103,11 @@ impl Application {
         valid_id(id)?;
         SessionManager::new(&self.sessions).load(id).await
     }
-    pub async fn start_workflow(
-        self: &Arc<Self>,
-        input: AppWorkflowRequest,
-    ) -> Result<WorkflowState, RuntimeError> {
+    fn compile_workflow(
+        &self,
+        input: &AppWorkflowRequest,
+        tasks: &mut WorkflowTasks<'_>,
+    ) -> Result<WorkflowDefinition, RuntimeError> {
         valid_id(&input.id)?;
         // API callers may tighten execution limits but cannot allocate unbounded
         // workers, memory, dispatches or wall time in the host process.
@@ -102,11 +120,9 @@ impl Application {
         {
             return Err(config_error("workflow limits exceed application ceilings"));
         }
-        let roles = self.role_agents();
-        let mut tasks = roles.tasks(&self.runs)?;
         let definition = match (&input.definition, &input.peer) {
             (Some(definition), None) => definition.clone(),
-            (None, Some(peer)) => peer.install(&mut tasks)?,
+            (None, Some(peer)) => peer.install(tasks)?,
             _ => return Err(config_error("supply exactly one of definition or peer")),
         };
         if definition
@@ -118,6 +134,56 @@ impl Application {
                 "recovery-only skill roles cannot start new workflows".into(),
             ));
         }
+        Ok(definition)
+    }
+
+    pub fn preview_workflow(
+        &self,
+        input: AppWorkflowRequest,
+    ) -> Result<AppWorkflowPreview, RuntimeError> {
+        let roles = self.role_agents();
+        let mut tasks = roles.tasks(&self.runs)?;
+        let definition = self.compile_workflow(&input, &mut tasks)?;
+        let envelope = serde_json::to_value(WorkflowEnvelope {
+            app_workflow_version: 1,
+            input: input.input.clone(),
+            peer: input.peer.clone(),
+        })
+        .map_err(crate::runtime::store::storage)?;
+        let plan = WorkflowRunner::new(&tasks, &self.workflows)
+            .with_limits(input.limits.clone())
+            .preview(&input.id, definition, envelope)?;
+        Ok(AppWorkflowPreview {
+            version: 1,
+            preview_key: crate::runtime::state::fingerprint(&plan)?,
+            request: input,
+            plan,
+            dispatch_performed: false,
+            identity_reserved: false,
+        })
+    }
+
+    pub async fn launch_workflow(
+        self: &Arc<Self>,
+        input: AppWorkflowLaunch,
+    ) -> Result<WorkflowState, RuntimeError> {
+        let preview = self.preview_workflow(input.request)?;
+        if preview.preview_key != input.preview_key {
+            return Err(RuntimeError::Conflict(
+                "workflow input or frozen host contracts changed; preview again before launch"
+                    .into(),
+            ));
+        }
+        self.start_workflow(preview.request).await
+    }
+
+    pub async fn start_workflow(
+        self: &Arc<Self>,
+        input: AppWorkflowRequest,
+    ) -> Result<WorkflowState, RuntimeError> {
+        let roles = self.role_agents();
+        let mut tasks = roles.tasks(&self.runs)?;
+        let definition = self.compile_workflow(&input, &mut tasks)?;
         let key = format!("workflow:{}", input.id);
         let job = self.admit_key(&key)?;
         let result = WorkflowRunner::new(&tasks, &self.workflows)

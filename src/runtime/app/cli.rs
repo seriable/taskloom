@@ -12,6 +12,7 @@ use serde::Serialize;
 
 const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   init FILE                         write offline configuration (create only)\n\
+  config-check FILE                 review proposed configuration without services/secrets\n\
   serve [127.0.0.1:8080]             API/UI; TASKLOOM_API_TOKEN required\n\
   run ID PROMPT                     create and execute a durable run\n\
   resume ID                         resume a persisted run\n\
@@ -74,6 +75,14 @@ pub async fn run(
             .open(&args[1])?;
         file.write_all(&serde_json::to_vec_pretty(&AppConfig::default())?)?;
         println!("Created {}", args[1]);
+        return Ok(());
+    }
+    if args[0] == "config-check" {
+        if args.len() != 2 {
+            return Err(HELP.into());
+        }
+        let proposed = AppConfig::load(&PathBuf::from(&args[1])).await?;
+        output(&super::preview_configuration(proposed)?)?;
         return Ok(());
     }
     let config = AppConfig::load(&config_path).await?;

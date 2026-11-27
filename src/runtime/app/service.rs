@@ -55,9 +55,13 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/diagnostics/{kind}/{id}", get(diagnostics))
         .route("/diagnostics/{kind}/{id}/export", post(export_diagnostics))
         .route("/roles", get(roles))
+        .route("/setup", get(setup_defaults))
+        .route("/setup/validate", post(validate_setup))
         .route("/templates", get(templates))
         .route("/templates/{mount}/{template}/runs", post(start_template))
         .route("/workflows", get(workflows).post(start_workflow))
+        .route("/workflow-design/preview", post(preview_workflow))
+        .route("/workflow-design/launch", post(launch_workflow))
         .route("/workflows/{id}", get(workflow))
         .route("/workflows/{id}/events", get(workflow_events))
         .route("/workflows/{id}/resume", post(resume_workflow))
@@ -286,6 +290,41 @@ async fn report(State(app): State<Arc<Application>>, Path(id): Path<String>) -> 
 async fn roles(State(app): State<Arc<Application>>) -> ApiResult {
     Ok(Json(
         json!({"roles":app.registered_roles().collect::<Vec<_>>()}),
+    ))
+}
+async fn setup_defaults(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(json!({
+        "defaults":super::AppConfig::default(),
+        "active_model":app.config.model,
+        "active_tools":app.tools.definitions(&app.policy),
+        "active_roles":app.registered_roles().collect::<Vec<_>>(),
+        "templates":app.skill_templates(),
+        "configuration_applied":false
+    })))
+}
+async fn validate_setup(Json(config): Json<super::AppConfig>) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(super::preview_configuration(config)?)
+            .map_err(crate::runtime::store::storage)?,
+    ))
+}
+async fn preview_workflow(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<AppWorkflowRequest>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.preview_workflow(input)?)
+            .map_err(crate::runtime::store::storage)?,
+    ))
+}
+async fn launch_workflow(
+    State(app): State<Arc<Application>>,
+    Json(input): Json<super::AppWorkflowLaunch>,
+) -> Result<impl IntoResponse, ApiError> {
+    let state = app.launch_workflow(input).await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(json!({"workflow_id":state.id,"revision":state.revision})),
     ))
 }
 async fn diagnostics(

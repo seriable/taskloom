@@ -46,6 +46,24 @@ impl Default for RunLimits {
     }
 }
 
+impl RunLimits {
+    /// Check structural limits without constructing a model or dispatching work.
+    /// Zero steps/duration remain valid explicit stop policies.
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        if self.tool_timeout.is_zero()
+            || self.max_tool_result_bytes < 4
+            || self.max_model_result_bytes < 64
+            || Instant::now().checked_add(self.max_duration).is_none()
+            || Instant::now().checked_add(self.tool_timeout).is_none()
+        {
+            return Err(RuntimeError::Configuration(
+                "invalid sampling, output, timeout or result limit".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn default_model_result_bytes() -> usize {
     64 * 1024
 }
@@ -401,23 +419,12 @@ impl<'a> AgentLoop<'a> {
                 "run id, model and label must be nonempty".into(),
             ));
         }
-        if !self.temperature.is_finite()
-            || self.max_output_tokens == 0
-            || self.limits.tool_timeout.is_zero()
-            || self.limits.max_tool_result_bytes < 4
-            || self.limits.max_model_result_bytes < 64
-            || Instant::now()
-                .checked_add(self.limits.max_duration)
-                .is_none()
-            || Instant::now()
-                .checked_add(self.limits.tool_timeout)
-                .is_none()
-        {
+        if !self.temperature.is_finite() || self.max_output_tokens == 0 {
             return Err(RuntimeError::Configuration(
                 "invalid sampling, output, timeout or result limit".into(),
             ));
         }
-        Ok(())
+        self.limits.validate()
     }
 
     async fn drive(

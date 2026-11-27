@@ -4,6 +4,10 @@ The `v0.2.0-alpha.1` preview's `app` feature adds a packaged executable and a sh
 durable run controller. It includes `runtime`, both provider adapters and MCP.
 Library-only users keep the existing minimal default feature set.
 
+New source checkouts also provide pure configuration review and exact workflow
+preview/launch APIs. See [workflow design](workflow-design.md) for their additive
+paths, migration, deferred checks and current P2 acceptance limits.
+
 ## Install and run offline
 
 Use Rust 1.86 or newer. A CLI-only installation uses the pinned preview:

@@ -56,6 +56,20 @@ impl<'a, 'tasks> WorkflowRunner<'a, 'tasks> {
         self
     }
 
+    /// Compile the exact initial plan without acquiring a lease, saving state,
+    /// emitting an event, reserving spending or invoking a task. This does not
+    /// reserve an ID or prove live service/storage availability.
+    pub fn preview(
+        &self,
+        id: &str,
+        definition: WorkflowDefinition,
+        input: Value,
+    ) -> Result<WorkflowState, RuntimeError> {
+        let state = self.initial(id, definition, input)?;
+        state.validate()?;
+        Ok(state)
+    }
+
     pub async fn start(
         &self,
         id: &str,

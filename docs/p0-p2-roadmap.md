@@ -85,6 +85,17 @@ conditioning claim is made. Retained V4 guidance errors, a first adapter HTTP
 DeerFlow and broader complex/long/recovery comparisons remain open. See
 `collaboration-comparison.md` and `acceptance/p0-collaboration-20261128.json`.
 
+Later DeerFlow increment: the actual pinned DeerFlowClient ran the corresponding
+natural-research task on the same Qwen3-4B model/corpus/output allowance and
+zero-priced cap. The final guarded trial completed source retrieval and one
+format repair but scored 0/1 for no delegated analyst/reviewer. Native prompts
+and natural delegation differ from the reference DAG; other exact staged
+lifecycles are explicitly not comparable. All three failed/exploratory probes,
+raw requests/usage, environment-guard differences and limits are retained in
+`acceptance/p0-deerflow-20261128.json`. This supplies a qualified actual result,
+not general DeerFlow inability or Taskloom leadership. Complex LangGraph,
+broader long/recovery/repair and quality gates remain open, so P0.1 stays open.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,
@@ -249,6 +260,14 @@ raw reports, failed probes, version/digest evidence and check limits. This accep
 the bounded P1 observability package; P0 quality/comparisons and P2 remain open.
 
 ## P2.1 — Product experience
+
+2026-11-28 foundation: pure configuration review and actual workflow compilation
+preview now exist through SDK/CLI/API, with exact-plan launch binding and
+additive routes. All nine short native Qwen3-4B integration controls passed;
+the all-feature suite has 330 passing tests and six explicit ignored checks.
+This does not provide a visual editor/wizard or multi-user/database service.
+Every P2 box remains unchecked. See `workflow-design.md` and
+`acceptance/p2-planning-20261128.json` for migration and deferred checks.
 
 - [ ] Model/tool/retrieval configuration wizard with validation and safe secret
   handling; template selection and explicit capability grants.
