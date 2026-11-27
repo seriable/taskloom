@@ -24,6 +24,8 @@ anthropic = ["dep:reqwest", "dep:base64"]
 schemars = ["dep:schemars"]
 # Autonomous tool execution, kept separate from the typed single-task API.
 runtime = ["dep:jsonschema", "dep:uuid"]
+# Explicitly configured MCP Streamable HTTP tool clients.
+mcp = ["runtime", "dep:reqwest"]
 
 [dependencies]
 base64 = { version = "0.22", optional = true }

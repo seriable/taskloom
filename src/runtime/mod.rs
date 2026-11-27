@@ -9,6 +9,8 @@ mod budget;
 mod context;
 mod durable;
 mod executor;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod rag;
 mod session;
 mod state;

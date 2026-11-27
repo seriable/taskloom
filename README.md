@@ -24,6 +24,8 @@ DAGs and bounded planner/executor/writer/reviewer collaboration (`agent_peer`).
 [Knowledge retrieval](docs/knowledge.md) supports pluggable ingestion, chunking,
 retrieval and exact source citations (`agent_research`). API/CLI/UI delivery
 remains in the [roadmap](docs/agent-roadmap.md).
+The optional [`mcp` integration](docs/mcp.md) binds explicitly configured
+Streamable HTTP tools to the same permission, approval and recovery controls.
 
 ## What you get
 

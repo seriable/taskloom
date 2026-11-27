@@ -87,6 +87,13 @@ source markers against archived evidence. Citation checks establish provenance,
 not semantic truth. See [knowledge and citations](knowledge.md).
 API/CLI/UI and ecosystem integration acceptance is still outstanding.
 
+MCP increment: explicit Streamable HTTP initialization, bounded paginated tool
+discovery, JSON/SSE calls and host-authored effect/permission bindings reuse
+native durable approval/recovery. Endpoint/tenant binding changes reject reentry.
+Local fixtures exercise the supported protocol surface without external service
+credentials. See [MCP integration](mcp.md). Application delivery acceptance is
+still outstanding.
+
 ## Verification constraints
 
 Provider tests use local HTTP servers and require no credentials. Offline

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Optional `mcp` integration: explicit HTTP session initialization, bounded
+  paginated catalog discovery, JSON/SSE tool responses, host-assigned aliases,
+  effect/permission contracts and frozen endpoint/tenant binding identities.
+  Calls reuse durable approvals/recovery and never retry remote effects or
+  reinitialize expired sessions implicitly. Local HTTP fixtures verify protocol
+  errors, limits, split SSE, auth/session headers and approved native tool use.
+
 - Pluggable document loading/chunking/corpus/retrieval, bounded UTF-8 import,
   source-preserving overlap chunks, atomic local corpus replacement with CAS,
   deterministic lexical retrieval and a permissioned read-only RAG tool.
