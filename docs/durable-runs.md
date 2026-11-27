@@ -30,6 +30,11 @@ events, tool attempts, approvals and operator recovery records. Definitions,
 schemas, permissions, model settings and limits must match on resume. Bump a
 tool's advertised definition when its implementation contract changes; the
 library cannot detect a code change behind identical metadata.
+After such a bump, `resume`, approval and `RetrySafe` are rejected for older
+runs, because they lead to dispatch under the frozen contract. Operations that
+only terminate or record remain available: `cancel`, an approval rejection,
+and the `RecordResult`/`Abort` reconciliations. Use them to finish paused,
+approval-waiting or recovery runs (and their session turns) after an upgrade.
 Format 2 also binds the exact initial-message boundary and persists context
 projections. Development format-1 jobs require the earlier checkout; they are
 not silently migrated or reset. See [sessions and context](sessions-and-context.md).

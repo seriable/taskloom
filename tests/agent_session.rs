@@ -502,6 +502,91 @@ async fn rejected_retry_after_retry_safe_leaves_a_closable_turn() {
 }
 
 #[tokio::test]
+async fn runs_can_be_cancelled_or_aborted_after_a_tool_definition_bump() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let old_tools = registry(Arc::clone(&count), true);
+    let policy = ToolPolicy::default().allow("write");
+    let old_agent = AgentLoop::new(&model, &old_tools, "test").with_policy(policy.clone());
+    let old = DurableAgent::new(&old_agent, &runs);
+    // A host upgrade bumps the advertised definition of the same tool.
+    let mut new_tools = ToolRegistry::new();
+    new_tools.register(FnTool::new(ToolDefinition {name:"write".into(),description:"Test effect v2".into(),input_schema:json!({"type":"object"}),effect:ToolEffect::NonIdempotent,permissions:BTreeSet::new()},|_:Value,_:ToolContext| async {Ok(json!(0))})).unwrap();
+    let new_agent = AgentLoop::new(&model, &new_tools, "test").with_policy(policy);
+    let upgraded = DurableAgent::new(&new_agent, &runs);
+
+    // A run waiting for approval: approval and resume stay strict, while
+    // rejection and cancellation can still terminate it.
+    let waiting = manager.run_turn(&old, "chat", "one", "write").await.unwrap();
+    let ticket = waiting.run.pending_approval().unwrap().clone();
+    assert!(matches!(
+        upgraded.decide(&ticket.run_id, &ticket.request_id, approve()).await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    assert!(matches!(
+        upgraded.resume(&ticket.run_id).await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let cancelled = upgraded
+        .cancel(&ticket.run_id, "operator", "host upgraded")
+        .await
+        .unwrap();
+    assert_eq!(cancelled.status, RunStatus::Finished);
+    assert_eq!(cancelled.report.stop_reason, StopReason::Cancelled);
+    manager
+        .abandon_turn("chat", "one", &cancelled, "operator", "host upgraded")
+        .await
+        .unwrap();
+
+    // A run needing recovery: RetrySafe stays strict; Abort terminates it.
+    let waiting = manager.run_turn(&old, "chat", "two", "write").await.unwrap();
+    let ticket = waiting.run.pending_approval().unwrap().clone();
+    old.decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&old, "chat", "two").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    assert!(matches!(
+        upgraded
+            .reconcile(
+                &ticket.run_id,
+                &call_id,
+                RecoveryDecision::RetrySafe {
+                    actor: "operator".into(),
+                    note: "retry".into(),
+                },
+            )
+            .await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    let aborted = upgraded
+        .reconcile(
+            &ticket.run_id,
+            &call_id,
+            RecoveryDecision::Abort {
+                actor: "operator".into(),
+                note: "host upgraded".into(),
+            },
+        )
+        .await
+        .unwrap();
+    manager
+        .abandon_turn("chat", "two", &aborted, "operator", "host upgraded")
+        .await
+        .unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn never_dispatched_calls_get_explicit_error_results_when_a_failed_turn_is_closed() {
     let dir = tempfile::tempdir().unwrap();
     let store = FileSessionStore::new(dir.path().join("sessions"));

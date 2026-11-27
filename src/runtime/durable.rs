@@ -83,7 +83,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(actor, note)?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // Cancellation dispatches nothing, so it stays available after a host
+        // upgrade changed the frozen configuration or tool definitions.
+        let (mut state, budget) = self.load_owned(&lease, run_id, false).await?;
         if state.status == RunStatus::Finished {
             return Ok(state);
         }
@@ -182,7 +184,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         run_id: &str,
         lease: Arc<dyn RunLease>,
     ) -> Result<RunState, RuntimeError> {
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        let (mut state, budget) = self.load_owned(&lease, run_id, true).await?;
         if state.status == RunStatus::Finished
             || state.status == RunStatus::WaitingApproval
             || state.status == RunStatus::NeedsRecovery
@@ -253,7 +255,8 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(&decision.actor, &decision.note)?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // A rejection only terminates the run; an approval leads to dispatch.
+        let (mut state, budget) = self.load_owned(&lease, run_id, decision.approved).await?;
         if state.status != RunStatus::WaitingApproval {
             return Err(RuntimeError::Conflict(
                 "run is not awaiting approval".into(),
@@ -327,7 +330,10 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
     ) -> Result<RunState, RuntimeError> {
         validate_actor(decision.actor(), decision.note())?;
         let lease = self.store.acquire(run_id).await?;
-        let (mut state, budget) = self.load_owned(&lease, run_id).await?;
+        // RecordResult and Abort only record an observation or terminate;
+        // RetrySafe prepares another dispatch and needs the frozen contract.
+        let strict = matches!(decision, RecoveryDecision::RetrySafe { .. });
+        let (mut state, budget) = self.load_owned(&lease, run_id, strict).await?;
         let index = state
             .current_tool_index()
             .ok_or_else(|| RuntimeError::Conflict("run has no uncertain tool".into()))?;
@@ -516,6 +522,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
         &self,
         lease: &Arc<dyn RunLease>,
         run_id: &str,
+        strict_config: bool,
     ) -> Result<(RunState, RunBudget), RuntimeError> {
         let mut state = lease
             .load()
@@ -526,7 +533,7 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
             return Err(corrupt("store returned a checkpoint for a different run"));
         }
         self.agent.validate(&state.report)?;
-        if state.config != self.configuration() {
+        if strict_config && state.config != self.configuration() {
             return Err(RuntimeError::Configuration(
                 "resume configuration or tool definitions differ from the saved run".into(),
             ));
