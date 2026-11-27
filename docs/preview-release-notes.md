@@ -33,8 +33,10 @@ free Rust checks and real CLI/API/browser scenarios are tracked separately in
 the delivery checklist. The `0.2.0-alpha.1` source package compiles with all
 features and contains the UI/scripts/supervisor/suite assets. A fresh release
 installation reports the correct version, imports two documents, verifies their
-quotes and does not replay completed work. A real Rust documentation page
-was imported and three archived source quotes verified using the offline excerpt
+quotes and does not replay completed work. A separate installation from the
+anonymously downloaded, SHA-256-verified published source ZIP passed the same
+onboarding scenario. A real Rust documentation page was imported and three
+archived source quotes verified using the offline excerpt
 model. The real Linux Poppler parser extracted a two-page PDF and enforced limits.
 Five separately invoked Docker Desktop Linux-engine cases verified isolation,
 numeric cgroup/file limits, time/output bounds and cancellation cleanup; the

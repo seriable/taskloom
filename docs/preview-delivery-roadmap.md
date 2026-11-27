@@ -75,5 +75,9 @@ The public preview is
 <https://github.com/seriable/taskloom/releases/tag/v0.2.0-alpha.1>, targeting
 `43f337d45b0dadc8b54256ff04e3afe95d7dd874`. Source ZIP, Cargo source package and
 checksums are public; unauthenticated API access and source download/hash checks
-passed. This is publication verification, not a hosted CI success. None of the
+passed. That downloaded source was separately installed in release mode and
+passed fresh-config/import/run/two-quote/completed-reentry checks. Direct Git
+transport installation remains untested on this host because its connection
+is blocked; the published archive path was exercised. This is publication and
+installation verification, not a hosted CI success. None of the
 unexecuted external checks is recorded as passing.
