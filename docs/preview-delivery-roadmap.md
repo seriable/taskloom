@@ -3,6 +3,8 @@
 The first three development phases have local acceptance at `082eb80`.
 This follow-up tracks product delivery and task effectiveness separately.
 Unchecked items are unfinished. Offline fixtures do not establish model quality.
+The owner scoped this delivery to public source code. Hosted Actions and live
+model-effectiveness evaluation are separate checks, not publication prerequisites.
 
 ## 1. Reproducible task evaluation
 
@@ -16,7 +18,6 @@ Unchecked items are unfinished. Offline fixtures do not establish model quality.
 ## 2. Open-source delivery
 
 - [x] Inspect hosted CI and distinguish account lock from code/test failure.
-- [ ] Restore hosted Actions availability and verify actual jobs (owner billing issue).
 - [x] New-user release-profile installation into an isolated prefix, fresh config,
       two imports, completed run, verified quotes and unchanged completed resume.
 - [x] Verify `0.2.0-alpha.1` package compilation, required runtime assets and
@@ -64,7 +65,8 @@ Hosted CI was inspected read-only at
 GitHub reports: "The job was not started because your account is locked due to
 a billing issue." Matrix cancellation follows that account-level failure;
 it is not evidence of a Rust test failure. Account billing/Actions availability
-needs the repository owner's intervention. Local checks cannot make that hosted
+would need the repository owner's intervention if hosted CI is desired. It is
+optional for this source-only delivery. Local checks cannot make that hosted
 run green. A fresh run for the preview source at `43f337d` confirms the same
 billing lock: <https://github.com/seriable/taskloom/actions/runs/45946774361>.
 

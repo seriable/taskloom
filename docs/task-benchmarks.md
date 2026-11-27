@@ -1,8 +1,8 @@
 # Reproducible task acceptance campaigns
 
-This is an executable baseline, not evidence of hosted-model quality. The
-follow-up delivery goal remains active until actual configured-provider runs and
-the other delivery items are accepted. See [the current checklist](preview-delivery-roadmap.md).
+This is an executable baseline, not evidence of hosted-model quality.
+Configured-provider effectiveness remains unverified and is separate from the
+owner's source-only publication scope. See [the current checklist](preview-delivery-roadmap.md).
 
 ## Suite and CLI
 

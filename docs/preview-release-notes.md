@@ -5,7 +5,8 @@ Published prerelease:
 Its source is `43f337d45b0dadc8b54256ff04e3afe95d7dd874`; source/Cargo archives
 and SHA-256 checksums are attached. Anonymous access/download verification passed.
 The [delivery checklist](preview-delivery-roadmap.md) separately records the
-account-level hosted CI blocker. No crates.io publication is claimed.
+account-level hosted CI limitation. Hosted Actions are optional for the owner's
+source-only publication scope. No crates.io publication is claimed.
 
 ## Changes
 
