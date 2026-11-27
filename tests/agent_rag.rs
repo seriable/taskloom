@@ -297,6 +297,24 @@ async fn citations_reject_unknown_sources_forged_quotes_and_unmatched_markers() 
     let mut bad = valid.clone();
     bad.citations.push(bad.citations[0].clone());
     assert!(result.verify(bad).is_err());
+    // A trivially short substring occurs in almost any chunk and is not evidence.
+    for short in ["e", "approval", "exact input"] {
+        let mut bad = valid.clone();
+        bad.citations[0].quote = short.into();
+        assert!(result.verify(bad).is_err(), "{short}");
+    }
+    let mut lenient = valid.clone();
+    lenient.citations[0].quote = "approval".into();
+    let policy = QuotePolicy {
+        min_chars: 8,
+        ..QuotePolicy::default()
+    };
+    assert!(result.verify_with(lenient, &policy).is_ok());
+    let policy = QuotePolicy::default();
+    assert!(policy.accepts("Review exact approval"));
+    assert!(policy.accepts("审批需要精确输入"));
+    assert!(!policy.accepts("审批"));
+    assert!(!policy.accepts("   "));
     let mut forged = result.clone();
     forged.hits[0].chunk.source = "forged".into();
     assert!(forged.verify(valid).is_err());
