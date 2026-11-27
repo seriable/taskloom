@@ -456,3 +456,37 @@ async fn native_agent_uses_permissioned_rag_and_citations_survive_durable_reentr
     let report = denied.run("denied", vec![Message::user("search")]).await;
     assert_ne!(report.stop_reason, StopReason::Completed);
 }
+
+#[tokio::test]
+async fn search_reports_higher_ranked_hits_skipped_for_size() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    let chunker = WindowChunker {
+        max_chars: 8000,
+        overlap_chars: 0,
+    };
+    ingest(
+        &store,
+        document("big", &"approval ".repeat(400)),
+        &chunker,
+        None,
+    )
+    .await
+    .unwrap();
+    ingest(&store, document("small", "approval note"), &chunker, None)
+        .await
+        .unwrap();
+    let full = search(&store, &LexicalRetriever, &RetrievalQuery::new("approval"))
+        .await
+        .unwrap();
+    assert_eq!(full.hits.len(), 2);
+    assert_eq!(full.hits[0].chunk.document_id, "big");
+    assert_eq!(full.skipped_oversize, 0);
+    let mut query = RetrievalQuery::new("approval");
+    query.max_bytes = 1024;
+    let limited = search(&store, &LexicalRetriever, &query).await.unwrap();
+    assert_eq!(limited.hits.len(), 1);
+    assert_eq!(limited.hits[0].chunk.document_id, "small");
+    assert_eq!(limited.skipped_oversize, 1);
+    assert!(serde_json::to_vec(&limited).unwrap().len() <= 1024);
+}

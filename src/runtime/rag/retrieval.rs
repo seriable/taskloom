@@ -157,6 +157,12 @@ pub struct Evidence {
 pub struct SearchResult {
     pub corpus_revision: u64,
     pub hits: Vec<Evidence>,
+    /// Ranked hits left out because they alone did not fit `max_bytes`;
+    /// lower-ranked hits that fit are still returned. Nonzero means stronger
+    /// evidence exists than the hits show, so narrow the query or raise the
+    /// byte limit.
+    #[serde(default)]
+    pub skipped_oversize: usize,
 }
 
 pub async fn search(
@@ -180,7 +186,11 @@ pub async fn search(
     let mut result = SearchResult {
         corpus_revision: snapshot.revision,
         hits: Vec::new(),
+        // Measure with the largest possible count so the final result,
+        // whatever it reports, stays within `max_bytes`.
+        skipped_oversize: ranked.len(),
     };
+    let mut skipped = 0;
     for item in ranked {
         if !item.score.is_finite() || item.score < 0.0 || !ids.insert(item.chunk_id.clone()) {
             return Err(invalid("invalid retrieval scores or duplicate IDs"));
@@ -198,8 +208,10 @@ pub async fn search(
             > query.max_bytes
         {
             result.hits.pop();
+            skipped += 1;
         }
     }
+    result.skipped_oversize = skipped;
     Ok(result)
 }
 
@@ -258,6 +270,7 @@ impl SearchResult {
         let combined = Self {
             corpus_revision: 0,
             hits: hits.into_values().collect(),
+            skipped_oversize: 0,
         };
         let mut verified = combined.verify(report)?;
         verified.corpus_revision = if revisions.len() == 1 {
