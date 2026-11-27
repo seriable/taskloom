@@ -62,7 +62,11 @@ credentials are never forwarded through redirects.
 Responses have total deadlines, hop limits and streamed byte limits, even
 without Content-Length. Only UTF-8 HTML/plain text/Markdown is accepted.
 HTML extraction excludes scripts, styles, templates, SVGs and frames; it never
-executes JavaScript or fetches subresources. Script-rendered pages, login flows,
+executes JavaScript or fetches subresources. `timeout_ms` covers the whole
+fetch including extraction: HTML is parsed on a blocking thread under the
+remaining deadline, in one linear pass. Pages nested more than 512 elements
+deep (estimated before parsing; optional-end-tag elements such as `p`/`li` do
+not count) are rejected rather than parsed. Script-rendered pages, login flows,
 OCR, bot challenges and other encodings are unsupported and require a suitable
 host-controlled loader. Sources remain untrusted data.
 

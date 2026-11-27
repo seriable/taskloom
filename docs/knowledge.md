@@ -87,8 +87,25 @@ Ask the model for `CitedReport { text, citations: [{ chunk_id, quote }] }`.
 The text uses `[[full_chunk_id]]` references. Validate it using the actual
 `SearchResult::verify` from the run's tool output, not a new search of a possibly
 updated corpus. Verification rejects unknown/unretrieved sources, duplicate
-citations, changed source hashes, absent or invented quotes, absent/unclosed
-markers and references without corresponding citations.
+citations, chunks whose text no longer matches their own ID, absent or invented
+quotes, quotes below the minimum size, absent/unclosed markers and references
+without corresponding citations.
+
+A quote must be an exact substring of the cited chunk and long enough to be
+meaningful: by default at least 12 non-whitespace characters, or 3 words, or
+6 CJK (Han/kana/Hangul) characters, whichever is met first. Use
+`SearchResult::verify_with`/`verify_all_with` and `QuotePolicy` to change
+these minimums; `verify`/`verify_all`, the app and benchmarks use the default.
+
+What this proves, precisely: each cited chunk appeared in the supplied tool
+output, its ID equals the hash of its own content, and the quote occurs in it.
+The chunk ID is a *self*-hash. It detects accidental corruption, not tampering:
+whoever can edit archived tool output can edit a chunk and recompute its ID,
+and the edited chunk then verifies. It is not compared with the original
+document's hash or the current corpus, and the app accepts output of any tool
+step named `knowledge_search`. Integrity therefore rests on the durable run
+store. Binding evidence to a specific tool instance/corpus (for example signed
+or store-anchored results) is future work.
 
 `VerifiedReport` retains exact chunks and corpus revision, so a saved report
 can still be audited after the corpus is updated or deleted. The durable run

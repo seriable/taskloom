@@ -68,6 +68,21 @@ jobs:
       - run: cargo run --locked --features runtime --example agent_session
       - run: cargo run --locked --features runtime --example agent_peer
       - run: cargo run --locked --features runtime --example agent_research
+      # app_approval is an interactive server and never exits, so it is only
+      # built here; the offline CLI flow below exercises the application.
+      - run: cargo build --locked --features app --example app_approval
+      - name: Offline application CLI flow (no provider credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          demo=$(mktemp -d)
+          cargo run --quiet --locked --features app --bin taskloom -- init "$demo/taskloom.json"
+          taskloom() { cargo run --quiet --locked --features app --bin taskloom -- --config "$demo/taskloom.json" "$@"; }
+          taskloom import approval "Approval guide" examples/knowledge/approval.md
+          taskloom import recovery "Recovery guide" examples/knowledge/recovery.md
+          taskloom run research "approval recovery" > /dev/null
+          taskloom report research > /dev/null
+          taskloom resume research > /dev/null
       - name: Install explicit PDF extractor
         run: sudo apt-get update && sudo apt-get install --yes poppler-utils
       - name: Exercise real PDF extraction

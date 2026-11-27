@@ -11,6 +11,7 @@ use base64::Engine;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::{
@@ -197,6 +198,12 @@ impl DockerSandbox {
             self.config.timeout_ms.to_string(),
             "--max-output-bytes".into(),
             self.config.max_output_bytes.to_string(),
+            // Code travels over stdin only; its size and digest let the
+            // supervisor refuse a truncated (interrupted) or altered write.
+            "--code-bytes".into(),
+            code.len().to_string(),
+            "--code-sha256".into(),
+            hex::encode(Sha256::digest(code.as_bytes())),
         ];
         Ok(SandboxCommand {
             program: self.config.executable.clone(),
@@ -308,26 +315,13 @@ impl DockerSandbox {
         let mut child = command
             .spawn()
             .map_err(|_| config_error("cannot start configured Docker CLI; no host fallback"))?;
-        let mut stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
         let output = tokio::time::timeout(
             Duration::from_millis(self.config.timeout_ms + 10_000),
-            async {
-                tokio::try_join!(
-                    async {
-                        stdin
-                            .write_all(code.as_bytes())
-                            .await
-                            .map_err(super::store::storage)?;
-                        drop(stdin);
-                        Ok::<_, RuntimeError>(())
-                    },
-                    read_limited(stdout, self.config.max_output_bytes * 2 + 4096),
-                    read_limited(stderr, 8192),
-                    async { child.wait().await.map_err(super::store::storage) }
-                )
-            },
+            exchange(
+                &mut child,
+                code.as_bytes(),
+                self.config.max_output_bytes * 2 + 4096,
+            ),
         )
         .await;
         let output = match output {
@@ -345,16 +339,8 @@ impl DockerSandbox {
         };
         let removed = self.cleanup(&spec.container_name, dir.path()).await;
         cleanup.armed = !removed;
-        let (_, stdout, stderr, status) = output?;
-        if !status.success() {
-            return Err(config_error(&format!(
-                "Docker execution failed (no host fallback): {}",
-                String::from_utf8_lossy(&stderr)
-                    .chars()
-                    .take(1024)
-                    .collect::<String>()
-            )));
-        }
+        let (written, stdout, stderr, status) = output?;
+        check_exchange(&written, &stderr, status)?;
         let response: SupervisorOutput = serde_json::from_slice(&stdout)
             .map_err(|_| config_error("invalid isolated supervisor response"))?;
         if response.version != 1 {
@@ -464,6 +450,57 @@ async fn read_limited(
     }
     Ok(bytes)
 }
+type Exchange = (
+    std::io::Result<()>,
+    Vec<u8>,
+    Vec<u8>,
+    std::process::ExitStatus,
+);
+/// Sends code on stdin and collects stdout/stderr/exit status. A stdin write
+/// failure is returned as data rather than failing the join: when Docker exits
+/// before reading stdin, its exit status and stderr explain the failure, not
+/// the resulting broken pipe.
+async fn exchange(
+    child: &mut tokio::process::Child,
+    code: &[u8],
+    max_stdout: usize,
+) -> Result<Exchange, RuntimeError> {
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    tokio::try_join!(
+        async {
+            let written = stdin.write_all(code).await;
+            drop(stdin);
+            Ok::<_, RuntimeError>(written)
+        },
+        read_limited(stdout, max_stdout),
+        read_limited(stderr, 8192),
+        async { child.wait().await.map_err(super::store::storage) }
+    )
+}
+/// Prefers the process's own failure over a stdin write error.
+fn check_exchange(
+    written: &std::io::Result<()>,
+    stderr: &[u8],
+    status: std::process::ExitStatus,
+) -> Result<(), RuntimeError> {
+    if !status.success() {
+        return Err(config_error(&format!(
+            "Docker execution failed (no host fallback): {}",
+            String::from_utf8_lossy(stderr)
+                .chars()
+                .take(1024)
+                .collect::<String>()
+        )));
+    }
+    if written.is_err() {
+        return Err(config_error(
+            "could not send code to the Docker supervisor (no host fallback)",
+        ));
+    }
+    Ok(())
+}
 fn config_error(detail: &str) -> RuntimeError {
     RuntimeError::Configuration(format!("sandbox: {detail}"))
 }
@@ -504,5 +541,69 @@ mod tests {
         let mut info = supported;
         info["OSType"] = json!("windows");
         assert!(validate_engine_info(&info).is_err());
+    }
+    #[tokio::test]
+    async fn process_failure_before_reading_stdin_wins_over_broken_pipe() {
+        // Stands in for `docker run` failing before it reads any code.
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = tokio::process::Command::new("cmd");
+            command.args(["/C", "echo docker: engine unavailable 1>&2 & exit /b 3"]);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = tokio::process::Command::new("sh");
+            command.args(["-c", "echo 'docker: engine unavailable' >&2; exit 3"]);
+            command
+        };
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Far larger than a pipe buffer, so the write cannot complete.
+        let code = vec![b'#'; 4 * 1024 * 1024];
+        let (written, _, stderr, status) =
+            tokio::time::timeout(Duration::from_secs(30), exchange(&mut child, &code, 4096))
+                .await
+                .unwrap()
+                .unwrap();
+        assert!(written.is_err());
+        let error = check_exchange(&written, &stderr, status)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("engine unavailable"), "{error}");
+    }
+    #[test]
+    fn command_carries_code_size_and_digest_but_not_code() {
+        let config = DockerSandboxConfig {
+            executable: std::env::current_exe().unwrap(),
+            endpoint: "unix:///var/run/docker.sock".into(),
+            image: format!("sha256:{}", "a".repeat(64)),
+            platform: "linux/amd64".into(),
+            memory_mib: 128,
+            cpu_millis: 500,
+            timeout_ms: 1000,
+            max_output_bytes: 4096,
+        };
+        let sandbox = DockerSandbox::new(config).unwrap();
+        let context = ToolContext {
+            run_id: "run".into(),
+            call_id: "call".into(),
+        };
+        let code = "print('integrity')";
+        let spec = sandbox.command_spec(code, &context).unwrap();
+        let value = |flag: &str| {
+            let at = spec.arguments.iter().position(|v| v == flag).unwrap();
+            spec.arguments[at + 1].clone()
+        };
+        assert_eq!(value("--code-bytes"), code.len().to_string());
+        assert_eq!(
+            value("--code-sha256"),
+            hex::encode(Sha256::digest(code.as_bytes()))
+        );
+        assert!(!spec.arguments.iter().any(|v| v.contains(code)));
     }
 }

@@ -256,7 +256,11 @@ impl Application {
             .iter()
             .find(|n| n.id == node)
             .ok_or_else(|| config_error("unknown workflow node"))?;
-        let entry = state.nodes.iter().find(|n| n.id == node).unwrap();
+        let entry = state
+            .nodes
+            .iter()
+            .find(|n| n.id == node)
+            .ok_or_else(|| config_error("workflow state has no entry for node"))?;
         let child = entry
             .child
             .as_ref()

@@ -228,6 +228,50 @@ pub struct CitedReport {
     pub text: String,
     pub citations: Vec<Citation>,
 }
+/// Minimum size of a citation quote, so a trivially short string that occurs
+/// in almost any chunk (one character, one common word) cannot pass as
+/// evidence. A quote is long enough when it meets ANY threshold, counted on
+/// the trimmed quote. Defaults: 12 non-whitespace characters, 3 words, or
+/// 6 CJK characters (Han, kana, Hangul), so short Chinese/Japanese/Korean
+/// phrases without spaces are still citable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotePolicy {
+    pub min_chars: usize,
+    pub min_words: usize,
+    pub min_cjk_chars: usize,
+}
+impl Default for QuotePolicy {
+    fn default() -> Self {
+        Self {
+            min_chars: 12,
+            min_words: 3,
+            min_cjk_chars: 6,
+        }
+    }
+}
+impl QuotePolicy {
+    pub fn accepts(&self, quote: &str) -> bool {
+        let quote = quote.trim();
+        let chars = quote.chars().filter(|c| !c.is_whitespace()).count();
+        let words = quote
+            .split_whitespace()
+            .filter(|word| word.chars().any(char::is_alphanumeric))
+            .count();
+        let cjk = quote.chars().filter(|c| is_cjk(*c)).count();
+        !quote.is_empty()
+            && (chars >= self.min_chars || words >= self.min_words || cjk >= self.min_cjk_chars)
+    }
+}
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3040}'..='\u{30ff}'     // Hiragana, Katakana
+        | '\u{3400}'..='\u{4dbf}'   // CJK Extension A
+        | '\u{4e00}'..='\u{9fff}'   // CJK Unified Ideographs
+        | '\u{ac00}'..='\u{d7af}'   // Hangul syllables
+        | '\u{f900}'..='\u{faff}'   // CJK Compatibility Ideographs
+        | '\u{20000}'..='\u{2ebef}' // CJK Extensions B-F
+    )
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VerifiedReport {
     pub report: CitedReport,
@@ -243,6 +287,14 @@ impl SearchResult {
     pub fn verify_all(
         results: &[Self],
         report: CitedReport,
+    ) -> Result<VerifiedReport, RuntimeError> {
+        Self::verify_all_with(results, report, &QuotePolicy::default())
+    }
+    /// [`Self::verify_all`] with an explicit minimum quote size.
+    pub fn verify_all_with(
+        results: &[Self],
+        report: CitedReport,
+        policy: &QuotePolicy,
     ) -> Result<VerifiedReport, RuntimeError> {
         if results.len() > 1024 {
             return Err(invalid("too many evidence snapshots"));
@@ -272,7 +324,7 @@ impl SearchResult {
             hits: hits.into_values().collect(),
             skipped_oversize: 0,
         };
-        let mut verified = combined.verify(report)?;
+        let mut verified = combined.verify_with(report, policy)?;
         verified.corpus_revision = if revisions.len() == 1 {
             revisions.first().copied()
         } else {
@@ -283,7 +335,16 @@ impl SearchResult {
     }
     /// Checks reference identity, exact quotation and marker coverage. This
     /// does not judge whether a source supports the model's interpretation.
+    /// Uses the default [`QuotePolicy`].
     pub fn verify(&self, report: CitedReport) -> Result<VerifiedReport, RuntimeError> {
+        self.verify_with(report, &QuotePolicy::default())
+    }
+    /// [`Self::verify`] with an explicit minimum quote size.
+    pub fn verify_with(
+        &self,
+        report: CitedReport,
+        policy: &QuotePolicy,
+    ) -> Result<VerifiedReport, RuntimeError> {
         if report.text.trim().is_empty()
             || report.text.len() > 1024 * 1024
             || report.citations.is_empty()
@@ -294,6 +355,11 @@ impl SearchResult {
         let mut seen = BTreeSet::new();
         let mut sources = Vec::new();
         for citation in &report.citations {
+            if !policy.accepts(&citation.quote) {
+                return Err(invalid(
+                    "citation quote is shorter than the minimum quote size",
+                ));
+            }
             let evidence = self
                 .hits
                 .iter()
@@ -302,7 +368,6 @@ impl SearchResult {
             if evidence.chunk.id != evidence.chunk.fingerprint()?
                 || !evidence.score.is_finite()
                 || !seen.insert(citation.chunk_id.as_str())
-                || citation.quote.trim().is_empty()
                 || !evidence.chunk.text.contains(&citation.quote)
                 || !report.text.contains(&format!("[[{}]]", citation.chunk_id))
             {

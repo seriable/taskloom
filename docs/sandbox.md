@@ -2,7 +2,8 @@
 
 The optional `sandbox` feature exposes `CodeSandbox`, `DockerSandbox` and
 `SandboxTool`. `app` includes the feature but registers no execution tool until
-the host supplies `sandbox` configuration. A missing Docker engine, missing
+the host supplies `sandbox` configuration. Even then, only workflow roles that
+list the tool receive it, unless `sandbox_top_level` is set. A missing Docker engine, missing
 image or failed container never falls back to host Python or a host shell.
 
 ## Isolation contract
@@ -11,7 +12,15 @@ Only code is model-controlled. The host fixes the Docker CLI, local engine
 socket/pipe, immutable audited image, platform, CPU/memory/output/time limits.
 The model cannot select an executable, image, mount, network, package, device,
 environment variable or Docker option. Code is sent through stdin, not shell
-command text or host argv interpolation.
+command text or host argv interpolation. The host passes only the code's byte
+length and SHA-256 as supervisor arguments (`--code-bytes`, `--code-sha256`).
+End of stdin alone does not prove the write completed, because an interrupted
+controller also closes stdin. The supervisor therefore refuses to run anything
+unless it received exactly the declared bytes with the declared digest. On
+refusal it returns exit code 126 with a `sandbox supervisor refused code`
+message, so an interrupted write never runs a prefix of approved code. If
+`docker run` fails before it reads stdin, the returned error carries Docker's
+exit status and stderr, not the resulting broken-pipe write error.
 Before dispatch, a bounded engine capability query requires Linux, memory/swap/
 PID/CPU limits, private cgroup namespaces and Docker's built-in seccomp profile.
 Unsupported or unverified capabilities fail instead of relying on warnings
@@ -68,6 +77,15 @@ $DOCKER --host "$ENGINE" build --platform linux/amd64 --build-arg BASE_IMAGE="$B
 IMAGE=$($DOCKER --host "$ENGINE" image inspect --format '{{.Id}}' taskloom-sandbox:local)
 ```
 
+The supervisor contract changed when the code-length/SHA-256 check was added:
+`supervisor.py` now requires `--code-bytes` and `--code-sha256`. Rebuild
+the image, which gives it a new digest, and update the pinned `image`. An
+image built from an older supervisor rejects the new arguments, so every call
+fails with a Docker execution error instead of running unchecked code. The 2026-11-27
+acceptance record below names the earlier image and supervisor build-context
+hash. It is historical evidence for that image, not for the current
+supervisor.
+
 Retain the resolved base and final image digests with your deployment evidence;
 repeat production builds using those exact digests. The mutable tag above is
 only an explicit base discovery step. Runtime execution accepts only
@@ -110,7 +128,12 @@ byte limit is enforced. Container/infrastructure charges are not generation
 
 The registered tool is `python_sandbox`, permission `sandbox:python`, with a
 single argument `{"code":"..."}`. A workflow executor role must explicitly
-allow this name. The tool is conservatively NonIdempotent, so default durable
+allow this name. Top-level runs (`POST /api/runs`, CLI `run`) and session
+turns are not offered the tool unless the top-level config also sets
+`"sandbox_top_level": true` next to `sandbox`. The default is `false`, and
+setting it without a `sandbox` section is a configuration error. Tool
+permissions are frozen per run, so toggling the flag affects reentry of
+existing top-level runs like any other tool-policy change. The tool is conservatively NonIdempotent, so default durable
 approval requires review of the exact code and worker binding before dispatch.
 A decision never implicitly executes code: resume the run/parent separately.
 Changed image/limits/engine contracts invalidate pending reentry. PEER planning,
