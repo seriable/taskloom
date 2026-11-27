@@ -527,5 +527,8 @@ session-assisted source-support labels (seven attached-citation supports, two
 insufficient, nine corpus-relative agreements), excluded from native judge API
 cost/latency and superiority claims. The V4 guidance error, first adapter HTTP
 422 probe and original agentUniverse dependency resolution failure are retained.
-This adds evidence, not full P0 acceptance; DeerFlow, complex LangGraph, long
-tasks, broader semantic/retrieval and native multi-agent recovery gates remain.
+This increment alone did not accept P0. Later actual DeerFlow and complex
+LangGraph results are documented in `collaboration-comparison.md`, and actual
+two-role workflow process death during a write in
+`workflow-recovery-acceptance.md`. Long tasks, broader semantic/retrieval quality
+and the remaining lifecycle gates stay open.

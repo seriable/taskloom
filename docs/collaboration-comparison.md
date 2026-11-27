@@ -214,8 +214,63 @@ events, responses, knowledge, prompts, control-source hashes, installed versions
 and validation attempts are saved below the fresh output directory. Vendored
 frameworks, dependencies, weights and binaries stay under ignored `target/`.
 
-The earlier basic
-LangGraph comparison remains 5/12 against Taskloom 5/12 with Qwen3-1.7B; a
-matching complex-agent comparison is still required. Broader realistic/long
-tasks, native failure repair, multi-agent process-death recovery and retrieval
-relevance gates also remain open.
+## Actual LangGraph complex-agent comparison
+
+The earlier basic LangGraph comparison remains 5/12 against Taskloom 5/12 with
+Qwen3-1.7B. The later V5 complex comparison uses actual LangGraph **1.2.24**,
+Python 3.14.6, the same Qwen3-4B model, all three research goals, corpus, role
+prompts, 1024-token output allowance and explicit zero API prices/one-micro-USD
+campaign cap. Installed StateGraph and Pregel source hashes matched their
+distribution RECORD. The isolated dependency check passed; JSON-schema 4.26.0
+and the retained environment constraints are explicit.
+
+`langgraph_collaboration.py` uses real StateGraph parallel branches/join edges,
+dynamic `Send` analyst fan-out, and conditional review/rewrite routing. Shared
+NativeRoles supplies actual model/knowledge I/O, bounded output repairs and the
+same SDK verifier. A native plan determines PEER tasks; no fixture replaces role
+answers or reviewer decisions. Three separately labelled scheduler-only fixture
+controls check two parallel callbacks, join completeness, submitted-review
+handoff and a bounded rewrite before native execution; they are not model scores.
+
+The actual native trial scored **2/3**. The policy brief passed. PEER completed
+its roles but failed reservation-topic and required-source coverage. The
+submitted-draft audit observed actual initial reviewer rejection and produced a
+corrected writer output that passed the declared topic/provenance/review gate.
+Both analyst role lifecycles overlapped in every case; this does not measure GPU
+inference parallelism. Thirty received native requests reported 38,978 input /
+3,108 output tokens at declared USD 0 API fee, with summed case wall time
+130,444 ms. Exact quotes/topic coverage are not independent entailment/factual
+scores. Full native messages, requests, outputs, usage and failures are retained
+in `acceptance/p0-langgraph-complex-20261128.json`.
+
+| Corresponding V5 task | Taskloom | LangGraph adapter | agentUniverse adapter | DeerFlow adapter |
+| --- | --- | --- | --- | --- |
+| Parallel policy brief | Pass | Pass | Not comparable: PEER-only adapter | Fail: no delegated analysts/reviewer |
+| PEER release checklist | Fail | Fail | Fail | Not comparable: natural-research adapter |
+| Submitted-draft audit | Fail | Pass | Not comparable: PEER-only adapter | Not comparable: natural-research adapter |
+
+These are descriptive outcomes under qualified adapters, not an overall ranking.
+Different opaque run IDs, wrappers, repair feedback, HTTP retry behavior and
+planning/control policies can change model output. The LangGraph adapter uses
+explicit model/tool I/O rather than a prebuilt agent; shared retrieval does not
+compare framework-native search. No checkpoint saver, approvals or external
+effects are configured in this comparison. Adapter omissions are **not** claims
+that the upstream frameworks cannot support those tasks. Native process death
+and long tasks need separate acceptance. The SDK validation bridge consumes
+actual observed tool dispatches rather than imported dependency citations.
+
+```powershell
+python -m venv target/competitors/langgraph-venv
+target/competitors/langgraph-venv/Scripts/python.exe -m pip install -c examples/benchmarks/langgraph-collaboration-constraints.txt langgraph==1.2.24 jsonschema==4.26.0
+target/competitors/langgraph-venv/Scripts/python.exe -m pip check
+target/competitors/langgraph-venv/Scripts/python.exe tests/langgraph_collaboration_controls.py
+target/competitors/langgraph-venv/Scripts/python.exe examples/benchmarks/langgraph_collaboration.py target/native-collaboration-v5 target/langgraph-v5 --taskloom target/debug/taskloom.exe --verifier target/debug/examples/benchmark_citations.exe
+```
+
+Start the exact explicitly configured local model first. The reference is a
+completed V5 native campaign, not this chat's responses. Prices are declared
+zero for this local API only; hardware, electricity and chat usage are excluded.
+Broader realistic/long tasks, native failure repair, independent semantic/source
+support and retrieval relevance remain open. Actual two-role Taskloom process
+death during an approved external write is documented separately in
+`workflow-recovery-acceptance.md`; it is not a competitor recovery comparison.
