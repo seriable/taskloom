@@ -108,7 +108,7 @@ verifies sources, reloads persisted results after restart, and approves/resumes
 one real file write. A narrow-screen check finds no horizontal overflow.
 
 The three development phases have completed local acceptance. These remain
-unreleased development-branch features; they are not in the `v0.1.0` tag.
+optional preview features targeted by `v0.2.0-alpha.1`; they are not in `v0.1.0`.
 External provider/MCP deployment compatibility, hosted CI and production-scale
 load testing have not been established by this local acceptance.
 

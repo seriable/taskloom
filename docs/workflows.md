@@ -1,6 +1,6 @@
 # Durable workflows and PEER collaboration
 
-Requires the unreleased `runtime` feature and Rust 1.86+. Run the complete
+Requires the `runtime` feature from the `v0.2.0-alpha.1` preview and Rust 1.86+. Run the complete
 offline example with:
 
 ```sh

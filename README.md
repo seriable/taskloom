@@ -14,7 +14,7 @@ call ledger, and record/replay of every answer.
 The default API executes one structured answer per task; your code controls
 the pipeline. The optional `runtime` feature adds a bounded native tool-calling
 agent loop with explicit permissions, execution events and run-wide limits.
-This runtime is unreleased development code and is not in the `v0.1.0` tag.
+These optional layers are part of the `v0.2.0-alpha.1` preview; `v0.1.0` predates them.
 See [the runtime guide](docs/agent-runtime.md) and the offline
 `agent_loop` example. Persistent checkpoints, approval and recovery are
 available through [DurableAgent](docs/durable-runs.md). [Sessions and context
@@ -54,19 +54,19 @@ checks and campaign budgets with explicit offline/provider provenance.
 | **Embeddings** | `Agent::embed` through the same gateway, recorded and cached per input text. |
 | **Evaluation** | Re-run recorded requests with a changed prompt or model and judge the answers (`Unchanged`, or a pairwise `ModelJudge`). |
 | **Tracing** | `tracing` spans per task and per attempt, named after the OpenTelemetry GenAI conventions (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, ...). |
-| **Agent runtime (optional, unreleased)** | Native tool conversations, schema-checked tools, explicit permissions, bounded decisions/tool calls/time/model spending, execution events and reports. |
-| **Durable collaboration (optional, unreleased)** | Atomic checkpoints, exact-input approvals, explicit effect reconciliation, sessions/context, parallel/conditional workflows and bounded PEER review. |
-| **Knowledge and tools (optional, unreleased)** | Pluggable ingestion/chunking/retrieval, exact source citations, local lexical search and explicitly bound MCP HTTP tools. |
-| **Application host (optional, unreleased)** | Installable CLI, authenticated run/workflow/session/knowledge API and operator UI for role handoffs, review revisions, budgets, approvals and recovery. |
-| **Research sources (optional, unreleased)** | Origin-granted web search/fetch, bounded PDF extraction, snapshot-bound vector indexes and hybrid retrieval; [configuration and validation](docs/research-tools.md). |
-| **Isolated Python (optional, unreleased)** | Explicit audited Linux-container worker, bounded resources and exact-code approval; [contract and pending container acceptance](docs/sandbox.md). |
+| **Agent runtime (optional, preview)** | Native tool conversations, schema-checked tools, explicit permissions, bounded decisions/tool calls/time/model spending, execution events and reports. |
+| **Durable collaboration (optional, preview)** | Atomic checkpoints, exact-input approvals, explicit effect reconciliation, sessions/context, parallel/conditional workflows and bounded PEER review. |
+| **Knowledge and tools (optional, preview)** | Pluggable ingestion/chunking/retrieval, exact source citations, local lexical search and explicitly bound MCP HTTP tools. |
+| **Application host (optional, preview)** | Installable CLI, authenticated run/workflow/session/knowledge API and operator UI for role handoffs, review revisions, budgets, approvals and recovery. |
+| **Research sources (optional, preview)** | Origin-granted web search/fetch, bounded PDF extraction, snapshot-bound vector indexes and hybrid retrieval; [configuration and validation](docs/research-tools.md). |
+| **Isolated Python (optional, preview)** | Explicit audited Linux-container worker, bounded resources and exact-code approval; [contract and real-container acceptance](docs/sandbox.md). |
 | **Typed errors** | `TaskError` / `ModelError` kinds (transient, context overflow, schema mismatch, auth, content rejected, misconfigured, deadline, cancelled). Branch on the kind, never on message text. |
 
 ## Quick start
 
 ```toml
 [dependencies]
-taskloom = { git = "https://github.com/seriable/taskloom", tag = "v0.1.0", features = ["openai"] }
+taskloom = { git = "https://github.com/seriable/taskloom", tag = "v0.2.0-alpha.1", features = ["openai"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -313,7 +313,7 @@ video pipeline that runs some sixty model tasks through it.
 
 This release is distributed on GitHub; the installation example pins its Git
 tag. It has not been published to crates.io. The tagged single-task API reports
-costs without imposing a whole-job currency cap. The unreleased runtime adds
+costs without imposing a whole-job currency cap. The preview runtime adds
 explicit model-spend reservations and workflow-wide allocations with known
 prices; independent external tool/service charges remain outside that cap.
 Live-provider interoperability and large-scale load testing are separate from

@@ -1,6 +1,6 @@
 # MCP tools over Streamable HTTP
 
-The unreleased optional `mcp` feature includes `runtime` and the HTTP client.
+The preview's optional `mcp` feature includes `runtime` and the HTTP client.
 It implements tool discovery/calls over explicitly configured MCP Streamable
 HTTP endpoints, negotiating **2025-06-18** or **2025-03-26** protocol versions.
 It supports JSON responses and response SSE, including notifications before

@@ -1,14 +1,22 @@
 # Local application: CLI, API and operator UI
 
-The unreleased `app` feature adds a packaged `taskloom` executable and a shared
+The `v0.2.0-alpha.1` preview's `app` feature adds a packaged executable and a shared
 durable run controller. It includes `runtime`, both provider adapters and MCP.
 Library-only users keep the existing minimal default feature set.
 
 ## Install and run offline
 
-Use Rust 1.86 or newer. From this development checkout:
+Use Rust 1.86 or newer. A CLI-only installation uses the pinned preview:
 
 ```sh
+cargo install --git https://github.com/seriable/taskloom.git --tag v0.2.0-alpha.1 --locked --features app
+```
+
+For the supplied offline example, install from a checkout containing its inputs:
+
+```sh
+git clone --branch v0.2.0-alpha.1 https://github.com/seriable/taskloom.git
+cd taskloom
 cargo install --path . --locked --features app
 taskloom init taskloom.json
 taskloom import approval "Approval guide" examples/knowledge/approval.md
@@ -27,10 +35,9 @@ general reasoning or claim to be a live model. `report` verifies source identity
 and exact quotes against saved tool results. Missing evidence is reported
 explicitly. See [knowledge/citations](knowledge.md) for semantic limitations.
 
-The application is not in the published `v0.1.0` tag and has not been uploaded
-to crates.io. Install from the development checkout, or from a verified future
-release commit containing this feature. Do not install the old tag expecting
-these commands.
+The application is absent from `v0.1.0`; use the preview tag above or this source
+checkout. No crates.io upload is part of this preview. Public tag/release and
+hosted validation status are recorded in the [delivery checklist](preview-delivery-roadmap.md).
 
 Optional web search, webpage ingestion, PDF upload/import and host-injected
 hybrid retrieval are described in [research tools](research-tools.md). They

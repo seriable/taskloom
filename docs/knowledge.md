@@ -1,6 +1,6 @@
 # Knowledge retrieval and source citations
 
-Requires the unreleased `runtime` feature. The complete offline pipeline is:
+Requires the preview's `runtime` feature. The complete offline pipeline is:
 
 ```sh
 cargo run --locked --features runtime --example agent_research
