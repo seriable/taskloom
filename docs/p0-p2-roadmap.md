@@ -269,13 +269,36 @@ This does not provide a visual editor/wizard or multi-user/database service.
 Every P2 box remains unchecked. See `workflow-design.md` and
 `acceptance/p2-planning-20261128.json` for migration and deferred checks.
 
-- [ ] Model/tool/retrieval configuration wizard with validation and safe secret
+- [x] Model/tool/retrieval configuration wizard with validation and safe secret
   handling; template selection and explicit capability grants.
-- [ ] Visual workflow editing, validated role/dependency/condition bindings and
+- [x] Visual workflow editing, validated role/dependency/condition bindings and
   a code/API representation that round-trips without changing semantics.
-- [ ] Inspect, approve, pause, cancel and resume actual runs from the UI,
+- [x] Inspect, approve, pause, cancel and resume actual runs from the UI,
   including child handoffs, reviewer revisions and actionable failures.
-- [ ] Browser acceptance of complete user flows and narrow-screen behavior.
+- [x] Browser acceptance of complete user flows and narrow-screen behavior.
+
+Later 2026-11-28 UI increment accepts the bounded single-operator product
+package: a configuration wizard statically reviews generation/tool/retrieval
+declarations and exports explicitly, without applying grants or reading secret
+values. Node cards, directed connections, role/dependency/condition/select
+bindings and a lossless JSON code/file representation use actual compiler
+preview and exact launch. Template preview validates active pinned input schemas.
+Unknown roles/advanced conditions and large integer/decimal values are preserved;
+invalid visible edits prevent launch and any edit invalidates prior review.
+
+Actual browser operations completed native Qwen3-4B DAG and installed-template
+runs, then paused a separate composite-condition DAG, restarted the host and
+resumed the second node with its first child retained at one generation/dispatch.
+A separately labelled offline fixture performed exact approval, one real local
+note write, reviewer rejection/rewrite and cancellation; its model decisions are
+not native quality evidence. Final 390px wizard/page checks measured client/scroll
+width 375/375. Early input-commit, provider-option and long budget-text overflow
+bugs are recorded with repairs and affected-flow reruns. All-feature tests remain
+330 passed/six ignored; Rust 1.86, strict Clippy, rustdoc and codec controls pass.
+See `workflow-design.md` and `acceptance/p2-design-ui-20261128.json` for raw
+journals, fee/provenance qualifications and reproducible steps. This accepts
+P2.1's local product flows, not P2.2 services, broad task quality or the entire
+goal; P0 and every P2.2 box below remain open.
 
 ## P2.2 — Service capabilities
 

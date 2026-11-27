@@ -167,6 +167,25 @@ impl Application {
         template: &str,
         input: AppTemplateRequest,
     ) -> Result<WorkflowState, RuntimeError> {
+        let request = self.compile_skill_template(mount, template, input)?;
+        self.start_workflow(request).await
+    }
+    /// Resolve an active pinned template and its input schema without starting
+    /// work. The ordinary workflow preview then binds its mounted role contracts.
+    pub fn preview_skill_template(
+        &self,
+        mount: &str,
+        template: &str,
+        input: AppTemplateRequest,
+    ) -> Result<super::AppWorkflowPreview, RuntimeError> {
+        self.preview_workflow(self.compile_skill_template(mount, template, input)?)
+    }
+    fn compile_skill_template(
+        &self,
+        mount: &str,
+        template: &str,
+        input: AppTemplateRequest,
+    ) -> Result<AppWorkflowRequest, RuntimeError> {
         let skill = self
             .skills
             .iter()
@@ -189,13 +208,12 @@ impl Application {
                 (None, Some(spec))
             }
         };
-        self.start_workflow(AppWorkflowRequest {
+        Ok(AppWorkflowRequest {
             id: input.id,
             input: input.input,
             definition,
             peer,
             limits: input.limits,
         })
-        .await
     }
 }

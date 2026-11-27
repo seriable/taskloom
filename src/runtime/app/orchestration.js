@@ -67,7 +67,7 @@ function renderRecovery(){
     for(const [label,type]of [['Record observed result','record_result'],['Abort call','abort'],...(step.definition.effect==='non_idempotent'?[]:[['Retry safe operation','retry_safe']])]){
       const button=document.createElement('button');button.textContent=label;button.onclick=()=>act(async()=>{
         const decision={type,actor:operator.value,note:note.value};
-        if(type==='record_result'){decision.output=JSON.parse(output.value);decision.is_error=checkbox.checked;}
+        if(type==='record_result'){decision.output=TaskloomJson.parse(output.value);decision.is_error=checkbox.checked;}
         await api('/runs/'+encodeURIComponent(selected)+'/reconcile/'+encodeURIComponent(step.call.id),'POST',decision);
         message('Reconciliation saved. Resume the parent to continue.');await refresh();
       });form.append(button);
@@ -126,7 +126,7 @@ $('parent-kind').onchange=()=>{$('dag-form').classList.toggle('hidden',$('parent
 $('parent-create').onclick=()=>act(async()=>{
   const kind=$('parent-kind').value,id=$('parent-id').value;
   if(kind==='session')await rawApi('/sessions','POST',{id});
-  else await rawApi('/workflows','POST',{id,input:$('parent-prompt').value,...(kind==='peer'?{peer:{planner:'planner',executor:'executor',writer:'writer',reviewer:'reviewer',max_tasks:2,max_revisions:1}}:{definition:JSON.parse($('dag-definition').value)})});
+  else await rawApi('/workflows','POST',{id,input:$('parent-prompt').value,...(kind==='peer'?{peer:{planner:'planner',executor:'executor',writer:'writer',reviewer:'reviewer',max_tasks:2,max_revisions:1}}:{definition:TaskloomJson.parse($('dag-definition').value)})});
   parentSelection={kind:kind==='session'?'session':'workflow',id};message('Parent saved.');await refresh();
 });
 $('session-send').onclick=()=>act(async()=>{

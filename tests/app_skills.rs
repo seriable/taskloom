@@ -284,6 +284,58 @@ async fn template_api_cannot_submit_its_own_grants_roles_or_invalid_inputs() {
     assert_eq!(response.status(), 400);
     assert_eq!(model.0.load(Ordering::SeqCst), 0);
     assert!(host.workflow("invalid").await.is_err());
+    for body in [
+        json!({"id":"invalid-preview","input":{}}),
+        json!({"id":"invalid-preview","input":{"goal":"write"},"grant":{"permissions":["all"]}}),
+    ] {
+        assert!(client
+            .post(format!("{url}/templates/demo/write-once/preview"))
+            .bearer_auth("template-operator-token")
+            .json(&body)
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_client_error());
+    }
+    let preview: Value = client
+        .post(format!("{url}/templates/demo/write-once/preview"))
+        .bearer_auth("template-operator-token")
+        .json(&template("template-preview"))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preview["dispatch_performed"], false);
+    assert_eq!(
+        preview["request"]["definition"]["nodes"][0]["task"],
+        "demo-worker"
+    );
+    assert_eq!(model.0.load(Ordering::SeqCst), 0);
+    assert!(host.workflow("template-preview").await.is_err());
+    let response = client
+        .post(format!("{url}/workflow-design/launch"))
+        .bearer_auth("template-operator-token")
+        .json(&json!({"request":preview["request"],"preview_key":preview["preview_key"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 202);
+    idle(&host, "template-preview").await;
+    let state = host.workflow("template-preview").await.unwrap();
+    assert_eq!(state.status, WorkflowStatus::Waiting);
+    let child = host
+        .inspect(&state.node("result").unwrap().child.as_ref().unwrap().run_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        child.pending_approval().unwrap().call.arguments,
+        json!({"n":7})
+    );
     service.abort();
 }
 

@@ -1,0 +1,22 @@
+// Node's standard library only. This tests the real served browser codec.
+const assert = require('node:assert/strict');
+require('../src/runtime/app/planning-json.js');
+const {parse, stringify, ExactNumber} = globalThis.TaskloomJson;
+const request = '{"input":{"large":9007199254740993,"decimal":1.0,"negative":-0.0,"exponent":1e3},"definition":{"nodes":[{"condition":{"type":"equals","value":9007199254740993},"params":{"__proto__":{"polluted":true},"text":"</script>\\\"\\\\💡"}}]}}';
+const value = parse(request);
+assert.equal(stringify(value), request);
+assert.equal(stringify(parse(stringify(value, true))), request);
+assert.equal(String(value.input.large), '9007199254740993');
+assert.equal({}.polluted, undefined);
+value.definition.nodes[0].task = 'revised-host-role';
+assert.ok(stringify(value).includes('"large":9007199254740993'));
+assert.ok(stringify(value).includes('"decimal":1.0'));
+assert.ok(stringify(value).includes('"value":9007199254740993'));
+for (const bad of ['{"x":1,"x":2}', '[1,]', '{"x":01}', 'true false', 'NaN', '1.', '"unclosed', '{"x":"bad\nline"}']) assert.throws(() => parse(bad), undefined, bad);
+assert.throws(() => stringify({value:9007199254740992}), /exact JSON/);
+assert.throws(() => new ExactNumber('0;alert(1)'), /Invalid/);
+assert.throws(() => parse('['.repeat(98) + '0' + ']'.repeat(98)), /nesting/);
+assert.throws(() => parse(' '.repeat(4*1024*1024+1)), /4 MiB/);
+assert.equal(stringify(parse('{"constructor":false,"toString":null}')), '{"constructor":false,"toString":null}');
+assert.equal(stringify({node:'control',limit:4,enabled:true,params:null}), '{"node":"control","limit":4,"enabled":true,"params":null}');
+console.log('lossless workflow/configuration codec controls passed');

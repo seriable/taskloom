@@ -58,6 +58,10 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/setup", get(setup_defaults))
         .route("/setup/validate", post(validate_setup))
         .route("/templates", get(templates))
+        .route(
+            "/templates/{mount}/{template}/preview",
+            post(preview_template),
+        )
         .route("/templates/{mount}/{template}/runs", post(start_template))
         .route("/workflows", get(workflows).post(start_workflow))
         .route("/workflow-design/preview", post(preview_workflow))
@@ -108,6 +112,24 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         ));
     Ok(Router::new()
         .route("/", get(|| async { Html(include_str!("ui.html")) }))
+        .route(
+            "/planning-json.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("planning-json.js"),
+                )
+            }),
+        )
+        .route(
+            "/planning.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    include_str!("planning.js"),
+                )
+            }),
+        )
         .route(
             "/orchestration.js",
             get(|| async {
@@ -299,12 +321,26 @@ async fn setup_defaults(State(app): State<Arc<Application>>) -> ApiResult {
         "active_tools":app.tools.definitions(&app.policy),
         "active_roles":app.registered_roles().collect::<Vec<_>>(),
         "templates":app.skill_templates(),
+        "workflow_defaults":crate::runtime::workflow::WorkflowLimits {
+            max_cost_micros:app.config.limits.max_cost_micros,
+            ..Default::default()
+        },
         "configuration_applied":false
     })))
 }
 async fn validate_setup(Json(config): Json<super::AppConfig>) -> ApiResult {
     Ok(Json(
         serde_json::to_value(super::preview_configuration(config)?)
+            .map_err(crate::runtime::store::storage)?,
+    ))
+}
+async fn preview_template(
+    State(app): State<Arc<Application>>,
+    Path((mount, template)): Path<(String, String)>,
+    Json(input): Json<super::AppTemplateRequest>,
+) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(app.preview_skill_template(&mount, &template, input)?)
             .map_err(crate::runtime::store::storage)?,
     ))
 }
