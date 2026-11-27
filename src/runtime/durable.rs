@@ -375,7 +375,23 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
                 }
                 state.tool_steps[index].progress = ToolProgress::Pending;
             }
-            RecoveryDecision::Abort { .. } => {}
+            RecoveryDecision::Abort { actor, note } => {
+                // Resolve the call with an explicit unknown outcome, so the
+                // protocol is complete and the abort cannot be repeated.
+                complete_tool(
+                    &mut state,
+                    index,
+                    ToolResult {
+                        call_id: call_id.into(),
+                        output: serde_json::json!({
+                            "host_error": "aborted by operator; external outcome unknown",
+                            "actor": actor,
+                            "note": note,
+                        }),
+                        is_error: true,
+                    },
+                )?;
+            }
         }
         let actor = decision.actor().to_string();
         let action = decision.action().to_string();

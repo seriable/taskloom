@@ -107,7 +107,10 @@ reconciliation. Use `reconcile` with a matching call id and an operator record:
 - `RetrySafe`: only read-only/idempotent tools are eligible. The same run/call
   ids are reused for tool-side deduplication. It requires fresh approval where
   the policy demands it and consumes another tool attempt.
-- `Abort`: terminate the run without continuing the uncertain operation.
+- `Abort`: terminate the run without continuing the uncertain operation. The
+  call is resolved with an explicit error result recording the actor, note
+  and an unknown external outcome, so the run can be closed and the abort
+  cannot be repeated.
 
 Non-idempotent operations cannot use `RetrySafe`. The library cannot determine
 whether an email was sent, a remote write committed or spawned work is still

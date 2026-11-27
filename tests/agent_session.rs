@@ -330,22 +330,15 @@ async fn uncertain_effects_must_be_reconciled_before_abandoning_the_session_turn
     assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
     let run_id = unknown.run.report.run_id.clone();
     let call_id = unknown.run.tool_steps[0].call.id.clone();
-    let aborted = durable
-        .reconcile(
-            &run_id,
-            &call_id,
-            RecoveryDecision::Abort {
-                actor: "operator".into(),
-                note: "stop pending verification".into(),
-            },
-        )
+    let cancelled = durable
+        .cancel(&run_id, "operator", "stop pending verification")
         .await
         .unwrap();
     assert!(manager
         .abandon_turn(
             "chat",
             "one",
-            &aborted,
+            &cancelled,
             "operator",
             "cannot ignore uncertainty"
         )
@@ -378,6 +371,60 @@ async fn uncertain_effects_must_be_reconciled_before_abandoning_the_session_turn
         .messages
         .iter()
         .any(|m| matches!(m,Message::Tool {result} if result.output==json!("confirmed saved"))));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn abort_resolves_the_uncertain_tool_so_the_turn_can_be_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileSessionStore::new(dir.path().join("sessions"));
+    let runs = FileRunStore::new(dir.path().join("runs"));
+    let manager = SessionManager::new(&store);
+    manager.create("chat", vec![]).await.unwrap();
+    let model = TestModel {
+        tools: true,
+        ..Default::default()
+    };
+    let count = Arc::new(AtomicUsize::new(0));
+    let tools = registry(Arc::clone(&count), true);
+    let agent =
+        AgentLoop::new(&model, &tools, "test").with_policy(ToolPolicy::default().allow("write"));
+    let durable = DurableAgent::new(&agent, &runs);
+    let waiting = manager
+        .run_turn(&durable, "chat", "one", "write")
+        .await
+        .unwrap();
+    let ticket = waiting.run.pending_approval().unwrap();
+    durable
+        .decide(&ticket.run_id, &ticket.request_id, approve())
+        .await
+        .unwrap();
+    let unknown = manager.resume_turn(&durable, "chat", "one").await.unwrap();
+    assert_eq!(unknown.run.status, RunStatus::NeedsRecovery);
+    let run_id = unknown.run.report.run_id.clone();
+    let call_id = unknown.run.tool_steps[0].call.id.clone();
+    let abort = || RecoveryDecision::Abort {
+        actor: "operator".into(),
+        note: "stop pending verification".into(),
+    };
+    let aborted = durable.reconcile(&run_id, &call_id, abort()).await.unwrap();
+    assert_eq!(aborted.status, RunStatus::Finished);
+    assert_eq!(aborted.report.stop_reason, StopReason::ToolError);
+    assert!(matches!(
+        aborted.tool_steps[0].progress,
+        ToolProgress::Complete { ref result } if result.is_error
+    ));
+    assert!(matches!(
+        durable.reconcile(&run_id, &call_id, abort()).await,
+        Err(RuntimeError::Conflict(_))
+    ));
+    let session = manager
+        .abandon_turn("chat", "one", &aborted, "operator", "outcome unknown")
+        .await
+        .unwrap();
+    session.validate().unwrap();
+    assert!(session.messages.iter().any(|m| matches!(m, Message::Tool { result }
+        if result.is_error && result.output["host_error"].as_str().unwrap().contains("aborted"))));
     assert_eq!(count.load(Ordering::SeqCst), 1);
 }
 
