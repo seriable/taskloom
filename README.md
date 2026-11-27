@@ -11,12 +11,13 @@ taskloom does the rest the same way for every task: model fallback, a
 resilient JSON protocol, deadlines, hedging, circuit breakers, budgets, a
 call ledger, and record/replay of every answer.
 
-It is **not** an autonomous agent loop (no open-ended tool calling, no
-multi-agent chat, no vector store). A task is one structured answer, and
-your deterministic code decides what happens next. If you need tool-calling
-agents that plan their own steps, use a framework built for that; if you run
-LLM calls inside a pipeline that must stay debuggable, replayable and within
-budget, taskloom is for you.
+The default API executes one structured answer per task; your code controls
+the pipeline. The optional `runtime` feature adds a bounded native tool-calling
+agent loop with explicit permissions, execution events and run-wide limits.
+This runtime is unreleased development code and is not in the `v0.1.0` tag.
+See [the runtime guide](docs/agent-runtime.md) and the offline
+`agent_loop` example. Durable agent recovery, multi-agent workflows and an
+application UI are under development in the [roadmap](docs/agent-roadmap.md).
 
 ## What you get
 
@@ -37,6 +38,7 @@ budget, taskloom is for you.
 | **Embeddings** | `Agent::embed` through the same gateway, recorded and cached per input text. |
 | **Evaluation** | Re-run recorded requests with a changed prompt or model and judge the answers (`Unchanged`, or a pairwise `ModelJudge`). |
 | **Tracing** | `tracing` spans per task and per attempt, named after the OpenTelemetry GenAI conventions (`gen_ai.request.model`, `gen_ai.usage.input_tokens`, ...). |
+| **Agent runtime (optional, unreleased)** | Native tool conversations, schema-checked tools, explicit permissions, bounded decisions/tool calls/time/model spending, execution events and reports. |
 | **Typed errors** | `TaskError` / `ModelError` kinds (transient, context overflow, schema mismatch, auth, content rejected, misconfigured, deadline, cancelled). Branch on the kind, never on message text. |
 
 ## Quick start
@@ -273,6 +275,7 @@ from a closure — handy for tests.
 ```text
 cargo run --example basic          # a typed task with validation and fallback, offline
 cargo run --example record_replay  # record once, replay offline
+cargo run --features runtime --example agent_loop  # native tool loop, offline
 OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
   cargo run --features openai --example openai
 ```

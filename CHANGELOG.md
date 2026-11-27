@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Optional `runtime` feature: typed native tool conversations, JSON Schema
+  tool validation, explicit permission grants, bounded sequential agent loops,
+  run events/reports and model-spend reservations across retries/fallbacks.
+- OpenAI-compatible and Anthropic native tool adapters share the gateway;
+  existing single-task APIs remain available without the runtime dependency.
+- Offline multi-step and live OpenAI-compatible examples, runtime guide and
+  three-phase agent framework roadmap. Durable state, workflows and application
+  delivery are still in development.
+
 - Normalize OpenAI `message.refusal`, streamed `delta.refusal`, refusal
   content parts and `content_filter` into typed content rejection, preserving
   reported usage and avoiding resilient-JSON retries and repair turns.

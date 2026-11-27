@@ -15,6 +15,9 @@ use serde_json::{json, Value};
 use crate::gateway::{ModelError, TokenUsage};
 use crate::provider::{ChatRequest, ChatResponse, Provider, Streaming};
 
+#[cfg(feature = "runtime")]
+mod runtime;
+
 /// The API version sent by default.
 pub const DEFAULT_API_VERSION: &str = "2023-06-01";
 /// `max_tokens` when the task leaves the output allowance to the provider
@@ -225,6 +228,13 @@ impl Anthropic {
 }
 
 impl Provider for Anthropic {
+    #[cfg(feature = "runtime")]
+    fn converse<'a>(
+        &'a self,
+        request: &'a crate::runtime::ModelRequest,
+    ) -> BoxFuture<'a, Result<crate::runtime::ModelReply, ModelError>> {
+        Box::pin(runtime::converse(self, request))
+    }
     fn cache_namespace(&self) -> String {
         format!(
             "anthropic-v2|{}|{}|{:?}|{}|{}",

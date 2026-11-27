@@ -22,8 +22,8 @@
 //! - records or replays answers, and serves validated answers again from a
 //!   step cache ([`Environment`]).
 //!
-//! This is not an autonomous agent loop: a task is one structured answer,
-//! and the caller's deterministic code decides what happens next.
+//! The single-task API leaves sequencing to the caller. The optional
+//! `runtime` feature adds a bounded tool-calling loop in the `runtime` module.
 
 #[cfg(feature = "anthropic")]
 pub mod anthropic;
@@ -44,6 +44,8 @@ pub mod provider;
 pub mod registry;
 pub mod retry;
 mod runner;
+#[cfg(feature = "runtime")]
+pub mod runtime;
 #[cfg(any(feature = "openai", feature = "anthropic"))]
 mod sse;
 mod task;

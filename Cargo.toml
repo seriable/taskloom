@@ -22,11 +22,17 @@ openai = ["dep:reqwest", "dep:base64"]
 anthropic = ["dep:reqwest", "dep:base64"]
 # `TaskSpec::schema_of::<T>()` from a `schemars::JsonSchema` type.
 schemars = ["dep:schemars"]
+# Autonomous tool execution, kept separate from the typed single-task API.
+runtime = ["dep:jsonschema", "dep:uuid"]
 
 [dependencies]
 base64 = { version = "0.22", optional = true }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hex = "0.4"
+jsonschema = { version = "0.29", default-features = false, optional = true }
+# jsonschema accepts newer uuid releases whose MSRV exceeds Rust 1.86.
+# Constrain downstream resolution too, not only this repository's lockfile.
+uuid = { version = "=1.18.1", default-features = false, optional = true }
 fs2 = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
 schemars = { version = "1", optional = true }
@@ -44,6 +50,14 @@ required-features = ["openai"]
 [[example]]
 name = "anthropic"
 required-features = ["anthropic"]
+
+[[example]]
+name = "agent_loop"
+required-features = ["runtime"]
+
+[[example]]
+name = "agent_openai"
+required-features = ["runtime", "openai"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "rt-multi-thread", "net", "io-util", "test-util"] }

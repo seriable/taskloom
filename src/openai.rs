@@ -15,6 +15,9 @@ use crate::provider::{
     ChatRequest, ChatResponse, EmbeddingRequest, EmbeddingResponse, Provider, Streaming,
 };
 
+#[cfg(feature = "runtime")]
+mod runtime;
+
 /// An OpenAI-compatible endpoint.
 #[derive(Clone)]
 pub struct OpenAiCompatible {
@@ -257,6 +260,13 @@ fn parse_embeddings(value: &Value) -> Result<EmbeddingResponse, ModelError> {
 }
 
 impl Provider for OpenAiCompatible {
+    #[cfg(feature = "runtime")]
+    fn converse<'a>(
+        &'a self,
+        request: &'a crate::runtime::ModelRequest,
+    ) -> BoxFuture<'a, Result<crate::runtime::ModelReply, ModelError>> {
+        Box::pin(runtime::converse(self, request))
+    }
     fn cache_namespace(&self) -> String {
         format!(
             "openai-v2|{}|{}|{:?}",

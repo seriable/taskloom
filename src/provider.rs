@@ -19,6 +19,9 @@ use crate::task::Answer;
 use crate::transport::{EmbedRequest, Embedded, Format, Request, Response, Transport};
 use crate::TaskError;
 
+#[cfg(feature = "runtime")]
+mod runtime;
+
 /// One chat-completion request to one model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatRequest {
@@ -91,6 +94,20 @@ pub trait Provider: Send + Sync {
         streaming: Option<Streaming<'a>>,
     ) -> BoxFuture<'a, Result<ChatResponse, ModelError>>;
 
+    /// One native tool-calling turn (feature `runtime`), without retries.
+    /// Keeps reported usage on protocol failures in [`crate::runtime::ModelReply`].
+    #[cfg(feature = "runtime")]
+    fn converse<'a>(
+        &'a self,
+        _request: &'a crate::runtime::ModelRequest,
+    ) -> BoxFuture<'a, Result<crate::runtime::ModelReply, ModelError>> {
+        Box::pin(async {
+            Err(ModelError::misconfigured(
+                "provider does not support native agent turns",
+            ))
+        })
+    }
+
     /// Embeds the inputs; no retries. Unsupported unless implemented.
     fn embed<'a>(
         &'a self,
@@ -105,6 +122,13 @@ pub trait Provider: Send + Sync {
 }
 
 impl<P: Provider + ?Sized> Provider for Arc<P> {
+    #[cfg(feature = "runtime")]
+    fn converse<'a>(
+        &'a self,
+        request: &'a crate::runtime::ModelRequest,
+    ) -> BoxFuture<'a, Result<crate::runtime::ModelReply, ModelError>> {
+        (**self).converse(request)
+    }
     fn cache_namespace(&self) -> String {
         (**self).cache_namespace()
     }

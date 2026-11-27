@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        features: ["", "openai", "anthropic", "schemars"]
+        features: ["", "openai", "anthropic", "schemars", "runtime", "runtime,openai", "runtime,anthropic"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,4 +62,5 @@ jobs:
       - run: cargo run --locked --example record_replay
       - run: cargo run --locked --example production
       - run: cargo run --locked --example eval
+      - run: cargo run --locked --features runtime --example agent_loop
       - run: cargo package --locked --all-features
