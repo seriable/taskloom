@@ -49,8 +49,8 @@ pub(super) async fn load(
     config: &AppConfig,
     tools: &ToolRegistry,
     policy: &ToolPolicy,
+    store: &super::AppSkillStore,
 ) -> Result<CompiledSkills, RuntimeError> {
-    let store = FileSkillStore::new(config.state_dir.join("skills"));
     let mut compiled = CompiledSkills {
         skills: Vec::new(),
         roles: Vec::new(),

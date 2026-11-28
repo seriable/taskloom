@@ -4,6 +4,12 @@ The `v0.2.0-alpha.1` preview's `app` feature adds a packaged executable and a sh
 durable run controller. It includes `runtime`, both provider adapters and MCP.
 Library-only users keep the existing minimal default feature set.
 
+Current development sources also support explicit
+[SQL Application persistence](sql-application.md) with `app,database`, including
+the `database-migrate` command. File storage remains the default. The separate
+[multi-user service](multi-user-service.md) binds authenticated roles to explicit
+projects; the ordinary operator UI/API remains a single-operator surface.
+
 New source checkouts also provide pure configuration review and exact workflow
 preview/launch APIs. See [workflow design](workflow-design.md) for their additive
 paths, migration, deferred checks and current P2 acceptance limits.

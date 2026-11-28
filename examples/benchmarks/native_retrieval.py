@@ -117,6 +117,7 @@ def main():
     parser.add_argument("--key-env", default="TASKLOOM_LOCAL_API_KEY")
     parser.add_argument("--semantic-min-score", type=float, default=0.0)
     parser.add_argument("--lexical-weight", type=float, default=1.0)
+    parser.add_argument("--database",type=Path,help="explicit AppDatabase JSON; migrate first and set only its named URL environment")
     args = parser.parse_args()
     url = urllib.parse.urlsplit(args.embedding_url)
     if url.hostname not in {"127.0.0.1", "localhost", "::1"} or url.scheme != "http" or url.query or url.username:
@@ -134,6 +135,8 @@ def main():
         "key_env": args.key_env, "namespace": "qwen3-embedding-files-" + identity},
         "model": "Qwen/Qwen3-Embedding-0.6B", "currency": "USD", "input_micros_per_million_tokens": 0,
         "max_request_cost_micros": 0, "max_total_cost_micros": 0, "max_input_bytes": 131072, "timeout_ms": 60000}}}
+    if args.database:
+        config['database']=json.loads(args.database.read_text(encoding='utf-8'))
     config_path = root / "taskloom.json"
     save(config_path, config)
     save(root / "dataset.json", dataset)

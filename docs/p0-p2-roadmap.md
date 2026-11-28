@@ -375,7 +375,23 @@ selection, global quotas, queue/workers and operational/load acceptance remain
 unfinished. All P2.2 boxes remain open. See `multi-user-service.md` and
 `acceptance/p2-multiuser-20261128.json`.
 
-- [ ] SQLite and PostgreSQL transactional backends for required persistent state
+Later SQL Application increment: explicit backend selection now covers runtime
+and budget journals, workflows/sessions, corpus/memory, skill catalog/content,
+embedding index/spend and host identities. Explicit CLI migration establishes a
+stable dataset identity without rewriting legacy SDK journals; file-to-SQL bulk
+import remains unsupported. Both databases passed 15 short native API lifecycle
+controls, 11 separate-process SQL service authority/restart controls, real
+learned-index/ledger integration and quiescent backup/restore comparisons. The
+backup verifier excludes only newly generated diagnostic capture time and retains
+raw observations. Earlier harness, shutdown-reentry and fixture readiness faults
+remain visible. Actual SQL embedding relevance still failed both negative queries
+per backend, so P0.2 stays open. Browser SQL run/template/trace controls also passed.
+The bounded persistence gate below is accepted; global generation quotas,
+queue/workers, cross-process service control and load/deployment gates remain
+unfinished. See `sql-application.md` and
+`acceptance/p2-sql-application-20261128.json`.
+
+- [x] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
 - [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.
 - [ ] Durable task queue, cross-process workers, lease renewal/fencing and

@@ -27,6 +27,8 @@ def main():
     parser.add_argument('out',type=Path)
     parser.add_argument('--example',type=Path,required=True)
     parser.add_argument('--postgres-fixture',type=Path,required=True)
+    parser.add_argument('--sql-apps',action='store_true',help='select SQL for project Application state as well as identities')
+    parser.add_argument('--sqlite-database',type=Path,help='explicit existing owned SQLite acceptance database; adds fresh isolated test projects')
     args=parser.parse_args()
     root=args.out.resolve();root.mkdir(parents=True,exist_ok=False)
     example=args.example.resolve()
@@ -36,16 +38,17 @@ def main():
     if endpoint.hostname!='127.0.0.1' or endpoint.port!=public['loopback_port']:
         raise ValueError('owned loopback database required')
     report={'version':1,'completed':False,'cases':[],'failures':[],
-        'scope':'separate-process API authorization/revocation/restart, SQL identities and file project journals, offline fixture model',
+        'scope':'separate-process API authorization/revocation/restart, SQL identities and '+('SQL' if args.sql_apps else 'file')+' project journals, offline fixture model',
         'binary_sha256':hashlib.sha256(example.read_bytes()).hexdigest(),'postgres_public_provenance':public,
         'model_provenance':'explicit offline demo, never native API effectiveness, cost or latency evidence',
-        'limits':['Project Applications still use file journals; no SQL Application selection or durable queue/worker/quota acceptance.',
+        'limits':[('Project Applications explicitly use SQL in this campaign.' if args.sql_apps else 'Project Applications still use file journals in this campaign.')+' No durable queue/worker/quota acceptance.',
             'Project members share run/workflow/session history; user-private memory endpoints are disabled.',
             'Bearer files and database credential values stay private; the acceptance artifact excludes them.',
             'Revocation affects new requests; it does not retroactively cancel already-authorized active operations.',
             'Loopback HTTP is the tested transport; public TLS/reverse proxy/distributed deployment/load acceptance remains open.']}
     started=time.monotonic()
-    for backend,url in {'sqlite':'sqlite://'+quote(str(root/'identities.sqlite'),safe='')+'?mode=rwc&cache=private','postgres':pg}.items():
+    sqlite_path=args.sqlite_database.resolve() if args.sqlite_database else root/'identities.sqlite'
+    for backend,url in {'sqlite':'sqlite://'+quote(str(sqlite_path),safe='')+'?mode=rwc&cache=private','postgres':pg}.items():
         out=root/backend;out.mkdir();env=dict(os.environ,TASKLOOM_DATABASE_URL=url)
         result={'backend':backend,'checks':{},'failures':[]};process=None;log=None
         project='service-'+uuid.uuid4().hex
@@ -99,6 +102,7 @@ def main():
             for suffix in ['a','b']:
                 config=json.loads((Path(__file__).resolve().parent/('project-'+suffix+'.json')).read_text())
                 config['state_dir']=str(out/('state-'+suffix))
+                if args.sql_apps:config['database']={'url_env':'TASKLOOM_DATABASE_URL','tenant':'team-'+suffix,'project':project}
                 save(out/('app-'+suffix+'.json'),config)
             save(out/'host.json',{'listen':f'127.0.0.1:{port}','projects':[
                 {'tenant':'team-a','project':project,'config':'app-a.json'},
@@ -114,7 +118,8 @@ def main():
                 if status==200 and not snapshot['job']['active']:break
                 time.sleep(0.05)
             else:raise RuntimeError('offline run did not reach idle')
-            checks['actual_file_journal_reaches_completed']=snapshot['state']['report']['stop_reason']=='completed'
+            checks['actual_application_journal_reaches_completed']=snapshot['state']['report']['stop_reason']=='completed'
+            if args.sql_apps:checks['sql_mode_does_not_create_file_run_journals']=not (out/'state-a/runs').exists() and not (out/'state-b/runs').exists()
             save(out/'completed.json',snapshot)
             account=json.loads((out/'runner.json').read_text());account['memberships'][0]['role']='reader';save(out/'downgrade.json',account)
             command('put-user',out/'downgrade.json',catalog()['revision'],'local-admin')
@@ -125,7 +130,7 @@ def main():
             checks['catalog_contains_only_token_digests']=all(value not in json.dumps(current) for value in tokens.values())
             stop();start()
             status,restarted=call(prefix+'/runs/short','reader');save(out/'restarted.json',restarted)
-            checks['host_restart_keeps_file_state_and_sql_revocation']=status==200 and restarted==snapshot and call(prefix+'/identity','runner')[0]==401
+            checks['host_restart_keeps_application_state_and_sql_revocation']=status==200 and restarted==snapshot and call(prefix+'/identity','runner')[0]==401
             result['model_kind']='offline fixture; no native model API requests'
         except Exception as error:result['failures'].append(str(error))
         finally:stop()

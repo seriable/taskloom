@@ -40,6 +40,9 @@ pub fn preview_configuration(config: AppConfig) -> Result<AppConfigPreview, Runt
         return Err(config_error("state directory must be explicit"));
     }
     let mut credentials = BTreeSet::new();
+    if let Some(database) = &config.database {
+        credential(&database.url_env, &mut credentials)?;
+    }
     provider(&config.provider, &mut credentials)?;
     if !matches!(config.provider, AppProvider::Offline)
         && (config.limits.max_cost_micros.is_none()

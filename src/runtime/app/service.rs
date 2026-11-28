@@ -368,7 +368,7 @@ async fn diagnostics(
     Path((kind, id)): Path<(String, String)>,
 ) -> ApiResult {
     let target = super::DiagnosticTarget::parse(&kind)?;
-    let snapshot = super::diagnostic_snapshot(&app.config, target, &id).await?;
+    let snapshot = app.diagnostic_snapshot(target, &id).await?;
     Ok(Json(
         json!({"billing_boundaries":snapshot.billing_boundaries(),"export_binding":super::diagnostics::export_binding(&app.config,&snapshot)?,"export_destination":app.config.observability.as_ref().and_then(|c|c.otlp.as_ref()).map(|c|&c.endpoint),"snapshot":snapshot,"export_configured":app.telemetry.is_some()}),
     ))
@@ -388,9 +388,9 @@ async fn export_diagnostics(
         .telemetry
         .as_ref()
         .ok_or_else(|| config_error("OTLP export is not configured by the host"))?;
-    let snapshot =
-        super::diagnostic_snapshot(&app.config, super::DiagnosticTarget::parse(&kind)?, &id)
-            .await?;
+    let snapshot = app
+        .diagnostic_snapshot(super::DiagnosticTarget::parse(&kind)?, &id)
+        .await?;
     if input.source_revision_key != snapshot.source_revision_key
         || Some(input.export_binding) != super::diagnostics::export_binding(&app.config, &snapshot)?
     {
@@ -694,7 +694,7 @@ async fn search(
     ))
 }
 async fn retrieval_status(State(app): State<Arc<Application>>) -> ApiResult {
-    let mut status = super::retrieval::index_status(&app.config).await?;
+    let mut status = super::retrieval::index_status_with_stores(&app.config, &app.stores).await?;
     status["active_retrieval_binding"] = json!(app.retriever.identity());
     Ok(Json(status))
 }
@@ -716,8 +716,9 @@ async fn build_index(
     Json(input): Json<IndexBuild>,
 ) -> ApiResult {
     Ok(Json(
-        super::retrieval::build_index(
+        super::retrieval::build_index_with_stores(
             &app.config,
+            &app.stores,
             input.expected_revision,
             &input.expected_binding,
         )

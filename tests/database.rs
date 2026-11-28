@@ -640,6 +640,23 @@ async fn close_drains_releases(db: &SqlDatabase, url: &str) {
     admin.close().await;
 }
 
+async fn immediate_owner_reentry(db: &SqlDatabase) {
+    let store = db.runs(scope(&project()));
+    for _ in 0..64 {
+        let owner = store
+            .acquire("hot-reentry")
+            .await
+            .expect("a dropped owner must not cause spurious local occupancy");
+        assert!(
+            matches!(
+                store.acquire("hot-reentry").await,
+                Err(RuntimeError::Conflict(_))
+            ),
+            "a live owner must still exclude a second invocation"
+        );
+        drop(owner);
+    }
+}
 #[tokio::test]
 async fn sqlite_transactions_leases_namespaces_and_durable_sdk() {
     let dir = tempfile::tempdir().unwrap();
@@ -658,6 +675,7 @@ async fn sqlite_transactions_leases_namespaces_and_durable_sdk() {
     fencing_and_corruption(&db, &url).await;
     dispatch_boundary_guards(&db, &url).await;
     close_drains_releases(&db, &url).await;
+    immediate_owner_reentry(&db).await;
     let admin = sql(&url).await;
     sqlx::query("UPDATE taskloom_meta SET version=2 WHERE singleton=1")
         .execute(&admin)
@@ -682,5 +700,6 @@ async fn postgres_real_transactions_leases_namespaces_and_durable_sdk() {
     fencing_and_corruption(&db, &url).await;
     dispatch_boundary_guards(&db, &url).await;
     close_drains_releases(&db, &url).await;
+    immediate_owner_reentry(&db).await;
     db.close().await;
 }

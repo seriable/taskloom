@@ -77,7 +77,7 @@ pub struct ActivatedSkill {
     grant: SkillGrant,
 }
 impl ActivatedSkill {
-    pub(super) fn new(
+    pub(crate) fn new(
         reference: SkillRef,
         packages: BTreeMap<SkillRef, SkillPackage>,
         grant: SkillGrant,

@@ -10,6 +10,7 @@ mod planning;
 pub mod retrieval;
 mod service;
 mod skills;
+mod storage;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -21,8 +22,8 @@ use serde_json::json;
 
 use super::mcp::{McpClient, McpHttpConfig};
 use super::rag::{
-    Citation, CitedReport, FileCorpusStore, PdfLoader, RagTool, Retriever, SearchResult, WebClient,
-    WebFetchTool, WebSearch, WebSearchTool,
+    Citation, CitedReport, PdfLoader, RagTool, Retriever, SearchResult, WebClient, WebFetchTool,
+    WebSearch, WebSearchTool,
 };
 use super::*;
 use crate::CancelToken;
@@ -34,14 +35,19 @@ pub use planning::{preview_configuration, AppConfigPreview, DeclaredToolGrant};
 pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
 pub use service::{router, serve};
 pub use skills::{AppSkill, AppTemplateRequest};
+pub use storage::{
+    AppCorpusStore, AppDatabase, AppMemoryStore, AppRunStore, AppSessionStore, AppSkillStore,
+    AppStores, AppWorkflowStore,
+};
 
 pub struct Application {
     pub config: AppConfig,
-    pub runs: FileRunStore,
-    pub corpus: Arc<FileCorpusStore>,
-    pub workflows: workflow::FileWorkflowStore,
-    pub sessions: FileSessionStore,
-    pub memory: super::memory::FileMemoryStore,
+    pub stores: AppStores,
+    pub runs: AppRunStore,
+    pub corpus: Arc<AppCorpusStore>,
+    pub workflows: AppWorkflowStore,
+    pub sessions: AppSessionStore,
+    pub memory: AppMemoryStore,
     web: Option<Arc<WebClient>>,
     search: Option<Arc<WebSearch>>,
     pdf: Option<PdfLoader>,
@@ -97,25 +103,37 @@ impl Application {
         policy: ToolPolicy,
     ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
-        let retriever = retrieval::configured(&config).await?;
-        Self::with_retriever(config, model, tools, policy, retriever).await
+        let stores = AppStores::open(&config).await?;
+        let retriever = retrieval::configured_with_stores(&config, &stores).await?;
+        Self::with_stores(config, model, tools, policy, retriever, stores).await
     }
     /// The operator search API and model knowledge tool share this retriever.
     /// Build/load paid embedding indexes explicitly before opening the host.
     pub async fn with_retriever(
         config: AppConfig,
         model: Arc<dyn Model>,
+        tools: ToolRegistry,
+        policy: ToolPolicy,
+        retriever: Arc<dyn Retriever>,
+    ) -> Result<Arc<Self>, RuntimeError> {
+        let stores = AppStores::open(&config).await?;
+        Self::with_stores(config, model, tools, policy, retriever, stores).await
+    }
+    async fn with_stores(
+        config: AppConfig,
+        model: Arc<dyn Model>,
         mut tools: ToolRegistry,
         mut policy: ToolPolicy,
         retriever: Arc<dyn Retriever>,
+        stores: AppStores,
     ) -> Result<Arc<Self>, RuntimeError> {
         config.validate()?;
-        let label = config.label()?;
-        let corpus = Arc::new(FileCorpusStore::new(config.state_dir.join("knowledge")));
-        let runs = FileRunStore::new(config.state_dir.join("runs"));
-        let workflows = workflow::FileWorkflowStore::new(config.state_dir.join("workflows"));
-        let sessions = FileSessionStore::new(config.state_dir.join("sessions"));
-        let memory = super::memory::FileMemoryStore::new(config.state_dir.join("memory"));
+        let label = stores.label(&config)?;
+        let corpus = Arc::new(stores.corpus.clone());
+        let runs = stores.runs.clone();
+        let workflows = stores.workflows.clone();
+        let sessions = stores.sessions.clone();
+        let memory = stores.memory.clone();
         if config.knowledge {
             tools.register(RagTool::new(
                 "knowledge_search",
@@ -190,7 +208,7 @@ impl Application {
                 }
             }
         }
-        let compiled = skills::load(&config, &tools, &policy).await?;
+        let compiled = skills::load(&config, &tools, &policy, &stores.skills).await?;
         let telemetry = config
             .observability
             .as_ref()
@@ -199,6 +217,7 @@ impl Application {
             .transpose()?;
         let app = Arc::new(Self {
             config,
+            stores,
             runs,
             corpus,
             workflows,
@@ -421,7 +440,7 @@ impl Application {
         verify_report(&self.inspect(id).await?)
     }
     pub async fn list(&self) -> Result<Vec<RunSummary>, RuntimeError> {
-        let mut summaries = list_persisted(&self.runs).await?;
+        let mut summaries = self.runs.list().await?;
         for summary in &mut summaries {
             summary.job = self.job(&summary.id)?;
         }
@@ -437,12 +456,18 @@ impl Application {
         while self.jobs()?.values().any(|job| job.active) && tokio::time::Instant::now() < until {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+        if self.config.database.is_some() && self.jobs()?.values().any(|job| job.active) {
+            return Err(RuntimeError::Conflict(
+                "SQL application shutdown grace expired; invocations still own stores".into(),
+            ));
+        }
         for client in &self.clients {
             client.close().await?;
         }
         if let Some(exporter) = &self.telemetry {
             exporter.shutdown().await?;
         }
+        self.stores.close().await;
         Ok(())
     }
 }

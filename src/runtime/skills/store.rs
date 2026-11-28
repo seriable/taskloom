@@ -35,7 +35,7 @@ impl Default for SkillCatalog {
     }
 }
 impl SkillCatalog {
-    fn validate(&self) -> Result<(), RuntimeError> {
+    pub(crate) fn validate(&self) -> Result<(), RuntimeError> {
         if self.format != 1
             || self.revision != self.events.len() as u64
             || self.events.len() > 20_000

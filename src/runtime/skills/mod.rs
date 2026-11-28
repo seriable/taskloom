@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use activation::{ActivatedSkill, SkillActivationMode, SkillBinding, SkillGrant, SkillHost};
 pub use archive::read_skill_archive;
-pub use store::{FileSkillStore, SkillCatalog, SkillCatalogEntry};
+pub use store::{FileSkillStore, SkillCatalog, SkillCatalogEntry, SkillCatalogEvent};
 
 pub const SKILL_FORMAT: u32 = 1;
 const MAX_FILES: usize = 128;

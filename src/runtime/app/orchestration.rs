@@ -53,14 +53,14 @@ pub(super) struct RoleAgents<'a> {
 impl RoleAgents<'_> {
     pub(super) fn tasks<'a>(
         &'a self,
-        runs: &'a FileRunStore,
+        runs: &'a dyn RunStore,
     ) -> Result<WorkflowTasks<'a>, RuntimeError> {
         self.tasks_with_cancel_reason(runs, None)
     }
     /// Child runs attribute a live cancellation to the recorded operator.
     pub(super) fn tasks_with_cancel_reason<'a>(
         &'a self,
-        runs: &'a FileRunStore,
+        runs: &'a dyn RunStore,
         cancel_reason: Option<&Arc<CancelReason>>,
     ) -> Result<WorkflowTasks<'a>, RuntimeError> {
         let mut tasks = WorkflowTasks::new();
@@ -524,18 +524,14 @@ impl Application {
             .await
     }
     pub async fn list_workflows(&self) -> Result<Vec<Value>, RuntimeError> {
-        let mut summaries = list_states::<WorkflowState, _>(self.workflows.root().into(), ".workflow.json", |s| {
-            Ok(json!({"id":s.id,"status":s.status,"revision":s.revision,"nodes":s.nodes.len(),"budget":s.budget()?}))
-        }).await?;
+        let mut summaries = self.workflows.list().await?;
         for summary in &mut summaries {
             summary["job"] = json!(self.workflow_job(summary["id"].as_str().unwrap())?);
         }
         Ok(summaries)
     }
     pub async fn list_sessions(&self) -> Result<Vec<Value>, RuntimeError> {
-        let mut summaries = list_states::<Session, _>(self.sessions.root().into(), ".session.json", |s| {
-            Ok(json!({"id":s.id,"revision":s.revision,"turns":s.turns.len(),"active":s.active.map(|b|json!({"turn_id":b.turn_id,"run_id":b.run_id}))}))
-        }).await?;
+        let mut summaries = self.sessions.list().await?;
         for summary in &mut summaries {
             summary["job"] = json!(self.session_job(summary["id"].as_str().unwrap())?);
         }
@@ -565,7 +561,7 @@ fn validate_actor(actor: &str, note: &str) -> Result<(), RuntimeError> {
         Ok(())
     }
 }
-trait ListedState: serde::de::DeserializeOwned + Send + 'static {
+pub(super) trait ListedState: serde::de::DeserializeOwned + Send + 'static {
     fn id(&self) -> &str;
     fn validate(&self) -> Result<(), RuntimeError>;
 }
@@ -585,7 +581,10 @@ impl ListedState for Session {
         Session::validate(self)
     }
 }
-async fn list_states<T: ListedState, F: Fn(T) -> Result<Value, RuntimeError> + Send + 'static>(
+pub(super) async fn list_states<
+    T: ListedState,
+    F: Fn(T) -> Result<Value, RuntimeError> + Send + 'static,
+>(
     root: PathBuf,
     suffix: &'static str,
     project: F,

@@ -7,9 +7,9 @@ append-only administration audit. Every request authenticates the actual bearer
 and freshly checks its SQL project membership. Request ownership fields cannot
 choose an Application, state root, credential or tool grant.
 
-This is a bounded identity/service increment. Project Applications still use
-file journals. The durable queue, global quotas, SQL Application selection,
-distributed workers and operational/load acceptance remain unfinished. P2.2
+This is a bounded identity/service increment. Project Applications use file
+journals by default or explicitly configured [SQL persistence](sql-application.md).
+The durable queue, global quotas, distributed workers and operational/load acceptance remain unfinished. P2.2
 remains open. The existing single-operator `router`/CLI/UI is unchanged; selecting
 it does not enable the new multi-user boundary.
 
@@ -120,9 +120,10 @@ do not treat this bounded catalog as an unbounded identity provider. Failed CAS
 updates leave the original catalog unchanged. A database outage fails closed.
 Keep SQL credentials, the database and issued bearer files outside source.
 
-Core and knowledge backup examples in `sql-storage.md` do not constitute a
-coordinated backup of SQL identities plus all project file trees. Such deployment
-backup/restore and credential-rotation acceptance remains a P2 gate. Restoring
+The SQL Application backup example in `sql-application.md` verifies core state,
+skills, indexes/ledger and identity metadata for SQL projects. File-backed
+projects still need a coordinated backup of their file trees. Full deployment
+and credential-rotation acceptance remains a P2 gate. Restoring
 older identity data can also restore older revocation state; admission must
 remain stopped until operators review/rotate credentials. Historical audit has
 no bearer plaintext. No whole-application backup claim is made here.

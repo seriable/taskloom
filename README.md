@@ -47,7 +47,8 @@ The opt-in [`database` stores](docs/sql-storage.md) persist SDK runtime,
 knowledge and reviewed-memory state in SQLite/PostgreSQL. The separate
 [project-scoped JSON service](docs/multi-user-service.md) uses SQL identities,
 roles and live token revocation; its project Applications still use file
-journals. Durable service quotas/queues/workers and broader quality acceptance
+journals by default or explicitly configured [SQL Application stores](docs/sql-application.md).
+Durable service quotas/queues/workers and broader quality acceptance
 remain tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
 The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool

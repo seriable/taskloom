@@ -1,7 +1,6 @@
-use super::{config::config_error, AppConfig};
+use super::{config::config_error, AppConfig, AppStores, Application};
 use crate::runtime::{
-    observability::*, workflow::*, FileRunStore, FileSessionStore, RunState, RunStore,
-    RuntimeError, SessionStore,
+    observability::*, workflow::*, RunState, RunStore, RuntimeError, SessionStore,
 };
 use serde::{Deserialize, Serialize};
 
@@ -73,19 +72,44 @@ pub async fn diagnostic_snapshot(
     target: DiagnosticTarget,
     id: &str,
 ) -> Result<TraceSnapshot, RuntimeError> {
+    let stores = AppStores::open(config).await?;
+    let result = with_stores(config, &stores, target, id).await;
+    stores.close().await;
+    result
+}
+impl Application {
+    pub async fn diagnostic_snapshot(
+        &self,
+        target: DiagnosticTarget,
+        id: &str,
+    ) -> Result<TraceSnapshot, RuntimeError> {
+        with_stores(&self.config, &self.stores, target, id).await
+    }
+}
+async fn with_stores(
+    config: &AppConfig,
+    stores: &AppStores,
+    target: DiagnosticTarget,
+    id: &str,
+) -> Result<TraceSnapshot, RuntimeError> {
     match target {
         DiagnosticTarget::Run => super::valid_read_id(id)?,
         DiagnosticTarget::Workflow | DiagnosticTarget::Session => super::valid_id(id)?,
     }
-    let runs = FileRunStore::new(config.state_dir.join("runs")).with_max_bytes(16 * 1024 * 1024);
-    let namespace = config
+    let runs = &stores.runs;
+    let declared_namespace = config
         .observability
         .as_ref()
-        .and_then(|c| c.namespace.clone())
-        .unwrap_or_else(|| {
-            use sha2::{Digest, Sha256};
-            hex::encode(Sha256::digest(runs.root().to_string_lossy().as_bytes()))
-        });
+        .and_then(|c| c.namespace.clone());
+    let namespace = match declared_namespace {
+        Some(namespace) if config.database.is_some() => crate::runtime::state::fingerprint(&(
+            "app-sql-observability-v1",
+            stores.identity(),
+            namespace,
+        ))?,
+        Some(namespace) => namespace,
+        None => stores.identity().into(),
+    };
     match target {
         DiagnosticTarget::Run => TraceSnapshot::run(
             &namespace,
@@ -95,8 +119,8 @@ pub async fn diagnostic_snapshot(
                 .ok_or_else(|| config_error("diagnostic run not found"))?,
         ),
         DiagnosticTarget::Workflow => {
-            let state = FileWorkflowStore::new(config.state_dir.join("workflows"))
-                .with_max_bytes(16 * 1024 * 1024)
+            let state = stores
+                .workflows
                 .inspect(id)
                 .await?
                 .ok_or_else(|| config_error("diagnostic workflow not found"))?;
@@ -106,12 +130,12 @@ pub async fn diagnostic_snapshot(
                 .iter()
                 .filter_map(|n| workflow_run_id(&state, n))
                 .collect::<Vec<_>>();
-            let children = load_children(&runs, &ids).await?;
+            let children = load_children(runs, &ids).await?;
             TraceSnapshot::workflow(&namespace, &state, &children)
         }
         DiagnosticTarget::Session => {
-            let session = FileSessionStore::new(config.state_dir.join("sessions"))
-                .with_max_bytes(16 * 1024 * 1024)
+            let session = stores
+                .sessions
                 .load(id)
                 .await?
                 .ok_or_else(|| config_error("diagnostic session not found"))?;
@@ -122,12 +146,12 @@ pub async fn diagnostic_snapshot(
                 .map(|t| t.binding.run_id.as_str())
                 .chain(session.active.iter().map(|t| t.run_id.as_str()))
                 .collect::<Vec<_>>();
-            let children = load_children(&runs, &ids).await?;
+            let children = load_children(runs, &ids).await?;
             TraceSnapshot::session(&namespace, &session, &children)
         }
     }
 }
-async fn load_children(runs: &FileRunStore, ids: &[&str]) -> Result<Vec<RunState>, RuntimeError> {
+async fn load_children(runs: &dyn RunStore, ids: &[&str]) -> Result<Vec<RunState>, RuntimeError> {
     if ids.len() > 256 {
         return Err(config_error(
             "diagnostics support at most 256 children; inspect individual runs",

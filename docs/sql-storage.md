@@ -1,11 +1,12 @@
-# SQL runtime stores (SDK foundation)
+# SQL runtime stores
 
 The opt-in `database` feature supplies SQLite and PostgreSQL implementations
 of `RunStore`, `WorkflowStore`, `SessionStore`, `CorpusStore` and `MemoryStore`. Default features remain
-empty and the supported Rust version remains 1.86. The local Application,
-HTTP API, CLI and UI still select file stores. This increment does not supply
-multi-user authentication, quotas, a durable queue or distributed workers.
-P2.2 therefore remains unfinished.
+empty and the supported Rust version remains 1.86. The later
+[SQL Application integration](sql-application.md) explicitly selects these stores
+for the API/CLI/UI, skills and embedding state. [SQL identities](multi-user-service.md)
+protect a separate project-scoped service. Global quotas, a durable queue and
+distributed workers remain unfinished, so the full P2.2 package remains open.
 
 ## Explicit setup
 
@@ -79,7 +80,7 @@ not be summed or interpreted as independent charges.
 Existing file-based users need no change. Enabling the Cargo feature does not
 change their store. `migrate()` explicitly creates schema v1 in a transaction;
 an unsupported version is refused. There is currently no supported bulk
-file-to-SQL import, no SQL skills/embedding ledger, and no automatic
+file-to-SQL import and no automatic
 schema downgrade. Keep existing file state until a separately verified importer
 is available. Take a backup before future schema changes.
 
@@ -175,5 +176,6 @@ database passed ten controls, plus three backup/restore controls overall. Origin
 model output remains distinct from the human's edited value. This visible small
 example does not accept broad extraction quality, semantic retrieval or
 authenticated multi-user isolation. See
-`acceptance/p2-sql-knowledge-20261128.json`. All P2.2 boxes remain open until
-application persistence, authenticated service control and workers are accepted.
+`acceptance/p2-sql-knowledge-20261128.json`. At that increment all P2.2 boxes
+remained open. The later `sql-application.md` accepts the bounded persistence
+integration; global quotas, queue/workers and operational/load gates stay open.

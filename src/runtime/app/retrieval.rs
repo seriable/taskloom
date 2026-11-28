@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use super::{
     config::{config_error, secret},
-    AppConfig, AppProvider,
+    AppConfig, AppProvider, AppStores,
 };
 use crate::runtime::{
     rag::{
@@ -196,33 +196,175 @@ fn lock(root: &Path, name: &str) -> Result<Lock, RuntimeError> {
     Ok(Lock(file))
 }
 fn spend(root: &Path, cfg: &AppEmbedding) -> Result<Spend, RuntimeError> {
-    let binding = cfg.binding()?;
-    let record = read_json::<Spend>(&root.join("spend.json"), 8192)?.unwrap_or_else(|| Spend {
-        version: 1,
-        binding: binding.clone(),
-        ..Default::default()
-    });
-    if record.version != 1
-        || record.binding != binding
-        || record.usage_reported_requests > record.requests
-        || record
-            .settled_micros
-            .checked_add(record.reserved_or_unknown_micros)
-            .is_none()
-    {
-        return Err(config_error(
-            "embedding ledger binding/version is invalid; retain it and migrate explicitly",
-        ));
-    }
+    let record = read_json::<Spend>(&root.join("spend.json"), 8192)?.unwrap_or(Spend::empty(cfg)?);
+    record.validate(cfg)?;
     Ok(record)
+}
+impl Spend {
+    fn empty(cfg: &AppEmbedding) -> Result<Self, RuntimeError> {
+        Ok(Self {
+            version: 1,
+            binding: cfg.binding()?,
+            ..Default::default()
+        })
+    }
+    fn validate(&self, cfg: &AppEmbedding) -> Result<(), RuntimeError> {
+        if self.version != 1
+            || self.binding != cfg.binding()?
+            || self.usage_reported_requests > self.requests
+            || self
+                .settled_micros
+                .checked_add(self.reserved_or_unknown_micros)
+                .is_none()
+        {
+            return Err(config_error(
+                "embedding ledger binding/version is invalid; retain it and migrate explicitly",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone)]
+enum Resources {
+    File(PathBuf),
+    #[cfg(feature = "database")]
+    Sql {
+        objects: crate::runtime::database::SqlObjectStore,
+        identity: String,
+    },
+}
+enum BuildGuard {
+    File {
+        _lock: Lock,
+    },
+    #[cfg(feature = "database")]
+    Sql(crate::runtime::database::SqlObjectLease),
+}
+impl Resources {
+    fn new(config: &AppConfig, stores: &AppStores) -> Result<Self, RuntimeError> {
+        #[cfg(feature = "database")]
+        if let Some((db, ns)) = &stores.sql {
+            return Ok(Self::Sql {
+                objects: db.objects(ns.clone()),
+                identity: stores.identity().into(),
+            });
+        }
+        let _ = stores;
+        Ok(Self::File(root(config)?))
+    }
+    fn model_identity(&self, cfg: &AppEmbedding) -> Result<String, RuntimeError> {
+        Ok(match self {
+            Self::File(_) => format!("app-embedding-v1:{}", cfg.binding()?),
+            #[cfg(feature = "database")]
+            Self::Sql { identity, .. } => format!(
+                "app-embedding-sql-v1:{}",
+                fingerprint(&(cfg.binding()?, identity))?
+            ),
+        })
+    }
+    async fn spend(&self, cfg: &AppEmbedding) -> Result<Spend, RuntimeError> {
+        match self {
+            Self::File(root) => {
+                let root = root.clone();
+                let cfg = cfg.clone();
+                blocking(move || spend(&root, &cfg)).await
+            }
+            #[cfg(feature = "database")]
+            Self::Sql { objects, .. } => {
+                let record = objects
+                    .load::<Spend>("embedding-spend")
+                    .await?
+                    .unwrap_or(Spend::empty(cfg)?);
+                record.validate(cfg)?;
+                Ok(record)
+            }
+        }
+    }
+    async fn update<R: Send + 'static>(
+        &self,
+        cfg: &AppEmbedding,
+        operation: impl FnOnce(&mut Spend) -> Result<R, RuntimeError> + Send + 'static,
+    ) -> Result<R, RuntimeError> {
+        let cfg = cfg.clone();
+        match self {
+            Self::File(root) => {
+                let root = root.clone();
+                blocking(move || {
+                    let _lock = lock(&root, "spend.lock")?;
+                    let mut record = spend(&root, &cfg)?;
+                    let result = operation(&mut record)?;
+                    record.validate(&cfg)?;
+                    atomic_write(&root.join("spend.json"), &record, 8192)?;
+                    Ok(result)
+                })
+                .await
+            }
+            #[cfg(feature = "database")]
+            Self::Sql { objects, .. } => {
+                objects
+                    .modify("embedding-spend", Spend::empty(&cfg)?, move |record| {
+                        record.validate(&cfg)?;
+                        let result = operation(record)?;
+                        record.validate(&cfg)?;
+                        Ok(result)
+                    })
+                    .await
+            }
+        }
+    }
+    async fn index(&self) -> Result<Option<EmbeddingIndex>, RuntimeError> {
+        match self {
+            Self::File(root) => {
+                let path = root.join("index.json");
+                blocking(move || read_json(&path, INDEX_LIMIT)).await
+            }
+            #[cfg(feature = "database")]
+            Self::Sql { objects, .. } => objects.load("embedding-index").await,
+        }
+    }
+    async fn acquire(&self) -> Result<BuildGuard, RuntimeError> {
+        match self {
+            Self::File(root) => {
+                let root = root.clone();
+                Ok(BuildGuard::File {
+                    _lock: blocking(move || lock(&root, "index.lock")).await?,
+                })
+            }
+            #[cfg(feature = "database")]
+            Self::Sql { objects, .. } => {
+                Ok(BuildGuard::Sql(objects.acquire("embedding-index").await?))
+            }
+        }
+    }
+    async fn save(&self, index: EmbeddingIndex, guard: &BuildGuard) -> Result<(), RuntimeError> {
+        match (self, guard) {
+            (Self::File(root), BuildGuard::File { .. }) => {
+                let path = root.join("index.json");
+                blocking(move || atomic_write(&path, &index, INDEX_LIMIT)).await
+            }
+            #[cfg(feature = "database")]
+            (Self::Sql { .. }, BuildGuard::Sql(lease)) => lease.save(&index).await,
+            #[cfg(feature = "database")]
+            _ => Err(config_error(
+                "index build guard differs from storage backend",
+            )),
+        }
+    }
 }
 struct MeteredEmbedding {
     config: AppEmbedding,
-    root: PathBuf,
+    resources: Resources,
+    #[cfg(feature = "database")]
+    guard: Option<crate::runtime::database::SqlObjectLease>,
     provider: Arc<dyn crate::Provider>,
 }
 impl MeteredEmbedding {
-    fn new(config: AppEmbedding, root: PathBuf) -> Result<Self, RuntimeError> {
+    fn new(
+        config: AppEmbedding,
+        resources: Resources,
+        guard: Option<&BuildGuard>,
+    ) -> Result<Self, RuntimeError> {
+        let _ = guard;
         config.validate()?;
         let AppProvider::Openai {
             base_url, key_env, ..
@@ -240,19 +382,21 @@ impl MeteredEmbedding {
         );
         Ok(Self {
             config,
-            root,
+            resources,
+            #[cfg(feature = "database")]
+            guard: match guard {
+                Some(BuildGuard::Sql(lease)) => Some(lease.clone()),
+                _ => None,
+            },
             provider,
         })
     }
 }
 impl EmbeddingModel for MeteredEmbedding {
     fn identity(&self) -> String {
-        format!(
-            "app-embedding-v1:{}",
-            self.config
-                .binding()
-                .expect("serializable embedding configuration")
-        )
+        self.resources
+            .model_identity(&self.config)
+            .expect("serializable embedding configuration")
     }
     fn embed<'a>(
         &'a self,
@@ -272,30 +416,32 @@ impl EmbeddingModel for MeteredEmbedding {
                     "embedding inputs exceed configured request limits",
                 ));
             }
-            let root = self.root.clone();
             let cfg = self.config.clone();
-            blocking(move || {
-                let _lock = lock(&root, "spend.lock")?;
-                let mut record = spend(&root, &cfg)?;
-                let total = record
-                    .settled_micros
-                    .checked_add(record.reserved_or_unknown_micros)
-                    .and_then(|n| n.checked_add(cfg.max_request_cost_micros));
-                if record.overrun || total.is_none_or(|n| n > cfg.max_total_cost_micros) {
-                    return Err(config_error(
-                        "embedding spend cap exhausted or reported reservation overrun",
-                    ));
-                }
-                record.reserved_or_unknown_micros += cfg.max_request_cost_micros;
-                record.requests = record
-                    .requests
-                    .checked_add(1)
-                    .ok_or_else(|| config_error("embedding request counter overflow"))?;
-                atomic_write(&root.join("spend.json"), &record, 8192)
-            })
-            .await?;
+            self.resources
+                .update(&self.config, move |record| {
+                    let total = record
+                        .settled_micros
+                        .checked_add(record.reserved_or_unknown_micros)
+                        .and_then(|n| n.checked_add(cfg.max_request_cost_micros));
+                    if record.overrun || total.is_none_or(|n| n > cfg.max_total_cost_micros) {
+                        return Err(config_error(
+                            "embedding spend cap exhausted or reported reservation overrun",
+                        ));
+                    }
+                    record.reserved_or_unknown_micros += cfg.max_request_cost_micros;
+                    record.requests = record
+                        .requests
+                        .checked_add(1)
+                        .ok_or_else(|| config_error("embedding request counter overflow"))?;
+                    Ok(())
+                })
+                .await?;
             // Once reservation is saved, cancellation, timeout and protocol
             // errors keep it. There is no retry, fallback or silent refund.
+            #[cfg(feature = "database")]
+            if let Some(guard) = &self.guard {
+                guard.verify_ownership().await?;
+            }
             let response = tokio::time::timeout(
                 Duration::from_millis(self.config.timeout_ms),
                 self.provider.embed(&crate::EmbeddingRequest {
@@ -312,21 +458,31 @@ impl EmbeddingModel for MeteredEmbedding {
                 .div_ceil(1_000_000);
                 let actual = u64::try_from(actual)
                     .map_err(|_| config_error("embedding cost overflow; reservation retained"))?;
-                let root = self.root.clone();
                 let cfg = self.config.clone();
-                blocking(move || {
-                    let _lock = lock(&root, "spend.lock")?;
-                    let mut record = spend(&root, &cfg)?;
-                    record.reserved_or_unknown_micros = record.reserved_or_unknown_micros.checked_sub(cfg.max_request_cost_micros)
-                        .ok_or_else(|| config_error("embedding reservation missing"))?;
-                    record.settled_micros = record.settled_micros.checked_add(actual)
-                        .ok_or_else(|| config_error("embedding ledger overflow"))?;
-                    record.usage_reported_requests += 1;
-                    record.overrun |= actual > cfg.max_request_cost_micros;
-                    atomic_write(&root.join("spend.json"), &record, 8192)?;
-                    if record.overrun { return Err(config_error("embedding reported cost exceeded reservation; further dispatch blocked")); }
-                    Ok(())
-                }).await?;
+                let overrun = self
+                    .resources
+                    .update(&self.config, move |record| {
+                        record.reserved_or_unknown_micros = record
+                            .reserved_or_unknown_micros
+                            .checked_sub(cfg.max_request_cost_micros)
+                            .ok_or_else(|| config_error("embedding reservation missing"))?;
+                        record.settled_micros = record
+                            .settled_micros
+                            .checked_add(actual)
+                            .ok_or_else(|| config_error("embedding ledger overflow"))?;
+                        record.usage_reported_requests = record
+                            .usage_reported_requests
+                            .checked_add(1)
+                            .ok_or_else(|| config_error("embedding usage counter overflow"))?;
+                        record.overrun |= actual > cfg.max_request_cost_micros;
+                        Ok(record.overrun)
+                    })
+                    .await?;
+                if overrun {
+                    return Err(config_error(
+                        "embedding reported cost exceeded reservation; further dispatch blocked",
+                    ));
+                }
             }
             Ok(EmbeddingBatch {
                 identity: self.identity(),
@@ -339,6 +495,13 @@ fn root(config: &AppConfig) -> Result<PathBuf, RuntimeError> {
     std::path::absolute(config.state_dir.join("retrieval")).map_err(storage)
 }
 pub(super) async fn configured(config: &AppConfig) -> Result<Arc<dyn Retriever>, RuntimeError> {
+    let stores = AppStores::open(config).await?;
+    configured_with_stores(config, &stores).await
+}
+pub(super) async fn configured_with_stores(
+    config: &AppConfig,
+    stores: &AppStores,
+) -> Result<Arc<dyn Retriever>, RuntimeError> {
     config.retrieval.validate()?;
     let lexical: Arc<dyn Retriever> = Arc::new(ConfiguredLexicalRetriever::new(
         config.retrieval.lexical.clone(),
@@ -346,26 +509,17 @@ pub(super) async fn configured(config: &AppConfig) -> Result<Arc<dyn Retriever>,
     if config.retrieval.mode == RetrievalMode::Lexical {
         return Ok(lexical);
     }
-    let root = root(config)?;
-    let corpus = rag::FileCorpusStore::new(
-        root.parent()
-            .expect("retrieval directory has parent")
-            .join("knowledge"),
-    );
-    let path = root.join("index.json");
-    let index: EmbeddingIndex = blocking(move || {
-        read_json(&path, INDEX_LIMIT)?.ok_or_else(|| {
-            config_error("embedding index missing; explicitly build it in lexical mode first")
-        })
-    })
-    .await?;
+    let resources = Resources::new(config, stores)?;
+    let index = resources.index().await?.ok_or_else(|| {
+        config_error("embedding index missing; explicitly build it in lexical mode first")
+    })?;
     let cfg = config
         .retrieval
         .embedding
         .clone()
         .expect("validated hybrid configuration");
-    let model = Arc::new(MeteredEmbedding::new(cfg, root)?);
-    let snapshot = corpus.snapshot().await?;
+    let model = Arc::new(MeteredEmbedding::new(cfg, resources, None)?);
+    let snapshot = stores.corpus.snapshot().await?;
     let vector = Arc::new(
         VectorRetriever::new(index, model, &snapshot)?
             .with_min_score(config.retrieval.semantic_min_score)?,
@@ -387,6 +541,18 @@ pub async fn build_index(
     expected_revision: u64,
     expected_binding: &str,
 ) -> Result<Value, RuntimeError> {
+    let stores = AppStores::open(config).await?;
+    let result =
+        build_index_with_stores(config, &stores, expected_revision, expected_binding).await;
+    stores.close().await;
+    result
+}
+pub(super) async fn build_index_with_stores(
+    config: &AppConfig,
+    stores: &AppStores,
+    expected_revision: u64,
+    expected_binding: &str,
+) -> Result<Value, RuntimeError> {
     config.validate()?;
     if expected_binding != fingerprint(&config.retrieval)? {
         return Err(RuntimeError::Conflict(
@@ -398,21 +564,15 @@ pub async fn build_index(
         .embedding
         .clone()
         .ok_or_else(|| config_error("embedding service not configured"))?;
-    let root = root(config)?;
-    let corpus = rag::FileCorpusStore::new(
-        root.parent()
-            .expect("retrieval directory has parent")
-            .join("knowledge"),
-    );
-    let lock_root = root.clone();
-    let _lock = blocking(move || lock(&lock_root, "index.lock")).await?;
-    let snapshot = corpus.snapshot().await?;
+    let resources = Resources::new(config, stores)?;
+    let guard = resources.acquire().await?;
+    let snapshot = stores.corpus.snapshot().await?;
     if snapshot.revision != expected_revision {
         return Err(RuntimeError::Conflict(
             "corpus revision changed before index build".into(),
         ));
     }
-    let model = MeteredEmbedding::new(cfg, root.clone())?;
+    let model = MeteredEmbedding::new(cfg, resources.clone(), Some(&guard))?;
     // Validate every batch before spending on the first one.
     for batch in snapshot.chunks.chunks(32) {
         if batch.iter().map(|c| c.text.len()).sum::<usize>() > model.config.max_input_bytes {
@@ -422,7 +582,7 @@ pub async fn build_index(
         }
     }
     let index = EmbeddingIndex::build(&snapshot, &model).await?;
-    let current = corpus.snapshot().await?;
+    let current = stores.corpus.snapshot().await?;
     if fingerprint(&current)? != fingerprint(&snapshot)? {
         return Err(RuntimeError::Conflict(
             "corpus changed during build; old index retained, charges recorded".into(),
@@ -430,31 +590,32 @@ pub async fn build_index(
     }
     let count = index.vectors.len();
     let binding = fingerprint(&index)?;
-    blocking(move || atomic_write(&root.join("index.json"), &index, INDEX_LIMIT)).await?;
+    resources.save(index, &guard).await?;
     Ok(
         json!({"corpus_revision":expected_revision,"chunks":count,"index_binding":binding,"restart_required":true}),
     )
 }
 /// Status inspection does not load credentials or contact a provider.
 pub async fn index_status(config: &AppConfig) -> Result<Value, RuntimeError> {
+    let stores = AppStores::open(config).await?;
+    let result = index_status_with_stores(config, &stores).await;
+    stores.close().await;
+    result
+}
+pub(super) async fn index_status_with_stores(
+    config: &AppConfig,
+    stores: &AppStores,
+) -> Result<Value, RuntimeError> {
     config.validate()?;
-    let root = root(config)?;
-    let corpus = rag::FileCorpusStore::new(
-        root.parent()
-            .expect("retrieval directory has parent")
-            .join("knowledge"),
-    );
-    let path = root.join("index.json");
-    let index: Option<EmbeddingIndex> = blocking(move || read_json(&path, INDEX_LIMIT)).await?;
-    let snapshot = corpus.snapshot().await?;
+    let resources = Resources::new(config, stores)?;
+    let index = resources.index().await?;
+    let snapshot = stores.corpus.snapshot().await?;
     let validity = match (&index, &config.retrieval.embedding) {
-        (Some(index), Some(cfg)) => {
-            index.validate(&snapshot, &format!("app-embedding-v1:{}", cfg.binding()?))
-        }
+        (Some(index), Some(cfg)) => index.validate(&snapshot, &resources.model_identity(cfg)?),
         _ => Err(config_error("embedding index or configuration missing")),
     };
     let ledger = if let Some(cfg) = config.retrieval.embedding.clone() {
-        Some(blocking(move || spend(&root, &cfg)).await?)
+        Some(resources.spend(&cfg).await?)
     } else {
         None
     };

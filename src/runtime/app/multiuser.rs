@@ -53,6 +53,17 @@ pub fn router(
             ));
         }
         let namespace = DatabaseNamespace::new(&project.tenant, &project.project)?;
+        if project
+            .application
+            .config
+            .database
+            .as_ref()
+            .is_some_and(|db| db.tenant != project.tenant || db.project != project.project)
+        {
+            return Err(config(
+                "service scope differs from SQL application namespace",
+            ));
+        }
         if !scopes.insert((project.tenant.clone(), project.project.clone())) {
             return Err(config("duplicate multi-user project registration"));
         }
@@ -74,16 +85,32 @@ pub fn router(
             return Err(config("multi-user project state roots overlap"));
         }
         for store in [
-            project.application.runs.root(),
-            project.application.workflows.root(),
-            project.application.sessions.root(),
-            project.application.corpus.root(),
-            project.application.memory.root(),
-        ] {
+            project.application.runs.file_root(),
+            project.application.workflows.file_root(),
+            project.application.sessions.file_root(),
+            project.application.corpus.file_root(),
+            project.application.memory.file_root(),
+            project.application.stores.skills.file_root(),
+        ]
+        .into_iter()
+        .flatten()
+        {
             std::fs::create_dir_all(store).map_err(storage)?;
             let actual = std::fs::canonicalize(store).map_err(storage)?;
             if actual == root || !actual.starts_with(&root) {
                 return Err(config("multi-user store directory escapes project root"));
+            }
+        }
+        if project.application.config.database.is_none() {
+            let retrieval = project.application.config.state_dir.join("retrieval");
+            std::fs::create_dir_all(&retrieval).map_err(storage)?;
+            if !std::fs::canonicalize(&retrieval)
+                .map_err(storage)?
+                .starts_with(&root)
+            {
+                return Err(config(
+                    "multi-user retrieval directory escapes project root",
+                ));
             }
         }
         roots.push(root);

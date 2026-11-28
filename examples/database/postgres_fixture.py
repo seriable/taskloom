@@ -47,7 +47,10 @@ def create(root):
     port=int(bindings[0]['HostPort'])
     save(root/'credentials.json',{'TASKLOOM_TEST_POSTGRES_URL':f'postgres://taskloom_accept:{password}@127.0.0.1:{port}/taskloom_accept?sslmode=disable'})
     for _ in range(100):
-        ready=subprocess.run(['docker','exec',identity,'pg_isready','-U','taskloom_accept','-d','taskloom_accept'],capture_output=True,timeout=5)
+        # Official images briefly accept Unix-socket connections in their
+        # init-only server before shutting it down. Wait for the final TCP
+        # listener, not that transient socket readiness.
+        ready=subprocess.run(['docker','exec',identity,'pg_isready','-h','127.0.0.1','-U','taskloom_accept','-d','taskloom_accept'],capture_output=True,timeout=5)
         if ready.returncode==0:break
         time.sleep(0.1)
     else:raise RuntimeError('owned PostgreSQL readiness deadline reached; ownership file retained')

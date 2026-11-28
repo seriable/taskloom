@@ -1,13 +1,18 @@
 //! Opt-in SQLite/PostgreSQL runtime journals with namespace-bound keys and
 //! renewable, database-clock leases. This SDK module does not authenticate an
-//! HTTP caller, install a task queue, or select a database in the local app.
+//! HTTP caller or install a task queue. The optional app selects these stores
+//! only through explicit database configuration and migration.
 mod identity;
 mod knowledge;
+mod objects;
+mod skills;
 pub use identity::{
     ApiToken, AuthenticatedActor, IdentityEvent, IdentitySnapshot, IssuedToken, ProjectMembership,
     ProjectPermission, ProjectRole, ServiceTokenRecord, ServiceUser, SqlIdentityStore,
 };
 pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
+pub use objects::{SqlObjectLease, SqlObjectStore};
+pub use skills::SqlSkillStore;
 use std::path::Path;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -16,6 +21,7 @@ use std::sync::{
 use std::time::Duration;
 
 use futures_util::future::BoxFuture;
+use futures_util::TryStreamExt;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sqlx::{
     any::{AnyPoolOptions, AnyRow},
@@ -204,6 +210,10 @@ impl SqlDatabase {
     /// Stop active invocations first. Drain already-dropped lease releases
     /// before closing the pool; a killed process still relies on database TTL.
     pub async fn close(&self) {
+        let _ = self.drain_releases().await;
+        self.0.pool.close().await;
+    }
+    async fn drain_releases(&self) -> Result<(), RuntimeError> {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
         loop {
             let notified = self.0.release_notify.notified();
@@ -213,10 +223,12 @@ impl SqlDatabase {
                 break;
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                break;
+                return Err(conflict(
+                    "dropped SQL owners are still releasing; retry explicitly",
+                ));
             }
         }
-        self.0.pool.close().await;
+        Ok(())
     }
     /// Versioned, transactional DDL. No legacy file data is silently imported.
     pub async fn migrate(&self) -> Result<(), RuntimeError> {
@@ -239,7 +251,28 @@ impl SqlDatabase {
         }
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_records (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,revision BIGINT NOT NULL CHECK(revision>=0),body TEXT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_leases (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,owner TEXT NOT NULL,epoch BIGINT NOT NULL CHECK(epoch>0),expires_ms BIGINT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
+        let identity_key = dataset_key()?;
+        let value = uuid::Uuid::new_v4().to_string();
+        let body = self.serialize(&identity_key, &value)?;
+        sqlx::query("INSERT INTO taskloom_records(namespace,family,object_id,revision,body) VALUES($1,$2,$3,0,$4) ON CONFLICT(namespace,family,object_id) DO NOTHING")
+            .bind(&identity_key.namespace.0).bind(identity_key.family).bind(&identity_key.id).bind(body)
+            .execute(&mut *tx).await.map_err(database_error)?;
+        parse_dataset(
+            self.read_tx(&mut tx, &identity_key)
+                .await?
+                .ok_or_else(|| storage("database identity missing"))?,
+        )?;
         tx.commit().await.map_err(database_error)
+    }
+    /// Stable nonsecret dataset identity. Explicit migration establishes it;
+    /// backup/restore retains it and rotating database credentials does not
+    /// alter durable host contracts. Legacy schema-v1 stores must rerun migrate.
+    pub async fn identity(&self) -> Result<String, RuntimeError> {
+        parse_dataset(
+            self.read(&dataset_key()?).await?.ok_or_else(|| {
+                config("database dataset identity missing; run explicit migration")
+            })?,
+        )
     }
     pub fn runs(&self, namespace: DatabaseNamespace) -> SqlRunStore {
         SqlRunStore {
@@ -269,6 +302,14 @@ impl SqlDatabase {
     /// authenticated, scoped operations rather than this raw store.
     pub fn identities(&self) -> SqlIdentityStore {
         SqlIdentityStore::new(self.clone())
+    }
+    /// Host-only auxiliary records, e.g. explicitly built embedding indexes
+    /// and their independent spending journal. Not an HTTP object-write API.
+    pub fn objects(&self, namespace: DatabaseNamespace) -> SqlObjectStore {
+        SqlObjectStore::new(self.clone(), namespace)
+    }
+    pub fn skills(&self, namespace: DatabaseNamespace) -> SqlSkillStore {
+        SqlSkillStore::new(self.clone(), namespace)
     }
     async fn schema(&self) -> Result<(), RuntimeError> {
         let value: Option<i64> =
@@ -308,6 +349,39 @@ impl SqlDatabase {
             .map_err(database_error)?;
         row.map(|r| decode_record(r, key.clone(), self.0.options.max_record_bytes))
             .transpose()
+    }
+    async fn list<T>(
+        &self,
+        namespace: &DatabaseNamespace,
+        family: &'static str,
+        parse: impl Fn(Record) -> Result<T, RuntimeError>,
+    ) -> Result<Vec<T>, RuntimeError> {
+        self.schema().await?;
+        let query=format!("SELECT object_id,revision,{} AS payload FROM taskloom_records WHERE namespace=$1 AND family=$2 ORDER BY object_id LIMIT $3",self.0.backend.body());
+        let mut rows = sqlx::query(&query)
+            .bind(&namespace.0)
+            .bind(family)
+            .bind(1000_i64)
+            .bind((self.0.options.max_record_bytes + 1) as i32)
+            .fetch(&self.0.pool);
+        let mut values = Vec::new();
+        let mut bytes = 0_u64;
+        while let Some(row) = rows.try_next().await.map_err(database_error)? {
+            let id: String = row.try_get("object_id").map_err(database_error)?;
+            let record = decode_record(
+                row,
+                RecordKey::new(namespace.clone(), family, &id)?,
+                self.0.options.max_record_bytes,
+            )?;
+            bytes = bytes.saturating_add(record.body.len() as u64);
+            if bytes > MAX_BYTES {
+                return Err(RuntimeError::StorageLimit(
+                    "database listing exceeds 64MiB; inspect individual records".into(),
+                ));
+            }
+            values.push(parse(record)?);
+        }
+        Ok(values)
     }
     async fn read_tx(
         &self,
@@ -373,6 +447,11 @@ impl SqlDatabase {
             .ok_or_else(|| storage("locked database record is absent"))
     }
     async fn acquire(&self, key: RecordKey) -> Result<Arc<Lease>, RuntimeError> {
+        // A prior SDK operation may just have dropped its final owner. Await
+        // its already-enqueued release on this pool, rather than racing it and
+        // reporting a spurious occupied record on immediate resume. This never
+        // retries an invocation or steals a live/foreign process's lease.
+        self.drain_releases().await?;
         self.schema().await?;
         let owner = uuid::Uuid::new_v4().to_string();
         let now = self.0.backend.now();
@@ -631,6 +710,15 @@ pub struct SqlRunStore {
     namespace: DatabaseNamespace,
 }
 impl SqlRunStore {
+    /// At most 1000 validated records / 64MiB, ordered by ID.
+    pub async fn list(&self) -> Result<Vec<RunState>, RuntimeError> {
+        self.db
+            .list(&self.namespace, "run", |row| {
+                let id = row.key.id.clone();
+                parse_run(row, &id)
+            })
+            .await
+    }
     /// Read the scoped reservation journal without taking ownership. A newer
     /// full checkpoint may contain a later settled budget generation.
     pub async fn inspect_budget(&self, id: &str) -> Result<Option<BudgetSnapshot>, RuntimeError> {
@@ -784,6 +872,16 @@ pub struct SqlWorkflowStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
 }
+impl SqlWorkflowStore {
+    pub async fn list(&self) -> Result<Vec<WorkflowState>, RuntimeError> {
+        self.db
+            .list(&self.namespace, "workflow", |row| {
+                let id = row.key.id.clone();
+                parse_workflow(row, &id)
+            })
+            .await
+    }
+}
 impl WorkflowStore for SqlWorkflowStore {
     fn acquire<'a>(
         &'a self,
@@ -873,6 +971,16 @@ fn parse_workflow(row: Record, id: &str) -> Result<WorkflowState, RuntimeError> 
 pub struct SqlSessionStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
+}
+impl SqlSessionStore {
+    pub async fn list(&self) -> Result<Vec<Session>, RuntimeError> {
+        self.db
+            .list(&self.namespace, "session", |row| {
+                let id = row.key.id.clone();
+                parse_session(row, &id)
+            })
+            .await
+    }
 }
 impl SessionStore for SqlSessionStore {
     fn max_bytes(&self) -> Option<u64> {
@@ -972,6 +1080,22 @@ fn conflict(value: &str) -> RuntimeError {
 }
 fn storage(value: impl std::fmt::Display) -> RuntimeError {
     RuntimeError::Storage(value.to_string())
+}
+fn dataset_key() -> Result<RecordKey, RuntimeError> {
+    RecordKey::new(
+        DatabaseNamespace::new("_taskloom_control", "storage")?,
+        "metadata",
+        "dataset",
+    )
+}
+fn parse_dataset(row: Record) -> Result<String, RuntimeError> {
+    let value: String = row.parse()?;
+    let uuid =
+        uuid::Uuid::parse_str(&value).map_err(|_| storage("invalid database dataset identity"))?;
+    if row.revision != 0 || uuid.get_version_num() != 4 || uuid.to_string() != value {
+        return Err(storage("invalid database dataset identity"));
+    }
+    Ok(value)
 }
 fn database_error(error: sqlx::Error) -> RuntimeError {
     // URLs/passwords, SQL parameters and server error details are not API data.

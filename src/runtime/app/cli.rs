@@ -13,6 +13,7 @@ use serde::Serialize;
 const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   init FILE                         write offline configuration (create only)\n\
   config-check FILE                 review proposed configuration without services/secrets\n\
+  database-migrate                  explicitly migrate configured SQL schema/dataset identity\n\
   serve [127.0.0.1:8080]             API/UI; TASKLOOM_API_TOKEN required\n\
   run ID PROMPT                     create and execute a durable run\n\
   resume ID                         resume a persisted run\n\
@@ -86,6 +87,20 @@ pub async fn run(
         return Ok(());
     }
     let config = AppConfig::load(&config_path).await?;
+    if args[0] == "database-migrate" {
+        if args.len() != 1 {
+            return Err(HELP.into());
+        }
+        let database = config
+            .database
+            .as_ref()
+            .ok_or("SQL database configuration is required")?;
+        let identity = database.migrate().await?;
+        output(
+            &serde_json::json!({"schema_version":1,"dataset_identity":identity,"tenant":database.tenant,"project":database.project,"migration_applied":true}),
+        )?;
+        return Ok(());
+    }
     if args[0] == "benchmark" {
         if args.len() != 4 {
             return Err(HELP.into());
@@ -138,11 +153,12 @@ pub async fn run(
         return Ok(());
     }
     // Inspection/import do not initialize a model or contact MCP services.
-    let runs = super::super::FileRunStore::new(config.state_dir.join("runs"));
-    let corpus = super::super::rag::FileCorpusStore::new(config.state_dir.join("knowledge"));
+    let stores = super::AppStores::open(&config).await?;
+    let runs = stores.runs.clone();
+    let corpus = stores.corpus.clone();
     if args[0] == "skills" || args[0].starts_with("skill-") {
         use super::super::skills::*;
-        let store = FileSkillStore::new(config.state_dir.join("skills"));
+        let store = &stores.skills;
         match args[0].as_str() {
             "skills" if args.len() == 1 => output(&store.catalog().await?)?,
             "skill-install" if args.len() == 3 => {
@@ -187,7 +203,7 @@ pub async fn run(
             .as_ref()
             .ok_or("long-term memory is not enabled by the host")?;
         let access = memory.access()?;
-        let store = FileMemoryStore::new(config.state_dir.join("memory"));
+        let store = stores.memory.clone();
         let manager = MemoryManager::new(&store);
         match args[0].as_str() {
             "memory" if args.len() == 1 => output(&manager.snapshot(&access).await?)?,
@@ -237,15 +253,14 @@ pub async fn run(
                 access.require_curator()?;
                 let input: super::MemoryExtract = decision_file(&args[1]).await?;
                 // Load no MCP/tool credentials for this tool-less operation.
-                let sessions =
-                    super::super::FileSessionStore::new(config.state_dir.join("sessions"));
+                let sessions = stores.sessions.clone();
                 let session = super::super::SessionManager::new(&sessions)
                     .load(&input.session_id)
                     .await?;
                 let model = config.model()?;
                 let tools = super::super::ToolRegistry::new();
                 let agent = super::super::AgentLoop::new(model.as_ref(), &tools, &config.model)
-                    .with_label(config.label()?)
+                    .with_label(stores.label(&config)?)
                     .with_limits(config.limits.clone())
                     .with_context(config.context.clone())
                     .with_output_tokens(config.output_tokens);
@@ -261,7 +276,11 @@ pub async fn run(
                         &agent,
                         &runs,
                     )
-                    .await?;
+                    .await;
+                // This early CLI branch also owns model-attempt SQL leases.
+                // Finish their queued release before successful/error exit.
+                stores.close().await;
+                let extracted = extracted?;
                 output(&extracted)?;
                 if !extracted.proposals_recorded {
                     return Err(
@@ -310,7 +329,7 @@ pub async fn run(
             return Ok(());
         }
         "list" if args.len() == 1 => {
-            output(&super::list_persisted(&runs).await?)?;
+            output(&runs.list().await?)?;
             return Ok(());
         }
         "report" if args.len() == 2 => {
@@ -410,7 +429,7 @@ pub async fn run(
         _ => {}
     }
     let app = Application::open(config).await?;
-    match args[0].as_str() {
+    let outcome:Result<(),Box<dyn std::error::Error>>=async {match args[0].as_str() {
         "serve" if args.len() <= 2 => {
             let address = args
                 .get(1)
@@ -437,12 +456,13 @@ pub async fn run(
             });
             let workers = async {
                 if accepting_stopped.await.is_ok() {
-                    let _ = app.shutdown(Duration::from_secs(5)).await;
-                }
+                    app.shutdown(Duration::from_secs(5)).await
+                }else{Ok(())}
             };
             let server = std::future::IntoFuture::into_future(server);
-            let (served, ()) = tokio::join!(server, workers);
+            let (served, stopped) = tokio::join!(server, workers);
             served?;
+            stopped?;
         }
         "run" if args.len() == 3 => {
             app.start(&args[1], &args[2]).await?;
@@ -477,6 +497,15 @@ pub async fn run(
             output(&app.reconcile(&args[1], &args[2], decision).await?)?;
         }
         _ => return Err(HELP.into()),
+    }
+    Ok(())}.await;
+    if args[0] != "serve" {
+        let shutdown = app.shutdown(Duration::from_secs(5)).await;
+        stores.close().await;
+        outcome?;
+        shutdown?;
+    } else {
+        outcome?;
     }
     Ok(())
 }
