@@ -33,7 +33,7 @@ trial is a controlled integration baseline, not an independent API benchmark.
 - [x] Real model decisions through an explicitly configured local or remote
   native API, with prompts, outputs, tool observations, framework/model versions,
   cost/uncertainty, wall time and failure reasons retained.
-- [ ] Actual DAG/PEER lifecycle acceptance, including process interruption,
+- [x] Actual DAG/PEER lifecycle acceptance, including process interruption,
   approval occupancy, cancellation and no repeated uncertain writes.
 - [x] Comparable adapters/results for the applicable capabilities of DeerFlow,
   agentUniverse and LangGraph under the same model, task and spending rules.
@@ -148,6 +148,50 @@ explicit reservation-timing requirement. Exact matches do not establish truth
 or complete task coverage. Failures remain retained in the new acceptance
 receipt; see `final-output.md` and
 `acceptance/p0-output-contract-20261128.json`. P0 remains open.
+
+Later 2026-11-28 explicit-source/native increment: an opt-in `selected_sources`
+contract resolves exact executed chunk IDs into labelled host-authored full-body
+quotations, with optional host bibliography. It never claims those quotations
+were authored by the model or that source selection proves entailment. Original
+answer schemas, exact run-local evidence, frozen bindings and bounded repairs
+still apply. Old inline/quote contracts remain strict. Native Instruct-2507
+collaboration passed two of three V9 cases; a separate PEER approval/kill/restart/
+observed-reconciliation/cancellation task passed sixteen controls and accounts
+for thirteen actual zero-priced local requests. The earlier fabricated-write
+and readiness failures remain failed. Together with the preceding actual DAG
+write-crash/read-error probes this accepts the bounded lifecycle box above,
+without claiming long-task or distributed-inference quality.
+
+The owner subsequently selected the actual Alibaba token-plan `qwen3.8-max`
+API. A durable finite request-count transport now separates prepaid allowance
+from token-cost accounting and forbids another endpoint/model fallback. Native
+semantic controls agreed on all eighteen attached-evidence labels, eighteen
+corpus labels and all seven contradictions in isolated contexts. These visible
+same-model development labels are not an independent truth oracle. V9 remote
+collaboration scored one of three due to fenced reviewer JSON. V11 opts planner/
+reviewer into the existing one-repair schema contract; original failures and
+late durable completion observations remain separately recorded.
+
+The first remote twelve-turn real-document session passed reference retention,
+fresh source coverage, actual host restart, compression and terminal reentry.
+A separate full-task audit found four overlength original answers, so it does
+not establish full quality acceptance. Strict original-answer length validation
+and explicit reporting address that missing gate without truncation or expected
+reference injection. Earlier 4B semantic/long-session failures remain retained.
+See `selected-sources.md`, `native-subscription-evaluation.md` and
+`acceptance/p0-native-subscription-20261128.json` for exact conditions,
+subsequent bounded results and limits.
+General/default retrieval and broader task/semantic-quality gates keep P0 and
+the Goal open; no main publication is accepted by this increment.
+
+The subsequent strict history run passed seven runtime/provenance/length gates
+in 27 requests. Actual-answer judgments then agreed with non-blind session
+reference labels on only 10/13 citation and 9/13 corpus cases (one case is a
+separate contradiction control), failing both 85% gates despite no execution
+errors. Unsupported final operational advice remains visible. All remote
+development campaigns together used 177 HTTP attempts under the 200-attempt
+allocation, plus the separate five-request connection smoke. Structural passes
+therefore do not close the semantic-quality requirement or the Goal.
 
 ## P0.2 — Default research retrieval
 

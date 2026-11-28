@@ -524,6 +524,18 @@ pub fn verify_report_with_provenance(state: &RunState) -> Result<serde_json::Val
                 .resolve_located(&state.report)
                 .map_err(|e| config::config_error(&e))?;
             value["rendering"] = json!({"type":"verified_source_locators","original":resolved.original,"mappings":resolved.mappings,"model_transcript_unchanged":true});
+        } else if let FinalOutputPolicy::SelectedSources { bibliography, .. } = policy {
+            let original: super::rag::SourceSelectionReport = serde_json::from_str(
+                state
+                    .report
+                    .final_text()
+                    .ok_or_else(|| config::config_error("run has no completed report"))?,
+            )
+            .map_err(super::store::storage)?;
+            value["rendering"] = json!({"type":"host_selected_source_bodies","original":original,
+                "model_transcript_unchanged":true,"quotations_generated_by_host":true,
+                "source_list_generated_by_host":bibliography,
+                "quote_scope":"full exact retrieved chunk bodies; source selection does not establish semantic claim support"});
         }
     }
     Ok(value)

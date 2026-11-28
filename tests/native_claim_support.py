@@ -11,6 +11,18 @@ spec.loader.exec_module(module)
 
 
 class ScoringControls(unittest.TestCase):
+    def test_citation_role_context_cannot_read_corpus_or_expected_labels(self):
+        attached=[{'chunk_id':'a'*64,'quote':'The switch is off.'}]
+        corpus=[{'document_id':'private-to-corpus-judge','body':'A separate source says the car is blue.'}]
+        request=module.separate_judge_request(3,'The car is blue.',attached,corpus)
+        first,second=request['definition']['nodes']
+        self.assertEqual(first['params'],{'claim':'The car is blue.','evidence':attached})
+        self.assertNotIn('private-to-corpus-judge',str(first))
+        self.assertEqual(second['params']['evidence'],corpus)
+        self.assertEqual(first['depends_on'],[])
+        self.assertEqual(second['depends_on'],[])
+        self.assertIsNone(request['input'])
+        self.assertNotIn('expected',str(request))
     def test_error_and_missing_native_records_cannot_pass_or_leave_denominator(self):
         gates = {'minimum_cited_support_agreement': .85, 'minimum_corpus_factuality_agreement': .85,
                  'required_known_contradictions_rejected': 1, 'max_errors': 0}

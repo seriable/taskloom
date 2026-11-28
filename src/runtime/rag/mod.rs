@@ -7,6 +7,7 @@ mod located;
 #[cfg(feature = "research")]
 mod pdf;
 mod retrieval;
+mod selected;
 pub(crate) use retrieval::terms as memory_terms;
 #[cfg(feature = "research")]
 mod web;
@@ -35,6 +36,7 @@ pub use retrieval::{
     LexicalRetriever, QuotePolicy, RagTool, RetrievalQuery, Retriever, ScoredChunk, SearchResult,
     VerifiedReport,
 };
+pub use selected::SourceSelectionReport;
 #[cfg(feature = "research")]
 pub use web::{
     WebAccess, WebClient, WebFetchTool, WebSearch, WebSearchConfig, WebSearchHit, WebSearchTool,

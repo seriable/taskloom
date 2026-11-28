@@ -103,3 +103,29 @@ The helper's `--fail-first-status-once` option defaults off and records a
 persisted fault marker under its explicit note directory. Later reads return
 actual status. No runtime, API or checkpoint migration is needed. Existing
 read/write examples retain their behavior when the new option is absent.
+
+## Native PEER lifecycle
+
+`native_workflow_crash.py --peer` keeps the original two-role DAG as its default
+and adds a real native planner/executor/writer/reviewer configuration. The
+planner chooses two tasks, overlapping executor lifecycles perform append/status
+work, and writer/reviewer have only the host's read-only status grant. Exact
+approval precedes the single fsynced effect. Pending approval reentry, a second
+live host's ownership refusal, process death during the held result, unchanged
+uncertain reentry, actual observation and labelled reconciliation remain distinct.
+A separate native cancellation revokes a second pending append and preserves
+terminal reentry without another effect.
+
+The verified Qwen3-4B-Instruct-2507 probe passed sixteen controls, with thirteen
+native requests (nine main, four cancellation), 8,453 input / 268 output tokens
+and a 19,476ms campaign wall time. GPU inference simultaneity is not claimed.
+The first PEER probe failed before approval/effect because the model read status
+but claimed an append; the actual status check and independent reviewer refused
+it. That failed result is retained, not repaired into a fictitious write.
+
+Raw older budget journals can show an in-flight attempt even after a newer
+settled checkpoint. The separate newest-generation audit finds all latest
+budgets settled, without erasing the old records. Later helper metadata captures
+these generations directly and refuses conflicting snapshots at equal generation.
+No paid rerun was made solely to refresh that metadata. This accepts bounded
+DAG/PEER interruption/authority behavior, not general semantic task quality.

@@ -5,7 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    rag::{CitedReport, LocatedReport, ResolvedLocatedReport, SearchResult, VerifiedReport},
+    rag::{
+        CitedReport, LocatedReport, ResolvedLocatedReport, SearchResult, SourceSelectionReport,
+        VerifiedReport,
+    },
     state::fingerprint,
     Message, RunEventKind, RunReport, RuntimeError, ToolDefinition, ToolPolicy,
 };
@@ -51,6 +54,24 @@ pub enum FinalOutputPolicy {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         answer_schema: Option<Value>,
     },
+    /// Model selects exact retrieved chunk IDs; canonical quotes are full
+    /// source bodies generated explicitly by the host. No model quote repair.
+    SelectedSources {
+        #[serde(default = "knowledge_tool")]
+        retrieval_tools: BTreeSet<String>,
+        #[serde(default = "one_source")]
+        min_sources: usize,
+        #[serde(default)]
+        required_documents: BTreeSet<String>,
+        #[serde(default)]
+        max_repairs: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer_schema: Option<Value>,
+        /// Host renders an answer-level source list; inline markers are not
+        /// required. Existing supplied markers still require exact sources.
+        #[serde(default, skip_serializing_if = "is_false")]
+        bibliography: bool,
+    },
     JsonSchema {
         schema: Value,
         #[serde(default)]
@@ -62,6 +83,9 @@ fn knowledge_tool() -> BTreeSet<String> {
 }
 fn one_source() -> usize {
     1
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 impl FinalOutputPolicy {
     pub fn cited_report(max_repairs: usize) -> Self {
@@ -82,12 +106,35 @@ impl FinalOutputPolicy {
             answer_schema: None,
         }
     }
+    pub fn selected_sources(max_repairs: usize) -> Self {
+        Self::SelectedSources {
+            retrieval_tools: knowledge_tool(),
+            min_sources: 1,
+            required_documents: BTreeSet::new(),
+            max_repairs,
+            answer_schema: None,
+            bibliography: false,
+        }
+    }
+    pub fn with_host_bibliography(mut self) -> Result<Self, RuntimeError> {
+        if let Self::SelectedSources { bibliography, .. } = &mut self {
+            *bibliography = true;
+            Ok(self)
+        } else {
+            Err(configuration(
+                "host bibliography requires the explicit selected_sources contract",
+            ))
+        }
+    }
     pub fn citation_tools(&self) -> Option<&BTreeSet<String>> {
         match self {
             Self::CitedReport {
                 retrieval_tools, ..
             }
             | Self::LocatedCitedReport {
+                retrieval_tools, ..
+            }
+            | Self::SelectedSources {
                 retrieval_tools, ..
             } => Some(retrieval_tools),
             Self::JsonSchema { .. } => None,
@@ -98,7 +145,8 @@ impl FinalOutputPolicy {
     pub fn with_answer_schema(mut self, schema: Value) -> Result<Self, RuntimeError> {
         match &mut self {
             Self::CitedReport { answer_schema, .. }
-            | Self::LocatedCitedReport { answer_schema, .. } => *answer_schema = Some(schema),
+            | Self::LocatedCitedReport { answer_schema, .. }
+            | Self::SelectedSources { answer_schema, .. } => *answer_schema = Some(schema),
             Self::JsonSchema { .. } => {
                 return Err(configuration("answer_schema requires a citation contract"))
             }
@@ -109,7 +157,8 @@ impl FinalOutputPolicy {
     fn answer_schema(&self) -> Option<&Value> {
         match self {
             Self::CitedReport { answer_schema, .. }
-            | Self::LocatedCitedReport { answer_schema, .. } => answer_schema.as_ref(),
+            | Self::LocatedCitedReport { answer_schema, .. }
+            | Self::SelectedSources { answer_schema, .. } => answer_schema.as_ref(),
             Self::JsonSchema { .. } => None,
         }
     }
@@ -130,6 +179,7 @@ impl FinalOutputPolicy {
         match self {
             Self::CitedReport { max_repairs, .. }
             | Self::LocatedCitedReport { max_repairs, .. }
+            | Self::SelectedSources { max_repairs, .. }
             | Self::JsonSchema { max_repairs, .. } => *max_repairs,
         }
     }
@@ -153,6 +203,12 @@ impl FinalOutputPolicy {
                 ..
             }
             | Self::LocatedCitedReport {
+                retrieval_tools,
+                min_sources,
+                required_documents,
+                ..
+            }
+            | Self::SelectedSources {
                 retrieval_tools,
                 min_sources,
                 required_documents,
@@ -195,6 +251,9 @@ impl FinalOutputPolicy {
             }
             | Self::LocatedCitedReport {
                 retrieval_tools, ..
+            }
+            | Self::SelectedSources {
+                retrieval_tools, ..
             } => retrieval_tools.contains(name),
             Self::JsonSchema { .. } => false,
         });
@@ -208,6 +267,9 @@ impl FinalOutputPolicy {
                     retrieval_tools, ..
                 }
                 | Self::LocatedCitedReport {
+                    retrieval_tools, ..
+                }
+                | Self::SelectedSources {
                     retrieval_tools, ..
                 } => retrieval_tools.contains(&tool.name),
                 Self::JsonSchema { .. } => false,
@@ -229,9 +291,9 @@ impl FinalOutputPolicy {
                     .validate(&value)
                     .map_err(|e| format!("final JSON schema check failed: {e}"))
             }
-            Self::CitedReport { .. } | Self::LocatedCitedReport { .. } => {
-                self.verified_citations(report).map(|_| ())
-            }
+            Self::CitedReport { .. }
+            | Self::LocatedCitedReport { .. }
+            | Self::SelectedSources { .. } => self.verified_citations(report).map(|_| ()),
         }
     }
     fn coverage(&self, verified: &VerifiedReport) -> Result<(), String> {
@@ -242,6 +304,11 @@ impl FinalOutputPolicy {
                 ..
             }
             | Self::LocatedCitedReport {
+                min_sources,
+                required_documents,
+                ..
+            }
+            | Self::SelectedSources {
                 min_sources,
                 required_documents,
                 ..
@@ -285,6 +352,29 @@ impl FinalOutputPolicy {
             .citation_tools()
             .ok_or("output contract is not a citation contract")?;
         let evidence = executed_evidence(report, tools)?;
+        if matches!(self, Self::SelectedSources { .. }) {
+            let selected:SourceSelectionReport=serde_json::from_str(final_text(report)?)
+                .map_err(|e|format!("final answer must be SourceSelectionReport JSON with BOTH text and sources (array of exact retrieved chunk IDs): {e}. Do not add quote/citations fields; full source-body quotes are generated by the host."))?;
+            let available = evidence
+                .iter()
+                .flat_map(|r| r.hits.iter().map(|h| h.chunk.id.as_str()))
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .take(6)
+                .collect::<Vec<_>>();
+            let bibliography = matches!(
+                self,
+                Self::SelectedSources {
+                    bibliography: true,
+                    ..
+                }
+            );
+            let verified=if bibliography {SearchResult::render_selection_bibliography_all(&evidence,selected)}else{SearchResult::verify_selection_all(&evidence,selected)}
+                .map_err(|e|format!("exact source selection failed: {e}. Available IDs (up to six): {available:?}. Select only actual results from your own executed retrieval. {} This does not verify semantic support.",if bibliography{"The host renders an answer-level source list; supplied markers must still match selected sources."}else{"Every selected ID needs its [[full_chunk_id]] text marker."}))?;
+            self.coverage(&verified)?;
+            self.check_answer_schema(report)?;
+            return Ok(verified);
+        }
         let cited: CitedReport = serde_json::from_str(final_text(report)?).map_err(|e| {
             format!("final answer must be exact CitedReport JSON, without Markdown fences: {e}. Return ONE complete object containing BOTH text (string) and citations (array of chunk_id and quote objects). Keep all correct fields while repairing the defective field; section headings belong inside text, never as new top-level keys.")
         })?;
@@ -306,6 +396,8 @@ impl FinalOutputPolicy {
         if matches!(self, Self::LocatedCitedReport { .. }) {
             serde_json::to_value(self.resolve_located(report)?.verified.report)
                 .map_err(|e| e.to_string())
+        } else if matches!(self, Self::SelectedSources { .. }) {
+            serde_json::to_value(self.verified_citations(report)?.report).map_err(|e| e.to_string())
         } else {
             self.check(report)?;
             serde_json::from_str(final_text(report)?).map_err(|e| e.to_string())

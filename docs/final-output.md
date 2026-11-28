@@ -63,6 +63,11 @@ research quality**. A model reviewer cannot override the host citation contract.
 
 ## Exact source locators (opt-in)
 
+A separate [source-selection contract](selected-sources.md) lets a model select
+exact retrieved chunk IDs while the host explicitly renders full original body
+quotes. It neither modifies the existing model-quote contracts nor labels
+host-generated quotations as model-authored. Semantic support remains separate.
+
 Models that cannot reliably copy long chunk hashes can use a distinct input
 contract, `{"type":"located_cited_report","max_repairs":2}`. It accepts the
 same retrieval-tool, minimum-source and required-document settings. The model

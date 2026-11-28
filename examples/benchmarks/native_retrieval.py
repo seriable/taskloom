@@ -32,6 +32,24 @@ def source_matches(path, expected):
         hashlib.sha256(text.replace("\n", "\r\n").encode("utf-8")).hexdigest()}
 
 
+def request_json(request):
+    """Retry bounded safe observations only; POST uncertainty is never replayed."""
+    read_only = request.get_method() == 'GET'
+    attempts = 3 if read_only else 1
+    for attempt in range(attempts):
+        try:
+            with urllib.request.urlopen(request, timeout=10 if read_only else 120) as response:
+                return json.loads(response.read(4 * 1024 * 1024))
+        except urllib.error.HTTPError as error:
+            with error:
+                detail = error.read(8192).decode(errors='replace')
+            raise RuntimeError(f'HTTP {error.code}: {detail}') from error
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(.2 * (attempt + 1))
+
+
 @contextlib.contextmanager
 def host(executable, config, root):
     with socket.socket() as sock:
@@ -48,11 +66,7 @@ def host(executable, config, root):
         request = urllib.request.Request(f"http://127.0.0.1:{port}/api{path}",
             data=None if body is None else json.dumps(body).encode(),
             headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                return json.loads(response.read(4 * 1024 * 1024))
-        except urllib.error.HTTPError as error:
-            raise RuntimeError(f"HTTP {error.code}: {error.read(8192).decode()}") from error
+        return request_json(request)
 
     # Owned process handle for explicit OS-process interruption campaigns.
     # This never refers to an independently running user process.

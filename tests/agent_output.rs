@@ -25,6 +25,7 @@ struct CitationModel {
     requests: Mutex<Vec<ModelRequest>>,
     mode: Mode,
     located: bool,
+    selected: bool,
 }
 impl CitationModel {
     fn new(mode: Mode) -> Self {
@@ -33,11 +34,18 @@ impl CitationModel {
             requests: Mutex::new(Vec::new()),
             mode,
             located: false,
+            selected: false,
         }
     }
     fn located(mode: Mode) -> Self {
         Self {
             located: true,
+            ..Self::new(mode)
+        }
+    }
+    fn selected(mode: Mode) -> Self {
+        Self {
+            selected: true,
             ..Self::new(mode)
         }
     }
@@ -101,7 +109,11 @@ impl Model for CitationModel {
                 } else {
                     json!({"chunk_id":chunk.id,"quote":chunk.text})
                 };
-                AssistantTurn::text(json!({"text":text,"citations":[citation]}).to_string())
+                if self.selected {
+                    AssistantTurn::text(json!({"text":text,"sources":[chunk.id]}).to_string())
+                } else {
+                    AssistantTurn::text(json!({"text":text,"citations":[citation]}).to_string())
+                }
             } else {
                 AssistantTurn::text("not a report")
             };
@@ -115,16 +127,26 @@ impl Model for CitationModel {
 
 #[tokio::test]
 async fn cited_answer_schema_repairs_structure_in_same_run_and_binds_original_format() {
-    for located in [false, true] {
+    for kind in 0..4 {
+        let located = kind == 1;
+        let selected = kind >= 2;
         let dir = tempfile::tempdir().unwrap();
         let writes = Arc::new(AtomicUsize::new(0));
         let tools = tools(dir.path(), writes.clone()).await;
-        let model = if located {
+        let model = if selected {
+            CitationModel::selected(Mode::SectionRepair)
+        } else if located {
             CitationModel::located(Mode::SectionRepair)
         } else {
             CitationModel::new(Mode::SectionRepair)
         };
-        let base = if located {
+        let base = if kind == 3 {
+            FinalOutputPolicy::selected_sources(1)
+                .with_host_bibliography()
+                .unwrap()
+        } else if selected {
+            FinalOutputPolicy::selected_sources(1)
+        } else if located {
             FinalOutputPolicy::located_cited_report(1)
         } else {
             FinalOutputPolicy::cited_report(1)
@@ -138,9 +160,9 @@ async fn cited_answer_schema_repairs_structure_in_same_run_and_binds_original_fo
                 .unwrap(),
             base.identity().unwrap()
         );
-        let schema = json!({"type":"object","required":["text","citations"],"properties":{
+        let schema = json!({"type":"object","required":["text",if selected{"sources"}else{"citations"}],"properties":{
             "text":{"type":"string","pattern":if located {"^Approval checklist:.*\\[\\[1\\]\\]"} else {"^Approval checklist:"}},
-            "citations":{"type":"array","minItems":1,"items":{"type":"object","required":if located {vec!["document_id","corpus_revision","start","quote"]} else {vec!["chunk_id","quote"]}}}
+            (if selected{"sources"}else{"citations"}):{"type":"array","minItems":1,"items":if selected {json!({"type":"string"})}else{json!({"type":"object","required":if located {vec!["document_id","corpus_revision","start","quote"]} else {vec!["chunk_id","quote"]}})}}
         }});
         let policy = base.clone().with_answer_schema(schema).unwrap();
         assert_ne!(base.identity().unwrap(), policy.identity().unwrap());
@@ -204,6 +226,93 @@ fn additional_citation_schema_is_validated_and_old_none_is_identity_compatible()
         serde_json::from_value(json!({"type":"cited_report","max_repairs":1,"answer_schema":null}))
             .unwrap();
     assert_eq!(base.identity().unwrap(), explicit.identity().unwrap());
+}
+
+#[tokio::test]
+async fn selected_sources_have_run_local_evidence_bounded_repairs_and_explicit_host_rendering() {
+    let dir = tempfile::tempdir().unwrap();
+    let writes = Arc::new(AtomicUsize::new(0));
+    let tools = tools(dir.path(), writes.clone()).await;
+    let model = CitationModel::selected(Mode::Correct);
+    let policy=FinalOutputPolicy::selected_sources(1).with_answer_schema(json!({"type":"object","required":["text","sources"],"properties":{"sources":{"type":"array","minItems":1,"items":{"type":"string","pattern":"^[a-f0-9]{64}$"}}}})).unwrap();
+    let selected_agent = agent(&model, &tools, 1).with_output_policy(policy.clone());
+    let store = FileRunStore::new(dir.path().join("runs"));
+    let durable = DurableAgent::new(&selected_agent, &store);
+    let done = durable
+        .start("selected", vec![Message::user("research")])
+        .await
+        .unwrap();
+    assert_eq!(done.report.stop_reason, StopReason::Completed);
+    let original: SourceSelectionReport =
+        serde_json::from_str(done.report.final_text().unwrap()).unwrap();
+    let verified = policy.verified_citations(&done.report).unwrap();
+    assert_eq!(verified.report.citations[0].chunk_id, original.sources[0]);
+    assert_eq!(
+        verified.report.citations[0].quote,
+        "Approval binds the exact operation arguments."
+    );
+    assert!(serde_json::from_str::<CitedReport>(done.report.final_text().unwrap()).is_err());
+    assert_eq!(
+        policy.validated_value(&done.report).unwrap(),
+        serde_json::to_value(&verified.report).unwrap()
+    );
+    assert!(model.requests.lock().unwrap()[2]
+        .tools
+        .iter()
+        .all(|t| t.name == "knowledge_search"));
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    let mut forged = done.report.clone();
+    forged.events.clear();
+    assert!(policy
+        .verified_citations(&forged)
+        .unwrap_err()
+        .contains("no citation evidence"));
+    assert_eq!(
+        durable.resume("selected").await.unwrap().revision,
+        done.revision
+    );
+    let incompatible = selected_agent.with_output_policy(FinalOutputPolicy::cited_report(1));
+    assert!(matches!(
+        DurableAgent::new(&incompatible, &store)
+            .resume("selected")
+            .await,
+        Err(RuntimeError::Configuration(_))
+    ));
+    #[cfg(feature = "app")]
+    {
+        let view = taskloom::runtime::app::verify_report_with_provenance(&done).unwrap();
+        assert_eq!(view["rendering"]["type"], "host_selected_source_bodies");
+        assert_eq!(view["rendering"]["quotations_generated_by_host"], true);
+        assert_eq!(
+            view["rendering"]["original"],
+            serde_json::to_value(original).unwrap()
+        );
+    }
+    let escape = CitationModel::selected(Mode::Escape);
+    let escaped = agent(&escape, &tools, 1)
+        .with_output_policy(FinalOutputPolicy::selected_sources(1))
+        .run("selected-escape", vec![Message::user("research")])
+        .await;
+    assert_eq!(escaped.stop_reason, StopReason::PermissionDenied);
+    assert_eq!(writes.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn bibliography_is_explicit_and_identity_bound() {
+    let inline = FinalOutputPolicy::selected_sources(1);
+    let bibliography = inline.clone().with_host_bibliography().unwrap();
+    assert_ne!(inline.identity().unwrap(), bibliography.identity().unwrap());
+    assert!(serde_json::to_value(&inline)
+        .unwrap()
+        .get("bibliography")
+        .is_none());
+    assert_eq!(
+        serde_json::to_value(&bibliography).unwrap()["bibliography"],
+        true
+    );
+    assert!(FinalOutputPolicy::cited_report(1)
+        .with_host_bibliography()
+        .is_err());
 }
 async fn tools(root: &std::path::Path, writes: Arc<AtomicUsize>) -> ToolRegistry {
     let corpus = Arc::new(FileCorpusStore::new(root.join("knowledge")));

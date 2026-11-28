@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlsplit
 
 from native_retrieval import host, save
+from native_subscription import metadata_for
 
 
 def node(name, task, dependencies=(), params=None, select=None):
@@ -175,7 +176,7 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] not in {1, 2, 3, 4, 5, 6, 7, 8, 9} or not suite["cases"]:
+    if suite["version"] not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} or not suite["cases"]:
         raise ValueError("unsupported suite")
     for case in suite["cases"]:
         for field, low, high, default in [("duration_seconds", 1, 1800, 300), ("max_tasks", 1, 8, 2), ("min_completed_analysts", 0, 8, 0), ("min_native_requests", 0, 256, 0)]:
@@ -210,7 +211,7 @@ def main():
     # A model-only config is reused, never its production tool grants/services.
     config.update(state_dir=str(root / "state"), roles=suite["roles"], knowledge=True,
                   mcp=[], skills=[], memory=None, final_output=None, research={}, sandbox=None, sandbox_top_level=False,
-                  retrieval={"mode": "lexical"})
+                  retrieval={"mode": "lexical"}, database=None, observability=None)
     # Every native role has a separate durable run. Reserve zero API fees per
     # role under the campaign's explicit one-micro-unit admission cap.
     subprocess.run([str(args.taskloom.resolve()), "init", str(root / "defaults.json")], capture_output=True, check=True)
@@ -225,6 +226,12 @@ def main():
         "limitations": ["visible synthetic operations tasks, no competitor campaign", "API fee zero; hardware unmetered",
             "native provider concurrency is subject to the local inference server scheduler", "reviewer verdict is not independent factual scoring"]}
     report.update(completed=False, active_case=None, passed=0, failed=0, requested=len(suite["cases"]), not_run=len(suite["cases"]))
+    subscription = metadata_for(config)
+    if subscription:
+        report.update(evidence_kind=subscription['evidence_kind'], subscription=subscription,
+                      currency=None, max_total_cost_micros=None)
+        report['limitations'][1] = subscription['fees']
+        report['limitations'][2] = 'Remote provider scheduling/weights are not controlled; role overlap is not proof of simultaneous inference.'
     save(root / "report.json", report)
     with host(args.taskloom.resolve(), config_path, root) as api:
         for i, document in enumerate(suite["documents"]):
@@ -241,6 +248,14 @@ def main():
             report["active_case"] = None
             save(root / "report.json", report)
             print(f"{case['id']}: {result['status']}: {result['failures']}", flush=True)
+    # Failed HTTP observation can leave a child working until host shutdown.
+    # Preserve its cold files instead of calling missing usage zero. A budget
+    # journal may have a newer generation than its saved run checkpoint.
+    report['cold_saved_state'] = {str(path.relative_to(root)): json.loads(path.read_text(encoding='utf-8'))
+        for path in sorted((root / 'state' / 'runs').glob('*.json'))}
+    report['usage_qualification'] = ('Case snapshots can precede late child completion. Cold run/budget '
+        'files after owned host shutdown and subscription HTTP reservations/observations are separate; '
+        'newer-generation budgets take precedence. Missing responses are not zero usage.')
     report["completed"] = True
     save(root / "report.json", report)
     raise SystemExit(1 if report["failed"] or report["not_run"] else 0)

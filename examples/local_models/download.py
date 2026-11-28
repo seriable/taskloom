@@ -15,6 +15,8 @@ import urllib.request
 PROFILES = {
     "standard": (("Qwen/Qwen3-1.7B", "Qwen/Qwen3-Embedding-0.6B"), 7 * 1024**3),
     "generation-4b": (("Qwen/Qwen3-4B",), 10 * 1024**3),
+    "generation-4b-instruct": (("Qwen/Qwen3-4B-Instruct-2507",), 10 * 1024**3),
+    "generation-14b": (("Qwen/Qwen3-14B",), 32 * 1024**3),
 }
 SMALL_FILES = {"config.json", "generation_config.json", "tokenizer.json",
                "tokenizer_config.json", "vocab.json", "merges.txt",

@@ -357,6 +357,31 @@ async fn proposed_configuration_never_resolves_credentials_connects_or_changes_l
         view["configuration"]["roles"][0]["output"]["policy"]["answer_schema"]["required"],
         json!(["text", "citations"])
     );
+    let mut selected = proposed.clone();
+    selected.roles[0].output = WorkflowOutput::Validated {
+        policy: FinalOutputPolicy::SelectedSources {
+            retrieval_tools: BTreeSet::from(["evidence".into()]),
+            min_sources: 1,
+            required_documents: BTreeSet::new(),
+            max_repairs: 1,
+            answer_schema: Some(json!({"type":"object","required":["text","sources"]})),
+            bibliography: false,
+        },
+    };
+    let selected_view = client
+        .post(format!("{url}/setup/validate"))
+        .bearer_auth(TOKEN)
+        .json(&selected)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(selected_view.status(), 200);
+    let selected_view: Value = selected_view.json().await.unwrap();
+    assert_eq!(
+        selected_view["configuration"]["roles"][0]["output"]["policy"]["type"],
+        "selected_sources"
+    );
+    assert_eq!(selected_view["services_contacted"], false);
     let active: Value = client
         .get(format!("{url}/setup"))
         .bearer_auth(TOKEN)

@@ -1,0 +1,391 @@
+{
+  "version": 1,
+  "name": "Visible source-relative labels for actual generated repository-history answers",
+  "provenance": {
+    "kind": "post-generation non-blind session-assisted reference labels; not human, independent or held-out truth",
+    "origin_report_sha256": "05afd91519ba9ca0107086c9807fe869308261f8688b962f674c85beb7ce31d6",
+    "origin_source_pins": [
+      {
+        "document_id": "queue",
+        "path": "docs/durable-queue.md",
+        "sha256_utf8_lf": "49b2bb4df79bb19f028f5ea364d59295bd9415df60ee3041e3dede832fd17b38",
+        "character_start": 9144,
+        "character_end": 10222,
+        "excerpt_sha256_utf8_lf": "2bcf6d9d74f592d263011a9dc5ebd360c89080b1427556500ee735f36445e978"
+      },
+      {
+        "document_id": "quota",
+        "path": "docs/generation-quota.md",
+        "sha256_utf8_lf": "e3176f2d4870f61cb9fc4dfd6072b6fd3fea4cd74786cebc433fa8810f13a4bf",
+        "character_start": 3162,
+        "character_end": 4400,
+        "excerpt_sha256_utf8_lf": "63e1d838ecd3729e226c6411e9412a4a7b57bd636a4e56a4a52f4bd793a8fcff"
+      },
+      {
+        "document_id": "memory",
+        "path": "docs/long-term-memory.md",
+        "sha256_utf8_lf": "5e851189c0ed914e52d7807c70f5b192eab184d1ab67c2d8dcaae4da2a23fd5e",
+        "character_start": 7211,
+        "character_end": 8639,
+        "excerpt_sha256_utf8_lf": "565d849b9e00d2a34fd52eb947961ed5deb1cfcee5b705d1fcf7545009cf9758"
+      },
+      {
+        "document_id": "skills",
+        "path": "docs/skill-packages.md",
+        "sha256_utf8_lf": "489d312b4a11f26870f77d403f342d8e8ac0177c41f5bd721c5fe681294c25e8",
+        "character_start": 5311,
+        "character_end": 6602,
+        "excerpt_sha256_utf8_lf": "f5c66b10c615edf78bf158c526b60022f87134b97b7868d46994b7d142f45e50"
+      },
+      {
+        "document_id": "telemetry",
+        "path": "docs/observability.md",
+        "sha256_utf8_lf": "d76bfb283b494d9957a964223bb8d3a25f8626993ce6db595a9fcd660759b7e2",
+        "character_start": 450,
+        "character_end": 1571,
+        "excerpt_sha256_utf8_lf": "3efb26732bec58d63d9ac8c918da7b1e3d493126449e6ef65ed38e0b8175ce63"
+      },
+      {
+        "document_id": "retrieval",
+        "path": "docs/retrieval-relevance.md",
+        "sha256_utf8_lf": "77fb118f8042b3538fec563fadda25c94cd2ea44db1825991b835961d5a026f9",
+        "character_start": 850,
+        "character_end": 1918,
+        "excerpt_sha256_utf8_lf": "60e67dbdd7da4f8ee962c9ac995c288383f093e7493187e62e058a2c9b884a47"
+      }
+    ],
+    "method": "Whole original technical prose after its exact review-reference/source-heading prefix. No model answer is rewritten. Reference retention, labelled host bibliography and source integrity are checked separately. Expected labels are source-relative session-assisted judgments and never enter judge prompts. The extra live-owner contradiction is a separate control, not a generated answer."
+  },
+  "documents": [
+    {
+      "id": "queue",
+      "title": "docs/durable-queue.md Ownership, interruption and recovery",
+      "source": "repo:docs/durable-queue.md",
+      "text": "## Ownership, interruption and recovery\n\nClaiming a job, increasing its attempt count and marking it Running is one SQL\ntransaction. Database time determines renewable lease validity. A candidate is\neligible only when both its queue owner and every associated runtime owner have\nexpired. A live owner is never stolen. Recovery claims are prioritized over new\npending jobs; healthy workers then take jobs in creation/ID order. This is not a\nguarantee of fair CPU allocation among worker processes.\n\nRun/workflow/session stores bind to the exact queue capability. Runtime writes\nand pre-dispatch checks verify both fences, with another check before commit\nafter potentially expensive decoding/accounting. Generation reservations still\ncommit before each provider attempt. Removing a capability cannot authorize\ndispatch through a plain SQL handle. Lease loss or an unverified monitor stops\nnew work; the former owner cannot overwrite the successor's checkpoint or budget.\nExternal services are not transactional participants, so no exactly-once external\neffect guarantee is added.",
+      "metadata": {
+        "topic": "queue release readiness operational audit"
+      }
+    },
+    {
+      "id": "quota",
+      "title": "docs/generation-quota.md Accounting and recovery",
+      "source": "repo:docs/generation-quota.md",
+      "text": "## Accounting and recovery\n\nAdmission and the run's reservation journal commit in the same transaction,\nbefore provider dispatch. The lock order is runtime ownership, project quota,\nthen accounting records. Administrator imports lock the project control row\nand read committed journals without taking runtime leases. PostgreSQL row locks\nand SQLite's immediate writer serialize competing processes.\n\nHeld cost is `committed_micros + in_flight_micros`. Uncertain cost is already\nincluded in committed and is not counted twice. Outstanding attempts are\n`in_flight_attempts + uncertain_attempts`: zero-priced requests occupy slots.\nKnown settlement releases only that attempt's slot. A lost response or killed\nprocess retains its ceiling and slot; converting in-flight into uncertain does\nnot free capacity. The ledger does not silently refund or erase uncertain work.\n\nA quota `Budget` refusal means a transaction was rolled back and no dispatch\nwas admitted. The runtime removes only the refused reservation and records the\nbudget stop without inventing uncertain fees. Other storage/commit failures\nremain ambiguous and retain conservative uncertainty. Reservation registration\nis serialized per run; provider execution can still overlap.",
+      "metadata": {
+        "topic": "quota release readiness operational audit"
+      }
+    },
+    {
+      "id": "memory",
+      "title": "docs/long-term-memory.md Recovery, erasure and migration",
+      "source": "repo:docs/long-term-memory.md",
+      "text": "## Recovery, erasure and migration\n\nVersion-1 file snapshots live under `state_dir/memory/<scope-hash>.memory.json`.\nWrites take per-scope OS locks, verify CAS/audit prefixes, flush a temporary file\nand atomically replace the previous snapshot. Reads fail on corruption; they\ndo not silently reset state. Limits are 16 MiB, 4096 records, 16,384 forgotten\nsource bindings and 20,000 audit events. Admission also reserves 2 KiB, one\npossible tombstone and one possible erasure event per retained record, so\nadministrative forgetting is not stranded by an admitted full snapshot.\nA limit refuses the operation without\nreplacing the valid snapshot. Export/backup before planned migration; retain\nthe scope and revisions when implementing another `MemoryStore`.\n\nExtraction request IDs bind a scope and the exact selected input to a durable\n`memory-<hash>` child. Repeating a completed request with a fresh inspected\nmemory revision reuses its answer without another model request. If memory CAS\nor capacity fails after generation, the completed extraction run stays in the\nrun store; inspect it and retry the **same request ID**, with the correct\nrevision/configuration. Do not silently mint a new paid request. Interrupting\ngeneration preserves its spending uncertainty; normal interrupted-model\nrecovery can admit a further attempt within the original cap. API admission\nis released even if the extraction caller drops its future.",
+      "metadata": {
+        "topic": "memory release readiness operational audit"
+      }
+    },
+    {
+      "id": "skills",
+      "title": "docs/skill-packages.md Host activation and durable identity",
+      "source": "repo:docs/skill-packages.md",
+      "text": "## Host activation and durable identity\n\nHost configuration opts in separately, using the verified install pin:\n\n```json\n{\n  \"skills\": [{\n    \"package\": {\"name\":\"research-brief\", \"version\":\"1.0.0\", \"digest\":\"COPY_THE_EXACT_INSTALLED_DIGEST\"},\n    \"mount\": \"research\",\n    \"mode\": \"active\",\n    \"grant\": {\"tools\":[\"knowledge_search\"], \"permissions\":[\"knowledge:read\"], \"credentials\":[]}\n  }]\n}\n```\n\nThis is a fragment, not a complete provider configuration. The research host\nmust enable knowledge access and set an explicit generation ceiling for output\nrepairs. Mount prefixes are 1–14 lowercase ASCII letters/digits/hyphens;\nmounted role names cannot collide with host roles or other mounts.\n\nEvery dependency's tool requirements must match the host's actual registered\ntool effects and complete permission sets. Grants must be subsets of the\noriginal host policy. Required credential names need both explicit package\ngrants and a host-configured provider/service name; package text never receives\nthe environment values. Packages cannot downgrade a write to a read, define a\nservice endpoint for the host, enlarge a tool policy, waive exact approval,\nremove spending ceilings or silently retry an uncertain effect. Tool-service\nand embedding charges retain their separate host boundaries.",
+      "metadata": {
+        "topic": "skills release readiness operational audit"
+      }
+    },
+    {
+      "id": "telemetry",
+      "title": "docs/observability.md Trace and time semantics",
+      "source": "repo:docs/observability.md",
+      "text": "## Trace and time semantics\n\n`TraceSnapshot::run`, `workflow` and `session` build run or parent traces.\nWorkflow/node/durable-run and session/turn/durable-run relationships come from\npersisted references and exact initial-input bindings. Closed session children\nalso match the recorded report fingerprint. Unreferenced, duplicate or mismatched\nchildren fail; absent children are counted. Active durable children can be found\nthrough their frozen node context before an outcome returns to the parent.\nReads of separate records are individually atomic, **not** a cross-record\ntransaction or a guarantee that a live parent and child were read simultaneously.\n\nStable SHA-256-derived IDs use a trusted host namespace and logical identities.\nRevisions change the source revision key, not existing trace/span identities.\nChanging the namespace changes IDs. The application defaults to a namespace\nderived from its absolute state root; set an explicit namespace before moving\njournals if continuity across deployment paths matters. These hashes provide\ncorrelation and pseudonymization, not cryptographic storage authentication.",
+      "metadata": {
+        "topic": "telemetry release readiness operational audit"
+      }
+    },
+    {
+      "id": "retrieval",
+      "title": "docs/retrieval-relevance.md Controls and limits",
+      "source": "repo:docs/retrieval-relevance.md",
+      "text": "## Controls and limits\n\n`lexical.stop_words` contains at most 256 lowercase normalized tokens, each at\nmost 64 bytes. It filters both query tokens and indexed fields when scoring.\nThe document and its citable body remain unchanged. Multi-token phrases and\nnon-normalized entries are rejected. Languages/domain vocabularies require\nhost review; filtering a meaningful token can reduce recall. Query aliases are\nstill expanded once by host policy before token filtering. Source text never\nchanges this policy.\n\n`exact_identifiers` requires every query token that contains both ASCII letters\nand digits and is at least eight bytes long to occur as an exact case-folded\ntoken in each returned candidate. Token punctuation separates components. Pure\nwords, pure numbers and short names such as `Qwen3` are not constrained. Matching\nuses chunk body, title and the lexical metadata allowlist. Document IDs, source\npaths and excluded internal metadata never become implicit searchable evidence.\nThis intentionally narrow rule does not recognize every ticket/product-ID format.",
+      "metadata": {
+        "topic": "retrieval release readiness operational audit"
+      }
+    }
+  ],
+  "predeclared_gates": {
+    "minimum_cited_support_agreement": 0.85,
+    "minimum_corpus_factuality_agreement": 0.85,
+    "required_known_contradictions_rejected": 1.0,
+    "max_errors": 0
+  },
+  "cases": [
+    {
+      "id": "generated-stage-01",
+      "claim": "Ownership expiry: claiming a job, incrementing its attempt count and marking it Running is one SQL transaction; database time decides renewable lease validity, and a candidate is eligible only when its queue owner and every associated runtime owner have expired, so a live owner is never stolen. Recovery claims take priority over new pending jobs, which is not a fair-CPU guarantee. Uncertain effects: external services are not transactional participants, so no exactly-once external effect guarantee is added; lease loss or an unverified monitor stops new work, and the former owner cannot overwrite the successor's checkpoint or budget. Operator action: revoke the queue capability, since removing it cannot authorize dispatch through a plain SQL handle; no manual reconciliation procedure is documented.",
+      "citation_documents": [
+        "queue"
+      ],
+      "expected_cited_support": "insufficient",
+      "expected_corpus_factuality": "insufficient",
+      "origin": {
+        "stage": 1,
+        "exact_character_start": 105,
+        "exact_character_end": 912,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 1, queue source (docs/durable-queue.md, \"Ownership, interruption and recovery\"). ",
+        "original_text_sha256": "40cd84b93a9418a5bfb1054dcf7e3cf0115eec757954e6bb2eadbb1ea35d9820"
+      },
+      "selected_chunk_ids": [
+        "89cbd86916af2999ba752dd2221aa39f176405cac559d1cbd8e186bb5d4d8eb3"
+      ],
+      "reference_rationale": "A concrete revocation operation and its effect on existing holders are not established by the excerpt; removing a capability from a plain handle is a different stated property."
+    },
+    {
+      "id": "generated-stage-02",
+      "claim": "Implemented behavior: admission and the run's reservation journal commit in one transaction before provider dispatch, under lock order runtime ownership, project quota, accounting records; held cost is committed_micros + in_flight_micros, and known settlement releases only that attempt's slot. Limitation: a lost response or killed process retains its ceiling and slot — converting in-flight into uncertain frees no capacity, the ledger never silently refunds or erases uncertain work, and non-Budget storage/commit failures stay ambiguous. Operator action: run administrator imports, which lock the project control row and read committed journals without taking runtime leases; treat a Budget refusal as a rolled-back transaction with no admitted dispatch. No manual refund, slot-release or reconciliation procedure is documented.",
+      "citation_documents": [
+        "quota"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 2,
+        "exact_character_start": 95,
+        "exact_character_end": 927,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 2, quota source (docs/generation-quota.md, \"Accounting and recovery\"). ",
+        "original_text_sha256": "86e919134ecf157228627814e7ce21551a8fe51b4af88aaeddeb557a5ab3e965"
+      },
+      "selected_chunk_ids": [
+        "b1d50fc924404b781299ad9539244140f7ae7305dada82c504b7fd3f1120b4b0",
+        "c6d7616c171d200b972172dfcb0ff10932e9bd59eb45db0ba1d91c7e436d379c"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-03",
+      "claim": "Behavior: snapshot writes take per-scope OS locks, verify CAS/audit prefixes, flush a temporary file and atomically replace the previous snapshot; admission reserves 2 KiB plus one tombstone and one erasure event per retained record. Limitation: reads fail on corruption instead of resetting state, and hitting a limit (16 MiB, 4096 records, 16,384 forgotten bindings, 20,000 audit events) refuses the operation without replacing the valid snapshot; interrupted generation keeps spending uncertainty. Operator action: export/backup before planned migration, retaining scope and revisions for another MemoryStore; if CAS or capacity fails after generation, inspect the retained run and retry the same request ID rather than minting a new paid request.",
+      "citation_documents": [
+        "memory"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 3,
+        "exact_character_start": 104,
+        "exact_character_end": 854,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 3, memory source (docs/long-term-memory.md, \"Recovery, erasure and migration\"). ",
+        "original_text_sha256": "93cb123452909dc6c3300df8be77bcad0ab10c1d888fdf78a31c5d389b1e7673"
+      },
+      "selected_chunk_ids": [
+        "30a9dc9a72f748c0eb65eca1d86ad2a0bae8f504d420dce0b157da3d4620fb36",
+        "7c02b098ef2043463cbaae3d68238f905bd83bd33255f67cd0d7eba9d7936c0a"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-04",
+      "claim": "Behavior: host configuration opts in per package using the verified install pin (name, version, digest), a mount prefix of 1–14 lowercase ASCII letters/digits/hyphens, a mode, and grants that must be subsets of the original host policy; every dependency's tool requirements must match the host's actually registered tool effects and complete permission sets. Limitation: packages cannot downgrade a write to a read, define a service endpoint, enlarge a tool policy, waive exact approval, remove spending ceilings or silently retry an uncertain effect; tool-service and embedding charges keep separate host boundaries, and package text never receives environment credential values. Operator action: enable knowledge access and set an explicit generation ceiling for output repairs, configure host provider/service names for required credentials, and avoid mount collisions with host roles.",
+      "citation_documents": [
+        "skills"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 4,
+        "exact_character_start": 107,
+        "exact_character_end": 995,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 4, skills source (docs/skill-packages.md, \"Host activation and durable identity\"). ",
+        "original_text_sha256": "d6bb76d5059facbd8225745c120b22d0534d5c290c56a04e549cc6ca2e91836f"
+      },
+      "selected_chunk_ids": [
+        "7a564c68b381531ba850826c32c20255423174394c8259e8d5d1a11e2302912d",
+        "95a157ea4fbe58d760297f1899f37bb48ad89cc68315d9b6c995e812eb3dd03f"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-05",
+      "claim": "Implemented behavior: TraceSnapshot::run, workflow and session build run or parent traces, with workflow/node/durable-run and session/turn/durable-run relationships derived from persisted references and exact initial-input bindings; closed session children must also match the recorded report fingerprint, and unreferenced, duplicate or mismatched children fail while absent children are counted. Limitation: reads of separate records are individually atomic only — not a cross-record transaction, and no guarantee that a live parent and child were read simultaneously; the SHA-256-derived IDs give correlation and pseudonymization, not cryptographic storage authentication. Operator action: set an explicit host namespace before moving journals, since the default derives from the absolute state root and changing it changes IDs.",
+      "citation_documents": [
+        "telemetry"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 5,
+        "exact_character_start": 97,
+        "exact_character_end": 927,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 5, telemetry source (docs/observability.md, \"Trace and time semantics\"). ",
+        "original_text_sha256": "1eddb540d407677d9dac184a37a9ee386522e49912e4ea44f5a9ae8dec30a006"
+      },
+      "selected_chunk_ids": [
+        "4b61ec80558a50810a592114841af132420023e2f7f51f0ce07d98dd5cebab05"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-06",
+      "claim": "Implemented behavior: `exact_identifiers` requires every query token containing both ASCII letters and digits and at least eight bytes to appear as an exact case-folded token in each returned candidate, matched against chunk body, title and the lexical metadata allowlist; token punctuation separates components. Limitation: the rule is intentionally narrow and does not recognize every ticket/product-ID format, and document IDs, source paths and excluded internal metadata never become implicit searchable evidence. Operator action: keep `lexical.stop_words` within 256 lowercase normalized single tokens of at most 64 bytes, and route language or domain vocabularies through host review, since filtering a meaningful token can reduce recall; source text never changes this policy.",
+      "citation_documents": [
+        "retrieval"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 6,
+        "exact_character_start": 98,
+        "exact_character_end": 881,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 6, retrieval source (docs/retrieval-relevance.md, \"Controls and limits\"). ",
+        "original_text_sha256": "7f683b25a6e87d7f02c398f4e505f3a2ee1382b5c53f4a3ddbe49a7f936d97f6"
+      },
+      "selected_chunk_ids": [
+        "dbace938faf6d66cb93a550ad7c858892fe2e8b7a58d3f4c0b5459e8f9f5de68"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-07",
+      "claim": "Implemented behavior: claiming a job, incrementing its attempt count and marking it Running occur in one SQL transaction, with database time governing renewable lease validity; a candidate is eligible only when its queue owner and every associated runtime owner have expired, and recovery claims take priority over new pending jobs. Limitation: this is not fair CPU allocation among worker processes, and because external services are not transactional participants, no exactly-once external effect guarantee is added. Operator action: bind run/workflow/session stores to the exact queue capability, since runtime writes and pre-dispatch checks verify both fences; lease loss or an unverified monitor stops new work, and removing a capability cannot authorize dispatch through a plain SQL handle.",
+      "citation_documents": [
+        "queue"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 7,
+        "exact_character_start": 105,
+        "exact_character_end": 901,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 7, queue source (docs/durable-queue.md, \"Ownership, interruption and recovery\"). ",
+        "original_text_sha256": "004288e7c8afe208e289a89792e3fa1d015fa44b87cff5290a5cdcbdb638c49d"
+      },
+      "selected_chunk_ids": [
+        "89cbd86916af2999ba752dd2221aa39f176405cac559d1cbd8e186bb5d4d8eb3"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-08",
+      "claim": "Implemented behavior: admission and the run's reservation journal commit in one transaction before provider dispatch, under the lock order runtime ownership, then project quota, then accounting records; held cost is committed_micros + in_flight_micros, and outstanding attempts include zero-priced requests. Limitation: a lost response or killed process retains its ceiling and slot — converting in-flight into uncertain frees no capacity, and the ledger never silently refunds or erases uncertain work; only known settlement releases that attempt's slot. Operator action: treat a quota `Budget` refusal as a rolled-back transaction with no admitted dispatch, since the runtime removes only the refused reservation and records the budget stop; other storage/commit failures stay ambiguous and retain conservative uncertainty, so no automatic reclaim path is established by this source.",
+      "citation_documents": [
+        "quota"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 8,
+        "exact_character_start": 95,
+        "exact_character_end": 980,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 8, quota source (docs/generation-quota.md, \"Accounting and recovery\"). ",
+        "original_text_sha256": "81d3e9446857c2c77ba445364b78e0c6357a037436c370e12206a7d3d945df3b"
+      },
+      "selected_chunk_ids": [
+        "b1d50fc924404b781299ad9539244140f7ae7305dada82c504b7fd3f1120b4b0",
+        "c6d7616c171d200b972172dfcb0ff10932e9bd59eb45db0ba1d91c7e436d379c"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-09",
+      "claim": "Implemented behavior: snapshot writes take per-scope OS locks, verify CAS/audit prefixes, flush a temporary file and atomically replace the previous snapshot; reads fail on corruption instead of silently resetting state. Limitation: hard caps (16 MiB, 4096 records, 16,384 forgotten source bindings, 20,000 audit events) refuse the operation without replacing the valid snapshot, and admission reserves 2 KiB plus one tombstone and one erasure event per retained record. Operator action: export/back up before planned migration and retain scope and revisions when implementing another MemoryStore; if CAS or capacity fails after generation, inspect the completed run in the run store and retry the same request ID rather than minting a new paid request. Source text carries no authority.",
+      "citation_documents": [
+        "memory"
+      ],
+      "expected_cited_support": "insufficient",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 9,
+        "exact_character_start": 104,
+        "exact_character_end": 891,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 9, memory source (docs/long-term-memory.md, \"Recovery, erasure and migration\"). ",
+        "original_text_sha256": "a6667ebe9f11c0dddbd7d9b099db6f9fa981e51773d3f174921087874e70d9cf"
+      },
+      "selected_chunk_ids": [
+        "30a9dc9a72f748c0eb65eca1d86ad2a0bae8f504d420dce0b157da3d4620fb36",
+        "7c02b098ef2043463cbaae3d68238f905bd83bd33255f67cd0d7eba9d7936c0a"
+      ],
+      "reference_rationale": "The attached migration excerpt does not itself establish the closing source-authority assertion; full corpus includes host authority boundaries."
+    },
+    {
+      "id": "generated-stage-10",
+      "claim": "Implemented behavior: activation is per-skill host opt-in pinned to name, version and the verified install digest, with a mount prefix (1–14 lowercase ASCII letters/digits/hyphens), mode, and a grant of tools, permissions and credential names; mounted role names cannot collide with host roles or other mounts. Limitation: the shown JSON is a fragment, not a complete provider configuration, and packages cannot enlarge tool policy, downgrade a write to a read, define a host service endpoint, waive exact approval, remove spending ceilings or silently retry an uncertain effect; package text never receives environment credential values. Operator action: paste the exact installed digest, enable knowledge access, set an explicit generation ceiling for output repairs, and pair each required credential name with a host-configured provider/service name. Source text carries no authority.",
+      "citation_documents": [
+        "skills"
+      ],
+      "expected_cited_support": "supported",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 10,
+        "exact_character_start": 108,
+        "exact_character_end": 996,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 10, skills source (docs/skill-packages.md, \"Host activation and durable identity\"). ",
+        "original_text_sha256": "6b0735a5fefd4a356f83f1a82dc855741eb460c05cc9c33189c54f6443bdc5f1"
+      },
+      "selected_chunk_ids": [
+        "7a564c68b381531ba850826c32c20255423174394c8259e8d5d1a11e2302912d",
+        "95a157ea4fbe58d760297f1899f37bb48ad89cc68315d9b6c995e812eb3dd03f"
+      ],
+      "reference_rationale": "Material source-relative statements agree with the provided excerpt(s); session-assisted labels remain reviewable and non-blind."
+    },
+    {
+      "id": "generated-stage-11",
+      "claim": "Implemented behavior: TraceSnapshot::run/workflow/session build traces from persisted references and exact initial-input bindings; closed session children must also match the recorded report fingerprint, unreferenced, duplicate or mismatched children fail, and absent children are counted. Limitation: reads of separate records are individually atomic only — not a cross-record transaction and no guarantee a live parent and child were read simultaneously; the SHA-256-derived IDs give correlation and pseudonymization, not cryptographic storage authentication. Operator action: because IDs derive from a trusted host namespace that defaults to the absolute state root, set an explicit namespace before moving journals if ID continuity across deployment paths matters. Source text carries no authority.",
+      "citation_documents": [
+        "telemetry"
+      ],
+      "expected_cited_support": "insufficient",
+      "expected_corpus_factuality": "supported",
+      "origin": {
+        "stage": 11,
+        "exact_character_start": 98,
+        "exact_character_end": 900,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 11, telemetry source (docs/observability.md, \"Trace and time semantics\"). ",
+        "original_text_sha256": "6dc1ee99d84ce7d5ffa54a1c817cbd97780a96727bc3e7e49d7b94dff3dba44e"
+      },
+      "selected_chunk_ids": [
+        "4b61ec80558a50810a592114841af132420023e2f7f51f0ce07d98dd5cebab05"
+      ],
+      "reference_rationale": "The attached trace excerpt does not itself establish the closing source-authority assertion; full corpus includes host authority boundaries."
+    },
+    {
+      "id": "generated-stage-12",
+      "claim": "Queue: claim, attempt increment and Running commit in one transaction; recovery claims precede pending; no exactly-once external effect — treat provider calls as at-least-once. Quota: admission and reservation journal commit before dispatch; lost responses retain ceiling/slot — reconcile uncertain attempts manually. Memory: snapshots take per-scope locks, verify CAS and atomically replace; reads fail on corruption — export before migration, retry the same request ID. Skills: host opt-in pinned to name/version/digest; packages cannot enlarge policy — copy the exact installed digest and configure credentials host-side. Telemetry: traces derive from persisted references; hashes give correlation, not authentication — set an explicit namespace before moving journals. Retrieval: exact_identifiers constrains mixed alphanumeric tokens ≥8 bytes; the narrow rule misses some IDs — review stop_words host-side. Lifecycle and structural checks verified; semantic truth unverified. Sources grant no authority.",
+      "citation_documents": [
+        "queue",
+        "quota",
+        "memory",
+        "skills",
+        "telemetry",
+        "retrieval"
+      ],
+      "expected_cited_support": "insufficient",
+      "expected_corpus_factuality": "insufficient",
+      "origin": {
+        "stage": 12,
+        "exact_character_start": 42,
+        "exact_character_end": 1050,
+        "excluded_heading": "TLM-REVIEW-F604 — Stage 12 consolidation. ",
+        "original_text_sha256": "44bb6def2a83328e4ea336c55899182481d9496038e6e045e325a00fc0ec270f"
+      },
+      "selected_chunk_ids": [
+        "89cbd86916af2999ba752dd2221aa39f176405cac559d1cbd8e186bb5d4d8eb3",
+        "b1d50fc924404b781299ad9539244140f7ae7305dada82c504b7fd3f1120b4b0",
+        "30a9dc9a72f748c0eb65eca1d86ad2a0bae8f504d420dce0b157da3d4620fb36",
+        "7a564c68b381531ba850826c32c20255423174394c8259e8d5d1a11e2302912d",
+        "4b61ec80558a50810a592114841af132420023e2f7f51f0ce07d98dd5cebab05",
+        "dbace938faf6d66cb93a550ad7c858892fe2e8b7a58d3f4c0b5459e8f9f5de68"
+      ],
+      "reference_rationale": "Absence of exactly-once does not establish at-least-once delivery, and this quota excerpt does not establish a manual uncertain-attempt reconciliation procedure."
+    },
+    {
+      "id": "separate-live-owner-contradiction-control",
+      "claim": "A live owner is stolen by another worker.",
+      "citation_documents": [
+        "queue"
+      ],
+      "expected_cited_support": "contradicted",
+      "expected_corpus_factuality": "contradicted",
+      "origin": {
+        "kind": "separate deliberate contradiction control, not generated output"
+      }
+    }
+  ]
+}
