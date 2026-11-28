@@ -117,6 +117,86 @@ async fn host_aliases_are_bounded_nonrecursive_and_bound_to_tool_identity() {
 }
 
 #[test]
+fn empty_stop_words_preserve_legacy_binding_and_invalid_tokens_are_rejected() {
+    use sha2::{Digest, Sha256};
+    let cfg = LexicalConfig::default();
+    let serialized = serde_json::to_value(&cfg).unwrap();
+    assert!(serialized.get("stop_words").is_none());
+    let old: LexicalConfig = serde_json::from_value(serialized.clone()).unwrap();
+    assert_eq!(old, cfg);
+    let legacy_hash = hex::encode(Sha256::digest(serde_json::to_vec(&serialized).unwrap()));
+    assert_eq!(
+        LexicalRetriever.identity().unwrap(),
+        format!("lexical-v2:{legacy_hash}")
+    );
+    for word in ["The", "two words", "", "!", "恢复"] {
+        let mut bad = cfg.clone();
+        bad.stop_words.insert(word.into());
+        assert!(bad.validate().is_err(), "{word}");
+    }
+}
+
+#[tokio::test]
+async fn host_stop_words_remove_function_word_false_recalls_without_changing_quotes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    ingest(
+        &store,
+        document(
+            "notes",
+            "The operator must inspect the original outcome before continuing.",
+        ),
+        &WindowChunker::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let query = RetrievalQuery::new("What is the temperature on Venus?");
+    let original = search(&store, &LexicalRetriever, &query).await.unwrap();
+    assert_eq!(original.hits.len(), 1); // Only "the" matched.
+    let cfg = LexicalConfig {
+        stop_words: ["what", "is", "the", "on"]
+            .into_iter()
+            .map(String::from)
+            .collect(),
+        ..Default::default()
+    };
+    assert_eq!(
+        cfg.query_terms("What is the operator?").unwrap(),
+        ["operator"]
+    );
+    let filtered = ConfiguredLexicalRetriever::new(cfg).unwrap();
+    assert_ne!(filtered.identity(), LexicalRetriever.identity());
+    for query in [query, RetrievalQuery::new("the is")] {
+        assert!(search(&store, &filtered, &query)
+            .await
+            .unwrap()
+            .hits
+            .is_empty());
+    }
+    let result = search(
+        &store,
+        &filtered,
+        &RetrievalQuery::new("the operator outcome"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        result.hits[0].chunk.text,
+        "The operator must inspect the original outcome before continuing."
+    );
+    assert!(result
+        .verify(CitedReport {
+            text: format!("Check [[{}]].", result.hits[0].chunk.id),
+            citations: vec![Citation {
+                chunk_id: result.hits[0].chunk.id.clone(),
+                quote: "The operator must inspect".into()
+            }]
+        })
+        .is_ok());
+}
+
+#[test]
 fn unicode_windows_keep_exact_byte_ranges_and_overlap() {
     let doc = document("zh", "审批🦀与恢复\n引用：持久化状态和工具副作用。");
     let chunks = WindowChunker {

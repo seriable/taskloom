@@ -169,6 +169,22 @@ cutoff/weight configuration improved this to 1/2, not full acceptance. The
 configured cutoff is available and identity-bound, but this small visible set
 does not establish general semantic relevance or answer abstention.
 
+Later 2026-11-28 relevance increment: explicit host stop words and exact long
+mixed letter/digit identifier constraints are available through the default
+research host and SDK, without changing old empty/disabled configuration
+bindings. An actual raw/instruct probe did not solve negative discrimination;
+the retained first 70-query profile campaign failed one nonexistent-hash query.
+Adding the generic exact-identifier constraint, with the same dataset, labels,
+cutoff and gates, passed the six fixed evaluation checks. Configured hybrid
+recall@5/MRR@5 across all queries was 46/48 and 0.9184, with 22/22 negatives
+empty; the 36-query evaluation group was 24/24 and 1.0, with 12/12 negatives
+empty. It is now an observed development regression, not fresh held-out/blind
+evidence. There were 67 actual local embedding requests at explicit USD 0 API
+prices/cap, no generation calls, and two retained calibration misses.
+This accepts that bounded configured profile; the general default/realistic
+corpus quality gate above stays open. See `retrieval-relevance.md` and
+`acceptance/p0-retrieval-relevance-20261128.json` for failures and limitations.
+
 ## P1.1 — Cross-session memory
 
 - [x] Versioned, source-linked fact/preference records with scoped ownership.

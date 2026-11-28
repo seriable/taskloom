@@ -149,6 +149,16 @@ negative result is retained: 1/2 negative queries correct, not full acceptance.
 This cutoff is an example calibrated to one model/corpus, not a universal default.
 Further out-of-domain calibration and answer abstention remain open work.
 
+The later [configured relevance profile](retrieval-relevance.md) adds explicit
+function-word filtering and exact-identifier constraints. On the expanded
+70-query visible development set it measured hybrid recall@5 46/48, MRR@5
+0.9184 and 22/22 empty negatives. The frozen evaluation group passed 24/24
+positive recall and 12/12 negatives after its first observed identifier failure
+was fixed. This is an observed regression, not a new blind/held-out result.
+Original 0.46/positive-only failures and the two remaining calibration misses
+remain visible; default uncalibrated hybrid and broader research quality are
+not declared solved by this profile.
+
 ```powershell
 python examples/benchmarks/native_retrieval.py target/native-retrieval-2 --taskloom target/debug/taskloom.exe --model-root target/local-models --semantic-min-score 0.46 --lexical-weight 2
 ```

@@ -217,6 +217,121 @@ impl Retriever for Ranking {
     }
 }
 #[tokio::test]
+async fn identifier_constraints_apply_to_any_ranking_and_preserve_hidden_metadata_and_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    for (id, body) in [
+        ("exact", "Order AB123456 is pending."),
+        ("generic", "An operation may be pending."),
+    ] {
+        ingest(
+            &store,
+            Document {
+                id: id.into(),
+                title: id.into(),
+                source: "fixture:identifiers".into(),
+                text: body.into(),
+                metadata: [
+                    ("tags".into(), "XY987654".into()),
+                    ("body_sha256".into(), "f1b8a7c9de0a4455".into()),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            &WindowChunker::default(),
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    let snapshot = store.snapshot().await.unwrap();
+    let ranking = snapshot
+        .chunks
+        .iter()
+        .map(|c| ScoredChunk {
+            chunk_id: c.id.clone(),
+            score: 0.99,
+        })
+        .collect();
+    let base: Arc<dyn Retriever> = Arc::new(Ranking(ranking));
+    let filter =
+        IdentifierConstrainedRetriever::new(base.clone(), ["tags".into()].into_iter().collect())
+            .unwrap();
+    assert!(filter.identity().is_none()); // An unidentified custom backend stays unidentified.
+    assert_ne!(
+        IdentifierConstrainedRetriever::new(Arc::new(LexicalRetriever), Default::default())
+            .unwrap()
+            .identity(),
+        LexicalRetriever.identity()
+    );
+    let found = search(
+        &store,
+        &filter,
+        &RetrievalQuery::new("Does order ab123456 have a pending operation?"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(found.hits.len(), 1);
+    assert_eq!(found.hits[0].chunk.document_id, "exact");
+    assert_eq!(
+        search(&store, &filter, &RetrievalQuery::new("AB123456 XY987654"))
+            .await
+            .unwrap()
+            .hits
+            .len(),
+        1
+    );
+    assert!(
+        search(&store, &filter, &RetrievalQuery::new("AB123456 ZZ123456"))
+            .await
+            .unwrap()
+            .hits
+            .is_empty()
+    );
+    // No candidate can satisfy this excluded internal hash. Even a failing
+    // remote backend is unnecessary and must not be called to establish that.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let failing = IdentifierConstrainedRetriever::new(
+        Arc::new(Failing(calls.clone())),
+        ["tags".into()].into_iter().collect(),
+    )
+    .unwrap();
+    assert!(search(
+        &store,
+        &failing,
+        &RetrievalQuery::new("Is operation f1b8a7c9de0a4455 documented?")
+    )
+    .await
+    .unwrap()
+    .hits
+    .is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(search(&store, &failing, &RetrievalQuery::new("AB123456"))
+        .await
+        .is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let invalid = IdentifierConstrainedRetriever::new(
+        Arc::new(Ranking(vec![ScoredChunk {
+            chunk_id: "unknown".into(),
+            score: 1.0,
+        }])),
+        ["tags".into()].into_iter().collect(),
+    )
+    .unwrap();
+    assert!(search(&store, &invalid, &RetrievalQuery::new("AB123456"))
+        .await
+        .is_err());
+    assert!(IdentifierConstrainedRetriever::query_identifiers(
+        "Qwen3 2026 plainword abcdefgh a1B2c3D4"
+    )
+    .contains("a1b2c3d4"));
+    assert_eq!(
+        IdentifierConstrainedRetriever::query_identifiers("Qwen3 2026 plainword abcdefgh").len(),
+        0
+    );
+}
+
+#[tokio::test]
 async fn fusion_uses_ranks_and_rejects_invalid_backend_entries_before_truncation() {
     let dir = tempfile::tempdir().unwrap();
     let store = corpus(dir.path()).await;

@@ -14,7 +14,8 @@ use super::{
 use crate::runtime::{
     rag::{
         self, ConfiguredLexicalRetriever, CorpusStore, EmbeddingBatch, EmbeddingIndex,
-        EmbeddingModel, HybridRetriever, LexicalConfig, Retriever, VectorRetriever,
+        EmbeddingModel, HybridRetriever, IdentifierConstrainedRetriever, LexicalConfig, Retriever,
+        VectorRetriever,
     },
     state::fingerprint,
     store::{atomic_write, blocking, read_json, storage},
@@ -41,6 +42,10 @@ pub struct AppRetrieval {
     pub semantic_weight: f64,
     /// Explicitly calibrated cosine cutoff; zero preserves positive-only behavior.
     pub semantic_min_score: f64,
+    /// Explicit hard lexical constraints for long mixed letter/digit identifiers.
+    /// Omitted when false to preserve legacy configuration fingerprints.
+    #[serde(skip_serializing_if = "is_false")]
+    pub exact_identifiers: bool,
     pub rank_constant: f64,
     pub candidate_k: usize,
 }
@@ -53,10 +58,14 @@ impl Default for AppRetrieval {
             lexical_weight: 1.0,
             semantic_weight: 1.0,
             semantic_min_score: 0.0,
+            exact_identifiers: false,
             rank_constant: 60.0,
             candidate_k: 20,
         }
     }
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 /// All billing fields are explicit. The host's per-request reservation must
 /// cover any accepted input at the configured service's price. An unexpected
@@ -507,7 +516,7 @@ pub(super) async fn configured_with_stores(
         config.retrieval.lexical.clone(),
     )?);
     if config.retrieval.mode == RetrievalMode::Lexical {
-        return Ok(lexical);
+        return constrain_identifiers(config, lexical);
     }
     let resources = Resources::new(config, stores)?;
     let index = resources.index().await?.ok_or_else(|| {
@@ -524,14 +533,28 @@ pub(super) async fn configured_with_stores(
         VectorRetriever::new(index, model, &snapshot)?
             .with_min_score(config.retrieval.semantic_min_score)?,
     );
-    Ok(Arc::new(
-        HybridRetriever::new(lexical, vector).with_fusion(
+    constrain_identifiers(
+        config,
+        Arc::new(HybridRetriever::new(lexical, vector).with_fusion(
             config.retrieval.lexical_weight,
             config.retrieval.semantic_weight,
             config.retrieval.rank_constant,
             config.retrieval.candidate_k,
-        )?,
-    ))
+        )?),
+    )
+}
+fn constrain_identifiers(
+    config: &AppConfig,
+    inner: Arc<dyn Retriever>,
+) -> Result<Arc<dyn Retriever>, RuntimeError> {
+    if config.retrieval.exact_identifiers {
+        Ok(Arc::new(IdentifierConstrainedRetriever::new(
+            inner,
+            config.retrieval.lexical.metadata_keys.clone(),
+        )?))
+    } else {
+        Ok(inner)
+    }
 }
 
 /// Explicit full rebuild/update. Expected revision AND configuration identity

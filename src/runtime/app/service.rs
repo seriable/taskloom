@@ -743,6 +743,8 @@ async fn explain_retrieval(
     query.validate()?;
     Ok(Json(json!({"original_query":query.text,
         "lexical_query":app.config.retrieval.lexical.expanded_query(&query.text)?,
+        "lexical_terms":app.config.retrieval.lexical.query_terms(&query.text)?,
+        "required_identifiers":if app.config.retrieval.exact_identifiers {crate::runtime::rag::IdentifierConstrainedRetriever::query_identifiers(&query.text)} else {std::collections::BTreeSet::new()},
         "semantic_query":query.text,"binding":app.retriever.identity(),
         "rewrite":"host-configured exact aliases, one pass, no model call",
         "note":"configured lexical settings; a custom host retriever may use a different algorithm"})))

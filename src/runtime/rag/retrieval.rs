@@ -88,6 +88,10 @@ pub struct LexicalConfig {
     /// Exact whole-query aliases (trimmed, lowercase keys), appended once.
     /// This deterministic rewrite never calls a model or follows source text.
     pub query_aliases: BTreeMap<String, Vec<String>>,
+    /// Host-selected normalized tokens to omit from lexical matching. Empty
+    /// preserves legacy ranking and its serialized configuration identity.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub stop_words: BTreeSet<String>,
 }
 impl Default for LexicalConfig {
     fn default() -> Self {
@@ -100,6 +104,7 @@ impl Default for LexicalConfig {
                 .map(String::from)
                 .collect(),
             query_aliases: BTreeMap::new(),
+            stop_words: BTreeSet::new(),
         }
     }
 }
@@ -125,9 +130,15 @@ impl LexicalConfig {
                     || values.iter().any(|v| v.trim().is_empty() || v.len() > 512)
                     || key.len() + values.iter().map(|v| v.len() + 1).sum::<usize>() > 4096
             })
+            || self.stop_words.len() > 256
+            || self.stop_words.iter().any(|word| {
+                word.is_empty()
+                    || word.len() > 64
+                    || terms(word).into_keys().collect::<Vec<_>>() != [word.clone()]
+            })
         {
             return Err(invalid(
-                "invalid lexical field weights, metadata keys or query aliases",
+                "invalid lexical field weights, metadata keys, query aliases or stop words",
             ));
         }
         Ok(())
@@ -147,6 +158,14 @@ impl LexicalConfig {
             return Err(invalid("expanded query exceeds 4096 bytes"));
         }
         Ok(expanded)
+    }
+    /// Actual lexical query tokens, after the same bounded host expansion and
+    /// stop-word policy used by retrieval. Does not contact any provider.
+    pub fn query_terms(&self, text: &str) -> Result<Vec<String>, RuntimeError> {
+        Ok(terms(&self.expanded_query(text)?)
+            .into_keys()
+            .filter(|term| !self.stop_words.contains(term))
+            .collect())
     }
 }
 #[derive(Debug, Clone, Default)]
@@ -181,9 +200,7 @@ fn lexical_search(
     config: &LexicalConfig,
 ) -> Result<Vec<ScoredChunk>, RuntimeError> {
     query.validate()?;
-    let terms = terms(&config.expanded_query(&query.text)?)
-        .into_keys()
-        .collect::<Vec<_>>();
+    let terms = config.query_terms(&query.text)?;
     if terms.is_empty() || snapshot.chunks.is_empty() {
         return Ok(Vec::new());
     }
@@ -200,14 +217,14 @@ fn lexical_search(
             .chunks
             .iter()
             .map(|chunk| match field {
-                0 => terms_for_chunk(&chunk.text),
-                1 => terms_for_chunk(&chunk.title),
+                0 => terms_for_chunk(&chunk.text, &config.stop_words),
+                1 => terms_for_chunk(&chunk.title, &config.stop_words),
                 _ => {
                     let mut counts = BTreeMap::<String, usize>::new();
                     if let Some(doc) = snapshot.documents.get(&chunk.document_id) {
                         for key in &config.metadata_keys {
                             if let Some(value) = doc.metadata.get(key) {
-                                for (term, n) in terms_for_chunk(value).0 {
+                                for (term, n) in terms_for_chunk(value, &config.stop_words).0 {
                                     *counts.entry(term).or_default() += n;
                                 }
                             }
@@ -258,8 +275,9 @@ fn lexical_search(
     matches.truncate(query.top_k);
     Ok(matches)
 }
-fn terms_for_chunk(text: &str) -> (BTreeMap<String, usize>, usize) {
-    let counts = terms(text);
+fn terms_for_chunk(text: &str, stop_words: &BTreeSet<String>) -> (BTreeMap<String, usize>, usize) {
+    let mut counts = terms(text);
+    counts.retain(|word, _| !stop_words.contains(word));
     let length = counts.values().sum();
     (counts, length)
 }

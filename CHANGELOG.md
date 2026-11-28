@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Optional host lexical stop words and exact long alphanumeric identifier
+  constraints prevent function-word and absent-record false recalls without
+  rewriting citable source text. Empty/disabled settings preserve legacy
+  fingerprints. A fixed configured Qwen profile measured hybrid recall@5
+  46/48 and 22/22 empty negative queries; the first profile failure and two
+  remaining positive misses are retained. This small visible development set
+  does not establish general default retrieval or semantic/factual quality.
+  See `docs/retrieval-relevance.md`.
+
 - Explicit SQLite/PostgreSQL durable project queues persist exact input before
   independent worker processes execute existing run/workflow/PEER/session
   controllers. Queue/runtime fences, approval/recovery occupancy, authenticated

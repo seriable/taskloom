@@ -278,6 +278,8 @@ async fn validation_explanation_and_index_auth_do_not_load_credentials_or_dispat
         .lexical
         .query_aliases
         .insert("restart".into(), vec!["reconciliation".into()]);
+    cfg.retrieval.lexical.stop_words.insert("the".into());
+    cfg.retrieval.exact_identifiers = true;
     let (_app, url, server) = host(cfg.clone()).await;
     let client = reqwest::Client::new();
     assert_eq!(
@@ -310,6 +312,21 @@ async fn validation_explanation_and_index_auth_do_not_load_credentials_or_dispat
         .await
         .unwrap();
     assert_eq!(response["lexical_query"], "restart reconciliation");
+    assert_eq!(
+        response["lexical_terms"],
+        json!(["reconciliation", "restart"])
+    );
+    let absent = client
+        .post(format!("{url}/knowledge/search"))
+        .bearer_auth(TOKEN)
+        .json(&RetrievalQuery::new("the unregistered ABC123456 operation"))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert!(absent["hits"].as_array().unwrap().is_empty());
     let response = client
         .post(format!("{url}/knowledge/search"))
         .bearer_auth(TOKEN)

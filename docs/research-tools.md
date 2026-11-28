@@ -358,6 +358,11 @@ It does not establish real-model embedding relevance. The subsequent
 retains unsuccessful negative-query/agent outcomes. Broader quality and
 cross-framework acceptance remain open P0 work.
 
+For opt-in stop-word filtering, exact long alphanumeric query constraints,
+configuration migration and actual learned-embedding calibration results, see
+[retrieval relevance](retrieval-relevance.md). Empty/disabled settings preserve
+old configuration bindings; source text and citable quotations are unchanged.
+
 ## Validation provenance
 
 Local HTTP fixtures verify search→fetch→ingest→retrieve→quote verification,

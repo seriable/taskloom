@@ -1,0 +1,633 @@
+{
+  "version": 2,
+  "provenance": "Maintainer-authored visible synthetic operations corpus. Calibration queries were observed in an actual raw/prefixed Qwen probe; 36 evaluation queries were fixed before this profile was dispatched. This is a same-maintainer development split, not externally held out, blind relevance judging or semantic claim/fact scoring. Original v1 labels unchanged.",
+  "documents": [
+    {
+      "id": "recovery",
+      "title": "Recovery policy",
+      "source": "fixture:recovery",
+      "text": "Interrupted non-idempotent writes require reconciliation. Confirm the original operation's external outcome before deciding how to continue. Do not silently repeat the write.",
+      "metadata": {
+        "tags": "restart crash resume",
+        "body_sha256": "unsearchablehash"
+      }
+    },
+    {
+      "id": "approval",
+      "title": "Approval contract",
+      "source": "fixture:approval",
+      "text": "The operator approves the exact tool name and arguments. Changing the payload invalidates the recorded decision. A pending ticket alone never grants execution.",
+      "metadata": {
+        "keywords": "human review permission"
+      }
+    },
+    {
+      "id": "budget",
+      "title": "Generation spending",
+      "source": "fixture:budget",
+      "text": "Reserve the worst allowed model cost durably before dispatch. Settle known usage after a response. Keep the reservation when the charge is unknown.",
+      "metadata": {
+        "topic": "quota accounting"
+      }
+    },
+    {
+      "id": "embedding",
+      "title": "Embedding spending",
+      "source": "fixture:embedding",
+      "text": "A query vector request uses a separate service ledger. Generation limits do not include this service. Failed requests may still incur a charge.",
+      "metadata": {
+        "tags": "semantic retrieval vector billing"
+      }
+    },
+    {
+      "id": "index",
+      "title": "Index lifecycle",
+      "source": "fixture:index",
+      "text": "Build source vectors explicitly. A changed corpus fingerprint or model identity invalidates the saved artifact before a query is dispatched. No background rebuild occurs.",
+      "metadata": {
+        "summary": "stale search index update"
+      }
+    },
+    {
+      "id": "citation",
+      "title": "Citation checking",
+      "source": "fixture:citation",
+      "text": "A reference must use a retrieved chunk identifier and an exact quotation from its body. Matching words do not establish whether the cited passage supports the claim.",
+      "metadata": {
+        "keywords": "provenance source evidence"
+      }
+    },
+    {
+      "id": "isolation",
+      "title": "Tenant isolation",
+      "source": "fixture:isolation",
+      "text": "Authenticated host context determines the tenant and project. Model output and source documents cannot choose ownership or create a new grant.",
+      "metadata": {
+        "topic": "authorization access control"
+      }
+    },
+    {
+      "id": "zh",
+      "title": "长任务恢复操作",
+      "source": "fixture:zh",
+      "text": "先核对外部系统是否已完成写入，再记录观察到的结果。不可直接再次执行状态未知的操作。",
+      "metadata": {
+        "tags": "断点恢复 人工核验"
+      }
+    },
+    {
+      "id": "scheduler",
+      "title": "Worker scheduling",
+      "source": "fixture:scheduler",
+      "text": "The scheduler assigns a queued task to an available process. Losing its lease stops new dispatch. Ownership alone does not guarantee exactly one external side effect.",
+      "metadata": {
+        "tags": "queue fencing concurrency"
+      }
+    },
+    {
+      "id": "meeting",
+      "title": "Weekly review notes",
+      "source": "fixture:meeting",
+      "text": "The team discussed office seating, lunch choices and the next community meeting. These notes contain no operational recovery instructions.",
+      "metadata": {
+        "author": "Community organizer"
+      }
+    },
+    {
+      "id": "cache",
+      "title": "Cache configuration",
+      "source": "fixture:cache",
+      "text": "Answer identity includes settings that can change returned content. A transport timeout is an operational limit rather than an answer transformation.",
+      "metadata": {
+        "keywords": "namespace configuration"
+      }
+    },
+    {
+      "id": "logs",
+      "title": "Operational logging",
+      "source": "fixture:logs",
+      "text": "Log event type, outcome and elapsed time. Avoid exporting prompts and credentials by default. External telemetry destinations require explicit host configuration.",
+      "metadata": {
+        "topic": "observability trace diagnostics"
+      }
+    }
+  ],
+  "queries": [
+    {
+      "id": "title-recovery",
+      "text": "recovery policy",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "metadata-restart",
+      "text": "crash resume",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "body-reconcile",
+      "text": "interrupted non idempotent writes",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "title-approval",
+      "text": "approval contract",
+      "relevant": [
+        "approval"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "body-arguments",
+      "text": "exact tool arguments payload",
+      "relevant": [
+        "approval"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "metadata-budget",
+      "text": "quota accounting",
+      "relevant": [
+        "budget"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "body-reserve",
+      "text": "reserve model cost durably",
+      "relevant": [
+        "budget"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "embedding-title",
+      "text": "embedding spending",
+      "relevant": [
+        "embedding"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "index-stale",
+      "text": "stale index update",
+      "relevant": [
+        "index"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "citation-limit",
+      "text": "quotation supports claim",
+      "relevant": [
+        "citation"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "isolation-metadata",
+      "text": "authorization access control",
+      "relevant": [
+        "isolation"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "zh-title",
+      "text": "长任务恢复",
+      "relevant": [
+        "zh"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "zh-body",
+      "text": "外部系统写入",
+      "relevant": [
+        "zh"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "scheduler-meta",
+      "text": "queue fencing concurrency",
+      "relevant": [
+        "scheduler"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "cache-title",
+      "text": "cache configuration",
+      "relevant": [
+        "cache"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "telemetry-meta",
+      "text": "observability trace diagnostics",
+      "relevant": [
+        "logs"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "absent",
+      "text": "photosynthesis chloroplast",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "metadata-internals",
+      "text": "unsearchablehash",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-bill",
+      "text": "If the model connection disappears, may I return the allocated money?",
+      "relevant": [
+        "budget"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-effect",
+      "text": "How do I continue safely when a side effect might already have happened?",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-identity",
+      "text": "Which party decides which organization owns an operation?",
+      "relevant": [
+        "isolation"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-claims",
+      "text": "Does a word-for-word excerpt necessarily prove the statement beside it?",
+      "relevant": [
+        "citation"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-worker",
+      "text": "What must the background process do if its ownership expires?",
+      "relevant": [
+        "scheduler"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-vectors",
+      "text": "Are the costs of converting a search into a numerical representation part of the language model allowance?",
+      "relevant": [
+        "embedding"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-human",
+      "text": "Can an unresolved authorization request let the assistant carry out an altered operation?",
+      "relevant": [
+        "approval"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "paraphrase-rebuild",
+      "text": "Will changed source material trigger rebuilding the numerical search data automatically?",
+      "relevant": [
+        "index"
+      ],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-cooking",
+      "text": "How many minutes should a chocolate souffle bake?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-space",
+      "text": "What is the atmospheric pressure on Venus?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-nonsense",
+      "text": "qzvplmxyzabc777",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-flora",
+      "text": "Why do orchids need fungal partners to germinate?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-transport",
+      "text": "How long is the railway journey from London to Edinburgh?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-medical",
+      "text": "What is the standard recommended adult vitamin D intake?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-sports",
+      "text": "Who won the 1998 football world cup?",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "absent-hash",
+      "text": "sha256:c0ffee91cafebeefdeadbeef",
+      "relevant": [],
+      "split": "calibration"
+    },
+    {
+      "id": "eval-cost-reservation",
+      "text": "What must be saved before sending a paid request to a model?",
+      "relevant": [
+        "budget"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-unknown-usage",
+      "text": "A model reply was lost. Can the reserved charge simply be released?",
+      "relevant": [
+        "budget"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-observe-first",
+      "text": "A write was interrupted. How should the operator establish whether to repeat it?",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-no-repeat",
+      "text": "What prevents a restarted process from silently repeating a non-idempotent action?",
+      "relevant": [
+        "recovery"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-human-exact",
+      "text": "Which parts of a tool operation must the human approve exactly?",
+      "relevant": [
+        "approval"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-changed-input",
+      "text": "Does changing the payload preserve the previous approval?",
+      "relevant": [
+        "approval"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-vector-charge",
+      "text": "Is embedding billing included in the generation spending limit?",
+      "relevant": [
+        "embedding"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-failed-query-charge",
+      "text": "Can an unsuccessful numerical search request still cost money?",
+      "relevant": [
+        "embedding"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-model-index",
+      "text": "What happens to the index if the configured model identity changes?",
+      "relevant": [
+        "index"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-source-index",
+      "text": "Will edited documents cause background rebuilding of the source vectors?",
+      "relevant": [
+        "index"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-excerpt-truth",
+      "text": "Is an exact quotation sufficient to show that a claim is true?",
+      "relevant": [
+        "citation"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-source-reference",
+      "text": "What must a reference identify and copy from the retrieved passage?",
+      "relevant": [
+        "citation"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-document-authority",
+      "text": "May a retrieved document select a different tenant or grant itself access?",
+      "relevant": [
+        "isolation"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-context-owner",
+      "text": "Who sets the organization and project ownership for an agent task?",
+      "relevant": [
+        "isolation"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-worker-expiry",
+      "text": "Can a worker dispatch additional work after its lease is lost?",
+      "relevant": [
+        "scheduler"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-queued-process",
+      "text": "How is a queued task assigned to an execution process?",
+      "relevant": [
+        "scheduler"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-external-guarantee",
+      "text": "Does having ownership ensure that an external side effect occurs exactly once?",
+      "relevant": [
+        "scheduler"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-logs-secrets",
+      "text": "Should ordinary telemetry export model prompts and credentials?",
+      "relevant": [
+        "logs"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-logs-destination",
+      "text": "Who must configure an external telemetry destination explicitly?",
+      "relevant": [
+        "logs"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-cache-setting",
+      "text": "Which configuration settings belong in the identity of a cached answer?",
+      "relevant": [
+        "cache"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-cache-timeout",
+      "text": "Does a transport timeout transform an answer or just limit the operation?",
+      "relevant": [
+        "cache"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-cn-recovery",
+      "text": "状态未知的写入操作可以直接重试吗？",
+      "relevant": [
+        "zh"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-cn-observe",
+      "text": "恢复前如何核对外部系统里的写入结果？",
+      "relevant": [
+        "zh"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-meeting",
+      "text": "What topics were discussed at the community meeting?",
+      "relevant": [
+        "meeting"
+      ],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-astronomy",
+      "text": "What is the orbital period of Neptune?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-food",
+      "text": "How many grams of flour does a sourdough loaf need?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-biology",
+      "text": "Why do maple leaves turn red in autumn?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-city",
+      "text": "Where is the capital of Mongolia?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-hash",
+      "text": "Does f1b8a7c9de0a4455 refer to a documented operation?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-word",
+      "text": "zxqwplmv009988",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-music",
+      "text": "Who composed the opera The Magic Flute?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-fitness",
+      "text": "How far is a standard Olympic marathon?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-ocean",
+      "text": "How deep is the Mariana Trench?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-chemistry",
+      "text": "What is the molar mass of sodium chloride?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-weather",
+      "text": "Will it snow tomorrow in Helsinki?",
+      "relevant": [],
+      "split": "evaluation"
+    },
+    {
+      "id": "eval-negative-history",
+      "text": "When was the printing press invented?",
+      "relevant": [],
+      "split": "evaluation"
+    }
+  ]
+}

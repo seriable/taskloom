@@ -23,6 +23,15 @@ def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def source_matches(path, expected):
+    # Git's Windows checkout may use CRLF. Bind the same source text on either
+    # platform without permitting JSON/key/label changes.
+    text = path.read_text(encoding="utf-8")
+    return expected in {
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        hashlib.sha256(text.replace("\n", "\r\n").encode("utf-8")).hexdigest()}
+
+
 @contextlib.contextmanager
 def host(executable, config, root):
     with socket.socket() as sock:
@@ -77,6 +86,8 @@ def evaluate(api, dataset):
     positives = negatives = negative_correct = 0
     for query in dataset["queries"]:
         case = {"id": query["id"], "query": query["text"], "relevant": query["relevant"]}
+        if "split" in query:
+            case["split"] = query["split"]
         started = time.perf_counter()
         try:
             result = api("/knowledge/search", {"text": query["text"], "top_k": 5, "max_bytes": 24576})
@@ -102,9 +113,21 @@ def evaluate(api, dataset):
         case["wall_ms"] = round((time.perf_counter() - started) * 1000)
         cases.append(case)
         print(f"evaluated {query['id']}: {case.get('ranked', case.get('error'))}", flush=True)
-    return {"positive_queries": positives, "recall_at_5": recall / positives,
+    result = {"positive_queries": positives, "recall_at_5": recall / positives,
             "mrr_at_5": mrr / positives, "negative_queries": negatives,
             "negative_correct": negative_correct, "errors": sum("error" in c for c in cases), "cases": cases}
+    result["splits"] = {}
+    for split in sorted({q["split"] for q in cases if "split" in q}):
+        selected = [q for q in cases if q.get("split") == split]
+        positive = [q for q in selected if q["relevant"]]
+        negative = [q for q in selected if not q["relevant"]]
+        result["splits"][split] = {
+            "positive_queries": len(positive), "negative_queries": len(negative),
+            "recall_at_5": sum(len(set(q.get("ranked", [])) & set(q["relevant"])) / len(q["relevant"]) for q in positive) / len(positive) if positive else None,
+            "mrr_at_5": sum(q.get("reciprocal_rank", 0) for q in positive) / len(positive) if positive else None,
+            "negative_correct": sum("error" not in q and not q["ranked"] for q in negative),
+            "errors": sum("error" in q for q in selected)}
+    return result
 
 
 def main():
@@ -117,8 +140,15 @@ def main():
     parser.add_argument("--key-env", default="TASKLOOM_LOCAL_API_KEY")
     parser.add_argument("--semantic-min-score", type=float, default=0.0)
     parser.add_argument("--lexical-weight", type=float, default=1.0)
+    parser.add_argument("--profile", type=Path, help="explicit retrieval JSON: lexical settings, semantic cutoff and fusion; services supplied separately")
+    parser.add_argument("--protocol", type=Path, help="fixed dataset/profile hashes and split quality gates; failure remains visible")
     parser.add_argument("--database",type=Path,help="explicit AppDatabase JSON; migrate first and set only its named URL environment")
     args = parser.parse_args()
+    protocol = None
+    if args.protocol:
+        protocol = json.loads(args.protocol.read_text(encoding="utf-8"))
+        if not args.profile or not source_matches(args.dataset, protocol["dataset_sha256"]) or not source_matches(args.profile, protocol["profile_sha256"]):
+            raise ValueError("fixed protocol dataset/profile hash mismatch; refuse before dispatch")
     url = urllib.parse.urlsplit(args.embedding_url)
     if url.hostname not in {"127.0.0.1", "localhost", "::1"} or url.scheme != "http" or url.query or url.username:
         raise ValueError("this zero-fee example permits only a loopback embedding service")
@@ -135,6 +165,12 @@ def main():
         "key_env": args.key_env, "namespace": "qwen3-embedding-files-" + identity},
         "model": "Qwen/Qwen3-Embedding-0.6B", "currency": "USD", "input_micros_per_million_tokens": 0,
         "max_request_cost_micros": 0, "max_total_cost_micros": 0, "max_input_bytes": 131072, "timeout_ms": 60000}}}
+    if args.profile:
+        profile = json.loads(args.profile.read_text(encoding="utf-8"))
+        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers"}
+        if not isinstance(profile, dict) or set(profile) - allowed:
+            raise ValueError("profile may only set lexical/fusion/relevance settings; no authority or service changes")
+        config["retrieval"].update(profile)
     if args.database:
         config['database']=json.loads(args.database.read_text(encoding='utf-8'))
     config_path = root / "taskloom.json"
@@ -142,9 +178,12 @@ def main():
     save(root / "dataset.json", dataset)
     save(root / "models.lock.json", manifest)
     report = {"version": 1, "evidence_kind": "actual local learned embedding API, no generation",
+        "taskloom_sha256": hashlib.sha256(args.taskloom.resolve().read_bytes()).hexdigest(),
         "model": "Qwen/Qwen3-Embedding-0.6B", "model_files_identity": identity, "configuration": config,
         "limitations": ["small visible synthetic relevance set, not held out", "no semantic claim-support or factual-accuracy scoring",
                         "no competitor evaluation", "no query instruction/prefix", "API fee USD 0; hardware/electricity unmetered"]}
+    report["dataset_sha256"] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
+    report["protocol"] = protocol
     report["phase_configurations"] = {"lexical": json.loads(json.dumps(config))}
     started = time.perf_counter()
     try:
@@ -161,6 +200,17 @@ def main():
         with host(args.taskloom.resolve(), config_path, root) as api:
             report["hybrid"] = evaluate(api, dataset)
             report["index_status"] = api("/retrieval")
+        if protocol:
+            gates = protocol["gates"]
+            measured = report["hybrid"]["splits"][gates["split"]]
+            report["quality_checks"] = {
+                "fixed_positive_count": measured["positive_queries"] == gates["positive_queries"],
+                "fixed_negative_count": measured["negative_queries"] == gates["negative_queries"],
+                "recall_at_5": measured["recall_at_5"] >= gates["min_recall_at_5"],
+                "mrr_at_5": measured["mrr_at_5"] >= gates["min_mrr_at_5"],
+                "negative_accuracy": measured["negative_correct"] / measured["negative_queries"] >= gates["required_negative_accuracy"],
+                "errors": measured["errors"] <= gates["max_errors"]}
+            report["quality_status"] = "passed" if all(report["quality_checks"].values()) else "failed"
     except Exception as error:
         report["campaign_error"] = str(error)
         raise
@@ -169,6 +219,8 @@ def main():
         save(root / "report.json", report)
     print(json.dumps({name: {k: v for k, v in report[name].items() if k != "cases"}
                       for name in ["lexical", "hybrid"]}, indent=2), flush=True)
+    if report.get("quality_status") == "failed":
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
