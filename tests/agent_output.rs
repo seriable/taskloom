@@ -12,6 +12,56 @@ use serde_json::{json, Value};
 use taskloom::runtime::{rag::*, workflow::*, *};
 use taskloom::CancelToken;
 
+#[tokio::test]
+async fn schema_repairs_receive_constraint_path_without_dumping_the_invalid_answer() {
+    struct LongAnswer(AtomicUsize);
+    impl Model for LongAnswer {
+        fn generate<'a>(
+            &'a self,
+            request: &'a ModelRequest,
+            budget: &'a RunBudget,
+        ) -> BoxFuture<'a, Result<ModelOutput, RuntimeError>> {
+            Box::pin(async move {
+                budget.reserve_before_dispatch(0).await?.settle(0);
+                let call = self.0.fetch_add(1, Ordering::SeqCst);
+                let value = if call == 0 {
+                    json!({"text":"PRIVATE_INVALID_VALUE".repeat(180)})
+                } else {
+                    let feedback = request
+                        .messages
+                        .iter()
+                        .filter_map(|m| {
+                            if let Message::User { content } = m {
+                                Some(content)
+                            } else {
+                                None
+                            }
+                        })
+                        .find(|s| s.contains("Host final-output validation feedback"))
+                        .unwrap();
+                    assert!(feedback.contains("/text"));
+                    assert!(feedback.contains("/properties/text/maxLength"));
+                    assert!(feedback.contains("2 characters"));
+                    assert!(!feedback.contains("PRIVATE_INVALID_VALUE"));
+                    json!({"text":"ok"})
+                };
+                Ok(ModelOutput {
+                    model: request.model.clone(),
+                    turn: AssistantTurn::text(value.to_string()),
+                })
+            })
+        }
+    }
+    let model = LongAnswer(AtomicUsize::new(0));
+    let tools = ToolRegistry::new();
+    let report=AgentLoop::new(&model,&tools,"schema-feedback")
+        .with_limits(RunLimits{max_cost_micros:Some(0),..Default::default()})
+        .with_output_policy(FinalOutputPolicy::JsonSchema{schema:json!({"type":"object","properties":{"text":{"type":"string","maxLength":2}},"required":["text"]}),max_repairs:1})
+        .run("bounded-diagnostic",vec![Message::user("answer")]).await;
+    assert_eq!(report.stop_reason, StopReason::Completed);
+    assert_eq!(model.0.load(Ordering::SeqCst), 2);
+}
+
 #[derive(Clone, Copy)]
 enum Mode {
     Correct,

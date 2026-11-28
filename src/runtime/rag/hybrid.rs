@@ -4,7 +4,9 @@ use std::sync::Arc;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 
-use super::{invalid, CorpusSnapshot, RetrievalQuery, Retriever, ScoredChunk};
+use super::{
+    invalid, Chunk, CorpusSnapshot, LexicalConfig, RetrievalQuery, Retriever, ScoredChunk,
+};
 use crate::runtime::{state::fingerprint, RuntimeError};
 
 /// Host-supplied embeddings. Identity must bind model/version, endpoint and
@@ -124,13 +126,37 @@ pub struct EmbeddingIndex {
     pub model_identity: String,
     pub dimensions: usize,
     pub vectors: BTreeMap<String, Vec<f32>>,
+    /// Version2 embeds a visible title prefix; version1 keeps body-only vectors.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub document_context: bool,
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 impl EmbeddingIndex {
+    /// Exact index input, also used by hosts to preflight all batches before
+    /// the first service dispatch. Citable bodies and IDs remain unchanged.
+    pub fn document_text(chunk: &Chunk, document_context: bool) -> String {
+        if document_context {
+            format!("Title: {}\n\n{}", chunk.title, chunk.text)
+        } else {
+            chunk.text.clone()
+        }
+    }
     /// Explicitly embeds all chunks in bounded batches. No background rebuild
     /// or retry occurs, so callers can manage ingestion/service spending.
     pub async fn build(
         snapshot: &CorpusSnapshot,
         model: &dyn EmbeddingModel,
+    ) -> Result<Self, RuntimeError> {
+        Self::build_with_document_context(snapshot, model, false).await
+    }
+    /// Explicit full build. Title context is embedded with each body without
+    /// changing the source chunk, quote or source hash. Charges include both.
+    pub async fn build_with_document_context(
+        snapshot: &CorpusSnapshot,
+        model: &dyn EmbeddingModel,
+        document_context: bool,
     ) -> Result<Self, RuntimeError> {
         snapshot.validate()?;
         if snapshot.chunks.is_empty() || snapshot.chunks.len() > 10_000 {
@@ -141,14 +167,18 @@ impl EmbeddingIndex {
             return Err(invalid("invalid embedding model identity"));
         }
         let mut index = Self {
-            version: 1,
+            version: if document_context { 2 } else { 1 },
             corpus_fingerprint: fingerprint(snapshot)?,
             model_identity: identity,
             dimensions: 0,
             vectors: BTreeMap::new(),
+            document_context,
         };
         for chunks in snapshot.chunks.chunks(32) {
-            let texts = chunks.iter().map(|c| c.text.clone()).collect::<Vec<_>>();
+            let texts = chunks
+                .iter()
+                .map(|c| Self::document_text(c, document_context))
+                .collect::<Vec<_>>();
             let batch = model.embed(&texts).await?;
             if batch.identity != index.model_identity
                 || model.identity() != index.model_identity
@@ -171,7 +201,7 @@ impl EmbeddingIndex {
     pub fn validate(&self, snapshot: &CorpusSnapshot, identity: &str) -> Result<(), RuntimeError> {
         snapshot.validate()?;
         check_size(self.dimensions, self.vectors.len())?;
-        if self.version != 1
+        if self.version != if self.document_context { 2 } else { 1 }
             || identity.trim().is_empty()
             || identity.len() > 4096
             || self.model_identity != identity
@@ -225,6 +255,7 @@ pub struct VectorRetriever {
     binding: String,
     min_score: f64,
     query_prefix: String,
+    lexical_support: Option<(LexicalConfig, usize)>,
 }
 impl VectorRetriever {
     pub fn new(
@@ -240,6 +271,7 @@ impl VectorRetriever {
             binding,
             min_score: 0.0,
             query_prefix: String::new(),
+            lexical_support: None,
         })
     }
     /// Host-calibrated minimum cosine similarity, in 0..=1. Positive
@@ -266,6 +298,24 @@ impl VectorRetriever {
         self.query_prefix = prefix;
         Ok(self)
     }
+    /// Optional conjunctive relevance evidence: require this many distinct
+    /// configured lexical query terms in the candidate's enabled fields.
+    /// Applied before vector top-k truncation; repeated words do not count
+    /// twice. Zero disables it and preserves the original identity. This
+    /// sacrifices paraphrase/cross-language recall and requires calibration;
+    /// matching words and cosine similarity do not establish claim support.
+    pub fn with_lexical_support(
+        mut self,
+        config: LexicalConfig,
+        minimum_terms: usize,
+    ) -> Result<Self, RuntimeError> {
+        config.validate()?;
+        if minimum_terms > 256 {
+            return Err(invalid("minimum lexical support exceeds256 terms"));
+        }
+        self.lexical_support = (minimum_terms > 0).then_some((config, minimum_terms));
+        Ok(self)
+    }
 }
 impl Retriever for VectorRetriever {
     fn identity(&self) -> Option<String> {
@@ -278,13 +328,20 @@ impl Retriever for VectorRetriever {
                     .expect("validated vector configuration")
             )
         };
-        Some(if self.query_prefix.is_empty() {
+        let identity = if self.query_prefix.is_empty() {
             legacy
         } else {
             format!(
                 "vector-query-prefix-v1:{}",
                 fingerprint(&(&legacy, &self.query_prefix)).expect("bounded query prefix")
             )
+        };
+        Some(match &self.lexical_support {
+            None => identity,
+            Some(policy) => format!(
+                "vector-lexical-support-v1:{}",
+                fingerprint(&(&identity, policy)).expect("validated lexical support")
+            ),
         })
     }
     fn retrieve<'a>(
@@ -295,6 +352,43 @@ impl Retriever for VectorRetriever {
         Box::pin(async move {
             query.validate()?;
             self.index.validate(snapshot, &self.model.identity())?;
+            let eligible = if let Some((config, minimum)) = &self.lexical_support {
+                let required = config
+                    .query_terms(&query.text)?
+                    .into_iter()
+                    .collect::<BTreeSet<_>>();
+                let mut eligible = BTreeSet::new();
+                if required.len() >= *minimum {
+                    for chunk in &snapshot.chunks {
+                        let mut present = BTreeSet::new();
+                        if config.body_weight > 0.0 {
+                            present.extend(super::retrieval::terms(&chunk.text).into_keys());
+                        }
+                        if config.title_weight > 0.0 {
+                            present.extend(super::retrieval::terms(&chunk.title).into_keys());
+                        }
+                        if config.metadata_weight > 0.0 {
+                            if let Some(document) = snapshot.documents.get(&chunk.document_id) {
+                                for key in &config.metadata_keys {
+                                    if let Some(value) = document.metadata.get(key) {
+                                        present.extend(super::retrieval::terms(value).into_keys());
+                                    }
+                                }
+                            }
+                        }
+                        if required.intersection(&present).count() >= *minimum {
+                            eligible.insert(chunk.id.clone());
+                        }
+                    }
+                }
+                // Proved lexical inadmissibility needs no billed query call.
+                if eligible.is_empty() {
+                    return Ok(Vec::new());
+                }
+                Some(eligible)
+            } else {
+                None
+            };
             let text = format!("{}{}", self.query_prefix, query.text);
             let batch = self.model.embed(std::slice::from_ref(&text)).await?;
             if batch.identity != self.index.model_identity
@@ -311,6 +405,9 @@ impl Retriever for VectorRetriever {
                 .vectors
                 .iter()
                 .filter_map(|(id, v)| {
+                    if eligible.as_ref().is_some_and(|ids| !ids.contains(id)) {
+                        return None;
+                    }
                     let dot = vector
                         .iter()
                         .zip(v)

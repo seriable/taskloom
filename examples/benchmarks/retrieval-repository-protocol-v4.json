@@ -1,0 +1,26 @@
+{
+  "version": 4,
+  "scope": "Observed repository retrieval regression after the retained instructed v4 transfer failure. Same full corpus,84 query texts/labels, cutoff0.43, prefix, fusion and numeric gates. Only title+body document embedding context changes through an explicit version2 index build. Fixed_evaluation is now observed development regression, not held out. No source-claim entailment guarantee.",
+  "dataset_sha256": "054c3818b2d0e56e0ee48833c3e2322e86ef7e960ec836aae248d47fb83934fa",
+  "profile_sha256": "a7db4f399ef60b1d51577082ee5536fd53d67073b1ef33a8011c4cc4fccfc053",
+  "gates": {
+    "split": "fixed_evaluation",
+    "positive_queries": 24,
+    "negative_queries": 12,
+    "min_recall_at_5": 0.9,
+    "min_mrr_at_5": 0.85,
+    "required_negative_accuracy": 1.0,
+    "max_errors": 0
+  },
+  "additional_gates": [
+    {
+      "split": "calibration",
+      "positive_queries": 36,
+      "negative_queries": 12,
+      "min_recall_at_5": 0.9,
+      "min_mrr_at_5": 0.85,
+      "required_negative_accuracy": 1.0,
+      "max_errors": 0
+    }
+  ]
+}

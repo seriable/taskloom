@@ -1,5 +1,9 @@
 # v0.2.0-alpha.1 preview notes
 
+These notes describe the immutable tagged snapshot. Later checkout development
+and acceptance are tracked in [the P0–P2 checklist](p0-p2-roadmap.md); they do not
+retroactively change this release's source or attached artifacts.
+
 Published prerelease:
 <https://github.com/seriable/taskloom/releases/tag/v0.2.0-alpha.1>.
 Its source is `43f337d45b0dadc8b54256ff04e3afe95d7dd874`; source/Cargo archives

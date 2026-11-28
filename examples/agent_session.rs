@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         max_input_bytes: 1000,
         keep_recent_blocks: 1,
         max_summary_bytes: 300,
+        pin_first_user: false,
     });
     let durable = DurableAgent::new(&agent, &runs);
     let first = format!(

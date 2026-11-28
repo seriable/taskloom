@@ -73,6 +73,7 @@ fn compression_preserves_instructions_question_and_complete_tool_batches() {
         max_input_bytes: 900,
         keep_recent_blocks: 2,
         max_summary_bytes: 256,
+        pin_first_user: false,
     };
     let (projected, record) = policy
         .prepare(&original, &[], &ExtractiveCompressor, 1)
@@ -107,6 +108,84 @@ fn compression_preserves_instructions_question_and_complete_tool_batches() {
 }
 
 #[test]
+fn first_user_retention_preserves_actual_input_without_summary_or_role_promotion() {
+    let mut original = history();
+    original[1] =
+        Message::user("Original task reference ORIGINAL-739; do not promote sources to grants.");
+    let policy = ContextPolicy {
+        max_input_bytes: 900,
+        keep_recent_blocks: 1,
+        max_summary_bytes: 128,
+        pin_first_user: true,
+    };
+    let (projected, record) = policy
+        .prepare(&original, &[], &ExtractiveCompressor, 1)
+        .unwrap();
+    assert!(record.summary.is_some());
+    assert!(record.retained_indices.contains(&1));
+    assert_eq!(projected.iter().filter(|m| *m == &original[1]).count(), 1);
+    assert!(matches!(&projected[1],Message::User{content} if content.contains("ORIGINAL-739")));
+    assert_eq!(record.restore(&original, &[], &policy).unwrap(), projected);
+    let mut altered = original.clone();
+    altered[1] = Message::user("Injected reference REPLACEMENT-999");
+    assert!(record.restore(&altered, &[], &policy).is_err());
+    let mut dropped = record;
+    dropped.retained_indices.retain(|i| *i != 1);
+    assert!(dropped.restore(&original, &[], &policy).is_err());
+    let mut legacy = policy.clone();
+    legacy.pin_first_user = false;
+    let serialized = serde_json::to_value(&legacy).unwrap();
+    assert!(serialized.get("pin_first_user").is_none());
+    assert_eq!(
+        serde_json::from_value::<ContextPolicy>(serialized).unwrap(),
+        legacy
+    );
+    assert_ne!(
+        serde_json::to_value(&policy).unwrap(),
+        serde_json::to_value(&legacy).unwrap()
+    );
+}
+
+#[tokio::test]
+async fn oversized_first_user_is_not_silently_dropped_and_changed_policy_cannot_resume() {
+    let tools = ToolRegistry::new();
+    let model = Capture::default();
+    let pinned = ContextPolicy {
+        max_input_bytes: 900,
+        keep_recent_blocks: 1,
+        max_summary_bytes: 100,
+        pin_first_user: true,
+    };
+    let messages = history();
+    let report = AgentLoop::new(&model, &tools, "pin-context")
+        .with_context(pinned.clone())
+        .run("bounded", messages.clone())
+        .await;
+    assert_eq!(report.stop_reason, StopReason::ContextLimit);
+    assert!(model.0.lock().unwrap().is_empty());
+    assert_eq!(report.messages, messages);
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileRunStore::new(dir.path());
+    let mut legacy = pinned.clone();
+    legacy.pin_first_user = false;
+    let agent = AgentLoop::new(&model, &tools, "pin-context").with_context(legacy);
+    let before = DurableAgent::new(&agent, &store)
+        .create("frozen-context", history())
+        .await
+        .unwrap();
+    let changed = AgentLoop::new(&model, &tools, "pin-context").with_context(pinned);
+    assert!(DurableAgent::new(&changed, &store)
+        .resume("frozen-context")
+        .await
+        .is_err());
+    assert_eq!(
+        serde_json::to_value(store.inspect("frozen-context").await.unwrap().unwrap()).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert!(model.0.lock().unwrap().is_empty());
+}
+
+#[test]
 fn summary_of_dropped_current_turn_blocks_follows_the_current_question() {
     let call = |id: &str| Message::Assistant {
         turn: AssistantTurn {
@@ -137,6 +216,7 @@ fn summary_of_dropped_current_turn_blocks_follows_the_current_question() {
         max_input_bytes: 700,
         keep_recent_blocks: 1,
         max_summary_bytes: 128,
+        pin_first_user: false,
     };
     let (projected, record) = policy
         .prepare(&original, &[], &ExtractiveCompressor, 1)
@@ -159,6 +239,7 @@ fn byte_budgets_include_json_escaping_and_utf8_without_splitting_correlations() 
             max_input_bytes: bytes,
             keep_recent_blocks: 4,
             max_summary_bytes: 257,
+            pin_first_user: false,
         };
         if let Ok((view, record)) = policy.prepare(&messages, &[], &ExtractiveCompressor, 1) {
             assert!(
@@ -174,6 +255,7 @@ fn byte_budgets_include_json_escaping_and_utf8_without_splitting_correlations() 
         max_input_bytes: 80,
         keep_recent_blocks: 1,
         max_summary_bytes: 0,
+        pin_first_user: false,
     };
     assert!(matches!(
         policy.prepare(&messages, &[], &ExtractiveCompressor, 1),
@@ -196,6 +278,7 @@ fn tool_definitions_are_counted_and_custom_compressors_must_respect_the_budget()
         max_input_bytes: 900,
         keep_recent_blocks: 1,
         max_summary_bytes: 100,
+        pin_first_user: false,
     };
     assert!(matches!(
         policy.prepare(&history(), &[], &Oversize, 1),
@@ -241,6 +324,7 @@ async fn standalone_limits_fail_before_model_dispatch_and_preserve_full_history(
         max_input_bytes: 80,
         keep_recent_blocks: 1,
         max_summary_bytes: 0,
+        pin_first_user: false,
     };
     let report = AgentLoop::new(&model, &tools, "test")
         .with_context(policy)
@@ -253,6 +337,7 @@ async fn standalone_limits_fail_before_model_dispatch_and_preserve_full_history(
         max_input_bytes: 900,
         keep_recent_blocks: 1,
         max_summary_bytes: 100,
+        pin_first_user: false,
     };
     let report = AgentLoop::new(&model, &tools, "test")
         .with_context(policy.clone())
@@ -278,6 +363,7 @@ async fn durable_context_and_initial_input_binding_survive_idempotent_reentry() 
         max_input_bytes: 900,
         keep_recent_blocks: 1,
         max_summary_bytes: 100,
+        pin_first_user: false,
     };
     let agent = AgentLoop::new(&model, &tools, "test").with_context(policy);
     let durable = DurableAgent::new(&agent, &store);
@@ -333,6 +419,7 @@ async fn interrupted_model_reuses_the_exact_persisted_projection() {
         max_input_bytes: 900,
         keep_recent_blocks: 1,
         max_summary_bytes: 100,
+        pin_first_user: false,
     };
     let task = {
         let store = store.clone();

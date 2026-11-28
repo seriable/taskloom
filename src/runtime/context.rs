@@ -14,6 +14,13 @@ pub struct ContextPolicy {
     pub max_input_bytes: usize,
     pub keep_recent_blocks: usize,
     pub max_summary_bytes: usize,
+    /// Keep the actual first User message in its original role and position.
+    /// This is host-controlled retention, never extraction or new authority.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub pin_first_user: bool,
+}
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl Default for ContextPolicy {
@@ -22,6 +29,7 @@ impl Default for ContextPolicy {
             max_input_bytes: 64 * 1024,
             keep_recent_blocks: 4,
             max_summary_bytes: 4096,
+            pin_first_user: false,
         }
     }
 }
@@ -137,6 +145,11 @@ impl ContextRecord {
             .collect::<BTreeSet<_>>();
         if (0..system).any(|index| !retained.contains(&index))
             || !retained.contains(&last_user)
+            || (policy.pin_first_user
+                && source
+                    .iter()
+                    .position(|m| matches!(m, Message::User { .. }))
+                    .is_some_and(|index| !retained.contains(&index)))
             || blocks
                 .last()
                 .is_some_and(|block| block.iter().any(|index| !retained.contains(index)))
@@ -220,6 +233,14 @@ impl ContextPolicy {
         for keep in (1..=self.keep_recent_blocks.min(blocks.len())).rev() {
             let mut retained = (0..system).collect::<BTreeSet<_>>();
             retained.insert(last_user);
+            if self.pin_first_user {
+                if let Some(index) = messages
+                    .iter()
+                    .position(|m| matches!(m, Message::User { .. }))
+                {
+                    retained.insert(index);
+                }
+            }
             for block in blocks.iter().rev().take(keep) {
                 retained.extend(block);
             }
@@ -252,7 +273,7 @@ impl ContextPolicy {
                 allowance = allowance.saturating_sub((bytes - self.max_input_bytes).max(1));
             }
         }
-        Err(context("instructions, current question, tool definitions and latest complete block cannot fit the context budget"))
+        Err(context("instructions, pinned user input, current question, tool definitions and latest complete block cannot fit the context budget"))
     }
 }
 

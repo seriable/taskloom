@@ -66,9 +66,172 @@ fn model() -> Arc<FixtureEmbeddings> {
     })
 }
 
+#[tokio::test]
+async fn lexical_support_requires_distinct_non_stop_terms_and_preserves_legacy_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let embeddings = model();
+    let index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    let legacy = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot).unwrap();
+    let mut config = LexicalConfig::default();
+    config.stop_words.insert("a".into());
+    let disabled = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot)
+        .unwrap()
+        .with_lexical_support(config.clone(), 0)
+        .unwrap();
+    assert_eq!(legacy.identity(), disabled.identity());
+    let supported = VectorRetriever::new(index, embeddings.clone(), &snapshot)
+        .unwrap()
+        .with_lexical_support(config, 2)
+        .unwrap();
+    assert_ne!(legacy.identity(), supported.identity());
+    let before = embeddings.calls.load(Ordering::SeqCst);
+    for text in ["a car", "car car car", "automobile passengers"] {
+        assert!(supported
+            .retrieve(&snapshot, &RetrievalQuery::new(text))
+            .await
+            .unwrap()
+            .is_empty());
+    }
+    assert_eq!(embeddings.calls.load(Ordering::SeqCst), before);
+    let result = search(&store, &supported, &RetrievalQuery::new("car passengers"))
+        .await
+        .unwrap();
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].chunk.text, "A car transports passengers.");
+    let title_only = LexicalConfig {
+        body_weight: 0.0,
+        metadata_weight: 0.0,
+        ..Default::default()
+    };
+    let index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    let title_gate = VectorRetriever::new(index, embeddings, &snapshot)
+        .unwrap()
+        .with_lexical_support(title_only, 1)
+        .unwrap();
+    assert!(title_gate
+        .retrieve(&snapshot, &RetrievalQuery::new("passengers"))
+        .await
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+async fn lexical_support_is_applied_before_top_k_and_still_validates_the_entire_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let embeddings = model();
+    let mut index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    let vehicle = snapshot
+        .chunks
+        .iter()
+        .find(|c| c.document_id == "vehicle")
+        .unwrap();
+    let fruit = snapshot
+        .chunks
+        .iter()
+        .find(|c| c.document_id == "fruit")
+        .unwrap();
+    index.vectors.insert(vehicle.id.clone(), vec![0.8, 0.2]);
+    index.vectors.insert(fruit.id.clone(), vec![1.0, 0.0]);
+    let retriever = VectorRetriever::new(index, embeddings, &snapshot)
+        .unwrap()
+        .with_min_score(0.5)
+        .unwrap()
+        .with_lexical_support(LexicalConfig::default(), 2)
+        .unwrap();
+    let mut query = RetrievalQuery::new("car passengers");
+    query.top_k = 1;
+    let hits = retriever.retrieve(&snapshot, &query).await.unwrap();
+    assert_eq!(hits[0].chunk_id, vehicle.id);
+    let mut changed = snapshot.clone();
+    changed.revision += 1;
+    assert!(retriever
+        .retrieve(&changed, &RetrievalQuery::new("unmatched words"))
+        .await
+        .is_err());
+}
+
 struct RankedFixture {
     id: Option<&'static str>,
     ranking: Vec<ScoredChunk>,
+}
+
+#[tokio::test]
+async fn lexical_support_binds_aliases_and_only_uses_selected_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FileCorpusStore::new(dir.path());
+    ingest(
+        &store,
+        Document {
+            id: "vehicle".into(),
+            title: "Guide".into(),
+            source: "fixture:guide".into(),
+            text: "A car transports passengers.".into(),
+            metadata: BTreeMap::from([
+                ("topic".into(), "car transport".into()),
+                ("private_hash".into(), "car secret".into()),
+            ]),
+        },
+        &WindowChunker::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    let snapshot = store.snapshot().await.unwrap();
+    let embeddings = model();
+    let index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    let config = LexicalConfig {
+        body_weight: 0.0,
+        title_weight: 0.0,
+        ..Default::default()
+    };
+    let retriever = VectorRetriever::new(index.clone(), embeddings.clone(), &snapshot)
+        .unwrap()
+        .with_lexical_support(config.clone(), 2)
+        .unwrap();
+    assert_eq!(
+        retriever
+            .retrieve(&snapshot, &RetrievalQuery::new("car transport"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let before = embeddings.calls.load(Ordering::SeqCst);
+    assert!(retriever
+        .retrieve(&snapshot, &RetrievalQuery::new("car secret"))
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(embeddings.calls.load(Ordering::SeqCst), before);
+    let mut aliased = config;
+    aliased
+        .query_aliases
+        .insert("car".into(), vec!["transport".into()]);
+    let aliased = VectorRetriever::new(index, embeddings, &snapshot)
+        .unwrap()
+        .with_lexical_support(aliased, 2)
+        .unwrap();
+    assert_ne!(retriever.identity(), aliased.identity());
+    assert_eq!(
+        aliased
+            .retrieve(&snapshot, &RetrievalQuery::new("car"))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 impl Retriever for RankedFixture {
     fn identity(&self) -> Option<String> {
@@ -255,6 +418,86 @@ async fn explicit_query_prefix_is_versioned_without_touching_document_vectors() 
                 .is_err()
         );
     }
+}
+
+#[tokio::test]
+async fn explicit_document_context_versions_index_but_preserves_exact_citable_bodies() {
+    struct InputModel(std::sync::Mutex<Vec<Vec<String>>>);
+    impl EmbeddingModel for InputModel {
+        fn identity(&self) -> String {
+            "context-fixture-v1".into()
+        }
+        fn embed<'a>(
+            &'a self,
+            texts: &'a [String],
+        ) -> BoxFuture<'a, Result<EmbeddingBatch, RuntimeError>> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(texts.to_vec());
+                Ok(EmbeddingBatch {
+                    identity: self.identity(),
+                    vectors: vec![vec![1.0, 0.0]; texts.len()],
+                })
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let before = serde_json::to_value(&snapshot).unwrap();
+    let model = Arc::new(InputModel(std::sync::Mutex::new(vec![])));
+    let legacy = EmbeddingIndex::build(&snapshot, model.as_ref())
+        .await
+        .unwrap();
+    assert_eq!(legacy.version, 1);
+    assert!(serde_json::to_value(&legacy)
+        .unwrap()
+        .get("document_context")
+        .is_none());
+    let index = EmbeddingIndex::build_with_document_context(&snapshot, model.as_ref(), true)
+        .await
+        .unwrap();
+    assert_eq!(index.version, 2);
+    assert!(index.document_context);
+    index.validate(&snapshot, &model.identity()).unwrap();
+    assert_eq!(
+        model.0.lock().unwrap()[1],
+        snapshot
+            .chunks
+            .iter()
+            .map(|c| format!("Title: {}\n\n{}", c.title, c.text))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(serde_json::to_value(&snapshot).unwrap(), before);
+    let vector = VectorRetriever::new(index.clone(), model.clone(), &snapshot).unwrap();
+    assert_ne!(
+        vector.identity(),
+        VectorRetriever::new(legacy, model.clone(), &snapshot)
+            .unwrap()
+            .identity()
+    );
+    let result = search(&store, &vector, &RetrievalQuery::new("vehicles"))
+        .await
+        .unwrap();
+    let chunk = &result.hits[0].chunk;
+    SearchResult::verify_all(
+        std::slice::from_ref(&result),
+        CitedReport {
+            text: format!("Evidence [[{}]].", chunk.id),
+            citations: vec![Citation {
+                chunk_id: chunk.id.clone(),
+                quote: chunk.text.clone(),
+            }],
+        },
+    )
+    .unwrap();
+    for version in [1, 3] {
+        let mut bad = index.clone();
+        bad.version = version;
+        assert!(bad.validate(&snapshot, &model.identity()).is_err());
+    }
+    let mut bad = index;
+    bad.document_context = false;
+    assert!(bad.validate(&snapshot, &model.identity()).is_err());
 }
 
 #[tokio::test]

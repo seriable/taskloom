@@ -170,7 +170,7 @@ impl FinalOutputPolicy {
                 .map_err(|e| e.to_string())?
                 .validate(&value)
                 .map_err(|e| {
-                    format!("cited answer schema rejected the original model JSON: {e}")
+                    format!("cited answer schema rejected the original model JSON at {} (schema {}): {}",e.instance_path,e.schema_path,e.masked())
                 })?;
         }
         Ok(())
@@ -287,9 +287,14 @@ impl FinalOutputPolicy {
                 let value: Value = serde_json::from_str(text)
                     .map_err(|e| format!("final answer is not exact JSON: {e}"))?;
                 let validator = jsonschema::validator_for(schema).map_err(|e| e.to_string())?;
-                validator
-                    .validate(&value)
-                    .map_err(|e| format!("final JSON schema check failed: {e}"))
+                validator.validate(&value).map_err(|e| {
+                    format!(
+                        "final JSON schema check failed at {} (schema {}): {}",
+                        e.instance_path,
+                        e.schema_path,
+                        e.masked()
+                    )
+                })
             }
             Self::CitedReport { .. }
             | Self::LocatedCitedReport { .. }

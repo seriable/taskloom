@@ -190,7 +190,7 @@ def main():
         "max_request_cost_micros": 0, "max_total_cost_micros": 0, "max_input_bytes": 131072, "timeout_ms": 60000}}}
     if args.profile:
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
-        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers", "require_semantic_match", "query_prefix"}
+        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers", "require_semantic_match", "query_prefix", "embedding_document_context", "semantic_min_lexical_terms"}
         if not isinstance(profile, dict) or set(profile) - allowed:
             raise ValueError("profile may only set lexical/fusion/relevance settings; no authority or service changes")
         config["retrieval"].update(profile)

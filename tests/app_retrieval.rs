@@ -10,6 +10,19 @@ use std::sync::{
 use taskloom::runtime::{app::*, rag::*, *};
 
 const TOKEN: &str = "retrieval-test-operator-token";
+
+#[test]
+fn semantic_lexical_admission_is_explicit_bounded_and_identity_bound() {
+    let legacy = AppRetrieval::default();
+    let serialized = serde_json::to_value(&legacy).unwrap();
+    assert!(serialized.get("semantic_min_lexical_terms").is_none());
+    let mut configured = legacy.clone();
+    configured.semantic_min_lexical_terms = 2;
+    configured.validate().unwrap();
+    assert_ne!(serde_json::to_value(&configured).unwrap(), serialized);
+    configured.semantic_min_lexical_terms = 257;
+    assert!(configured.validate().is_err());
+}
 #[derive(Clone)]
 struct Endpoint {
     root: std::path::PathBuf,
@@ -145,6 +158,44 @@ async fn query(url: &str) -> reqwest::Response {
         .send()
         .await
         .unwrap()
+}
+
+#[tokio::test]
+async fn semantic_lexical_admission_uses_enabled_fields_and_reserves_only_dispatched_queries() {
+    let (_dir, mut cfg, calls, provider) = setup(Some(3), false).await;
+    build(&cfg).await.unwrap();
+    let original = retrieval::index_status(&cfg).await.unwrap()["index_binding"].clone();
+    cfg.retrieval.mode = RetrievalMode::Hybrid;
+    cfg.retrieval.require_semantic_match = true;
+    cfg.retrieval.semantic_min_lexical_terms = 2;
+    let status = retrieval::index_status(&cfg).await.unwrap();
+    assert_eq!(status["index_binding"], original);
+    assert_eq!(status["index_valid"], true);
+    let (_app, url, server) = host(cfg.clone()).await;
+    for (text, expected) in [("writes writes", 0), ("Interrupted policy", 1)] {
+        let response = reqwest::Client::new()
+            .post(format!("{url}/knowledge/search"))
+            .bearer_auth(TOKEN)
+            .json(&RetrievalQuery::new(text))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.json::<Value>().await.unwrap()["hits"]
+                .as_array()
+                .unwrap()
+                .len(),
+            expected
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 2); // build plus admitted query
+    assert_eq!(
+        retrieval::index_status(&cfg).await.unwrap()["embedding_spend"]["requests"],
+        2
+    );
+    provider.abort();
+    server.abort();
 }
 
 #[tokio::test]
@@ -348,6 +399,33 @@ async fn validation_explanation_and_index_auth_do_not_load_credentials_or_dispat
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     provider.abort();
     server.abort();
+}
+
+#[tokio::test]
+async fn changed_document_context_refuses_old_index_before_provider_dispatch_and_rebuilds_explicitly(
+) {
+    let (_dir, mut cfg, calls, provider) = setup(Some(3), false).await;
+    build(&cfg).await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    cfg.retrieval.mode = RetrievalMode::Hybrid;
+    let legacy_binding = retrieval::index_status(&cfg).await.unwrap()["index_binding"].clone();
+    cfg.retrieval.embedding_document_context = true;
+    assert_eq!(
+        retrieval::index_status(&cfg).await.unwrap()["index_valid"],
+        false
+    );
+    assert!(Application::open(cfg.clone()).await.is_err());
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    cfg.retrieval.mode = RetrievalMode::Lexical;
+    build(&cfg).await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    cfg.retrieval.mode = RetrievalMode::Hybrid;
+    let status = retrieval::index_status(&cfg).await.unwrap();
+    assert_eq!(status["index_valid"], true);
+    assert_ne!(status["index_binding"], legacy_binding);
+    let app = Application::open(cfg).await.unwrap();
+    drop(app);
+    provider.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -23,6 +23,9 @@ class ScoringControls(unittest.TestCase):
         self.assertEqual(measures['corpus_factuality_supported'],.5)
         self.assertFalse(checks['errors'])
         self.assertFalse(module.score_generated(rows[:1],gates)[1]['fixed_case_count'])
+        for row in rows:row.pop('error',None);row['is_final']=True;row['native']={'cited_support':'supported','corpus_factuality':'supported'}
+        self.assertTrue(module.score_generated(rows,dict(gates,expected_final_count=2))[1]['final_answer_supported'])
+        self.assertFalse(module.score_generated(rows,dict(gates,expected_final_count=3))[1]['final_answer_supported'])
     def test_citation_role_context_cannot_read_corpus_or_expected_labels(self):
         attached=[{'chunk_id':'a'*64,'quote':'The switch is off.'}]
         corpus=[{'document_id':'private-to-corpus-judge','body':'A separate source says the car is blue.'}]

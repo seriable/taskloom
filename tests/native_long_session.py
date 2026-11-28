@@ -11,6 +11,15 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 
 
 class LengthControls(unittest.TestCase):
+    def test_recovery_sources_require_original_identities_not_six_arbitrary_documents(self):
+        required={'queue','quota','memory','skills','telemetry','retrieval'}
+        verified={'sources':[{'document_id':identity} for identity in required]}
+        self.assertTrue(module.required_sources_present(verified,required))
+        verified['sources'][0]={'document_id':'unrelated-source'}
+        self.assertFalse(module.required_sources_present(verified,required))
+        verified['sources']=[{'document_id':'queue'}]*6
+        self.assertFalse(module.required_sources_present(verified,required))
+
     def test_original_answer_boundary_and_host_rendering(self):
         verified={'report':{'text':'host '+('rendered '*500)},'rendering':{'original':{'text':'word '*150}}}
         self.assertEqual(module.answer_length(verified,1),{'words':150,'user_limit':150,'passed':True})

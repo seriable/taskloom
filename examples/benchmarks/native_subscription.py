@@ -172,6 +172,9 @@ def main():
     parser.add_argument('--rubric', choices=['v1','v2','v3'], default='v1')
     parser.add_argument('--assessment', action='store_true')
     parser.add_argument('--recover-from',type=Path)
+    parser.add_argument('--context-bytes',type=int)
+    parser.add_argument('--previous-recovery',type=Path)
+    parser.add_argument('--pin-first-user',action='store_true')
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding='utf-8'))
     provider = config['provider']
@@ -184,6 +187,9 @@ def main():
             or args.grounded and args.campaign != 'long-session'
             or args.rubric != 'v1' and args.campaign != 'claim-support'
             or args.assessment and (args.campaign != 'claim-support' or not args.separate_evidence)
+            or args.context_bytes is not None and args.campaign not in ['long-session','long-recovery']
+            or args.previous_recovery is not None and args.campaign!='long-recovery'
+            or args.pin_first_user and args.campaign!='long-recovery'
             or args.controls is not None and args.campaign != 'claim-support'
             or args.separate_evidence and args.campaign != 'claim-support'
             or args.suite is not None and args.campaign == 'claim-support'):
@@ -234,6 +240,9 @@ def main():
     if args.campaign=='claim-support':command += ['--rubric',args.rubric]
     if args.assessment:command.append('--assessment')
     if args.recover_from:command += ['--recover-from',str(args.recover_from.resolve())]
+    if args.context_bytes is not None:command += ['--context-bytes',str(args.context_bytes)]
+    if args.previous_recovery:command += ['--previous-recovery',str(args.previous_recovery.resolve())]
+    if args.pin_first_user:command.append('--pin-first-user')
     if args.controls:
         command += ['--controls',str(args.controls.resolve())]
     thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()

@@ -53,6 +53,13 @@ pub struct AppRetrieval {
     /// Explicit query-only publisher instruction, never added to document vectors.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub query_prefix: String,
+    /// Explicit index version2: embed visible chunk title along with its body.
+    #[serde(skip_serializing_if = "is_false")]
+    pub embedding_document_context: bool,
+    /// Require distinct lexical query terms before semantic candidate ranking.
+    /// Zero preserves legacy admission and serialized configuration identity.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub semantic_min_lexical_terms: usize,
     pub rank_constant: f64,
     pub candidate_k: usize,
 }
@@ -68,6 +75,8 @@ impl Default for AppRetrieval {
             exact_identifiers: false,
             require_semantic_match: false,
             query_prefix: String::new(),
+            embedding_document_context: false,
+            semantic_min_lexical_terms: 0,
             rank_constant: 60.0,
             candidate_k: 20,
         }
@@ -75,6 +84,9 @@ impl Default for AppRetrieval {
 }
 fn is_false(value: &bool) -> bool {
     !value
+}
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 /// All billing fields are explicit. The host's per-request reservation must
 /// cover any accepted input at the configured service's price. An unexpected
@@ -95,6 +107,9 @@ pub struct AppEmbedding {
 impl AppRetrieval {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.lexical.validate()?;
+        if self.semantic_min_lexical_terms > 256 {
+            return Err(config_error("semantic_min_lexical_terms exceeds256"));
+        }
         if self.query_prefix.len() > 4096 || self.query_prefix.contains('\0') {
             return Err(config_error(
                 "query_prefix exceeds4096 bytes or contains NUL",
@@ -537,6 +552,11 @@ pub(super) async fn configured_with_stores(
     let index = resources.index().await?.ok_or_else(|| {
         config_error("embedding index missing; explicitly build it in lexical mode first")
     })?;
+    if index.document_context != config.retrieval.embedding_document_context {
+        return Err(config_error(
+            "embedding document context changed; explicitly rebuild the index in lexical mode",
+        ));
+    }
     let cfg = config
         .retrieval
         .embedding
@@ -547,7 +567,11 @@ pub(super) async fn configured_with_stores(
     let vector = Arc::new(
         VectorRetriever::new(index, model, &snapshot)?
             .with_min_score(config.retrieval.semantic_min_score)?
-            .with_query_prefix(config.retrieval.query_prefix.clone())?,
+            .with_query_prefix(config.retrieval.query_prefix.clone())?
+            .with_lexical_support(
+                config.retrieval.lexical.clone(),
+                config.retrieval.semantic_min_lexical_terms,
+            )?,
     );
     constrain_identifiers(
         config,
@@ -618,13 +642,25 @@ pub(super) async fn build_index_with_stores(
     let model = MeteredEmbedding::new(cfg, resources.clone(), Some(&guard))?;
     // Validate every batch before spending on the first one.
     for batch in snapshot.chunks.chunks(32) {
-        if batch.iter().map(|c| c.text.len()).sum::<usize>() > model.config.max_input_bytes {
+        if batch
+            .iter()
+            .map(|c| {
+                EmbeddingIndex::document_text(c, config.retrieval.embedding_document_context).len()
+            })
+            .sum::<usize>()
+            > model.config.max_input_bytes
+        {
             return Err(config_error(
                 "index batch exceeds embedding input limit; adjust chunking/request limit",
             ));
         }
     }
-    let index = EmbeddingIndex::build(&snapshot, &model).await?;
+    let index = EmbeddingIndex::build_with_document_context(
+        &snapshot,
+        &model,
+        config.retrieval.embedding_document_context,
+    )
+    .await?;
     let current = stores.corpus.snapshot().await?;
     if fingerprint(&current)? != fingerprint(&snapshot)? {
         return Err(RuntimeError::Conflict(
@@ -654,7 +690,14 @@ pub(super) async fn index_status_with_stores(
     let index = resources.index().await?;
     let snapshot = stores.corpus.snapshot().await?;
     let validity = match (&index, &config.retrieval.embedding) {
-        (Some(index), Some(cfg)) => index.validate(&snapshot, &resources.model_identity(cfg)?),
+        (Some(index), Some(cfg))
+            if index.document_context == config.retrieval.embedding_document_context =>
+        {
+            index.validate(&snapshot, &resources.model_identity(cfg)?)
+        }
+        (Some(_), Some(_)) => Err(config_error(
+            "embedding document context changed; explicit rebuild required",
+        )),
         _ => Err(config_error("embedding index or configuration missing")),
     };
     let ledger = if let Some(cfg) = config.retrieval.embedding.clone() {

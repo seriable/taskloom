@@ -75,7 +75,7 @@ def score_generated(cases, gates):
     checks={'fixed_case_count':len(cases)==gates['expected_cases'],
             'cited_support':measurements['cited_support_supported']>=gates['minimum_cited_support'],
             'corpus_factuality':measurements['corpus_factuality_supported']>=gates['minimum_corpus_factuality'],
-            'final_answer_supported':len(finals)==1 and all(supported(finals[0],f) for f in ['cited_support','corpus_factuality']),
+            'final_answer_supported':len(finals)==gates.get('expected_final_count',1) and all(supported(c,f) for c in finals for f in ['cited_support','corpus_factuality']),
             'errors':sum('error' in c or not isinstance(c.get('native'),dict) for c in cases)<=gates['max_errors']}
     return measurements,checks
 
@@ -226,7 +226,7 @@ def main():
         for revision, document in enumerate(documents.values()):
             api('/knowledge', {'document': document, 'expected_revision': revision})
         for identity in documents:
-            result = api('/knowledge/search', {'text': identity, 'top_k': 20, 'max_bytes': 24576})
+            result = api('/knowledge/search', {'text': documents[identity]['title'], 'top_k': 20, 'max_bytes': 24576})
             match = [hit for hit in result['hits'] if hit['chunk']['document_id'] == identity]
             if not match or len({h['chunk']['id'] for h in match}) != len(match):
                 raise ValueError('control evidence absent/duplicate: ' + identity)

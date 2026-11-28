@@ -32,6 +32,7 @@ def main():
     parser.add_argument('--campaign',type=Path,required=True)
     parser.add_argument('--embedding-url',required=True)
     parser.add_argument('--key-env',default='TASKLOOM_LOCAL_API_KEY')
+    parser.add_argument('--mode',choices=['raw','instruct','both'],default='both')
     args=parser.parse_args()
     url=urlsplit(args.embedding_url)
     if url.scheme!='http' or url.hostname not in ['127.0.0.1','localhost','::1'] or url.username or url.query:
@@ -44,12 +45,13 @@ def main():
     documents={c['id']:c['document_id'] for c in corpus['chunks']}
     if set(index['vectors'])!=set(documents):raise ValueError('captured corpus/index source mismatch')
     queries=dataset['queries']
-    if not 1<=len(queries)<=64:raise ValueError('bounded diagnostic query set required')
+    if not 1<=len(queries)<=128:raise ValueError('bounded diagnostic query set required')
     report={'scope':__doc__,'source_index_sha256':hashlib.sha256((campaign/'state/retrieval/index.json').read_bytes()).hexdigest(),
             'credential_environment':args.key_env,'api_fee_currency':'USD','api_input_price':0,
-            'max_requests':8,'attempts':[],'modes':{},'identity_qualification':'Use the same already verified owned local service as the captured index; no independent server attestation or model fallback.'}
+            'max_requests':16,'attempts':[],'modes':{},'identity_qualification':'Use the same already verified owned local service as the captured index; no independent server attestation or model fallback.'}
     key=os.environ[args.key_env]
     instructions={'raw':'','instruct':'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: '}
+    if args.mode!='both':instructions={args.mode:instructions[args.mode]}
     for mode,prefix in instructions.items():
         vectors=[]
         for offset in range(0,len(queries),16):
@@ -62,8 +64,9 @@ def main():
                 headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'})
             try:
                 with urllib.request.urlopen(request,timeout=60) as response:body=json.loads(response.read(8*1024*1024))
-                if body.get('model')!=payload['model'] or len(body['data'])!=len(payload['input']):raise ValueError('embedding model/count mismatch')
-                vectors.extend(row['embedding'] for row in sorted(body['data'],key=lambda row:row['index']))
+                ordered=sorted(body['data'],key=lambda row:row['index'])
+                if body.get('model')!=payload['model'] or [v['index'] for v in ordered]!=list(range(len(payload['input']))):raise ValueError('embedding model/count/index mismatch')
+                vectors.extend(row['embedding'] for row in ordered)
                 entry.update(status='response_received',usage=body.get('usage'))
                 save(root/f'response-{entry["ordinal"]}.json',body)
             finally:

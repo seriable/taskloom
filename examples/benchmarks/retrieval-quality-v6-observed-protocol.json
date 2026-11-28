@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "scope": "Explicit technical question instruction, unchanged cosine0.43, body-only index, at least2 distinct configured lexical terms before vector truncation. Known84-query regression and new18-query prospective group reported separately; no competitor or claim-support measurement.",
+  "dataset_sha256": "054c3818b2d0e56e0ee48833c3e2322e86ef7e960ec836aae248d47fb83934fa",
+  "profile_sha256": "740484481b1f550dfe3201b5f316f279b3124383a4fb96c2fd228d70de7da360",
+  "gates": {
+    "split": "fixed_evaluation",
+    "positive_queries": 24,
+    "negative_queries": 12,
+    "min_recall_at_5": 0.9,
+    "min_mrr_at_5": 0.85,
+    "required_negative_accuracy": 1.0,
+    "max_errors": 0
+  },
+  "additional_gates": [
+    {
+      "split": "calibration",
+      "positive_queries": 36,
+      "negative_queries": 12,
+      "min_recall_at_5": 0.9,
+      "min_mrr_at_5": 0.85,
+      "required_negative_accuracy": 1.0,
+      "max_errors": 0
+    }
+  ]
+}

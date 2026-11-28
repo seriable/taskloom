@@ -5,11 +5,53 @@ The active Codex Goal covers all seven packages below, including the P2
 service capabilities. Unchecked work is unfinished; a type, mock or feature
 name alone is not acceptance.
 
-The preceding source-delivery scope has shipped. Its hosted Actions gate was
-explicitly waived by the owner. Native-provider effectiveness now has limited
-local measurements; broader quality and framework comparison remain P0 gates.
-The retained 12/12 session-assisted
-trial is a controlled integration baseline, not an independent API benchmark.
+The preceding source-delivery scope shipped with hosted Actions explicitly
+waived by the owner. Later native-provider and framework measurements are
+summarized below. Historical paragraphs retain the state at each increment;
+they are not new unmet gates after later bounded acceptance. The retained12/12
+session-assisted trial remains an integration baseline, not a native benchmark.
+
+## Final integration status — 2026-11-28
+
+The seven development packages now have the documented bounded implementation
+and applicable-environment evidence. The checked evaluation boxes mean the
+actual task, comparison and separate quality measurements were performed;
+they do **not** assert that every historical model output or semantic campaign
+passed. Earlier dated paragraphs below retain their then-open status and are
+superseded by this section, the [whole-goal review](reviews/p0-p2-audit-20261128.md)
+and [consolidated evidence](acceptance/p0-p2-final-20261128.json).
+
+The complete-document configured retrieval profile passes the original84-query
+regression and a newly frozen18-query group under unchanged numeric gates.
+The twelve-turn remote task passes seven runtime/source/length checks; explicit
+same-session continuation with actual first-User retention and bound sources
+passes twelve. Earlier ContextLimit, Deadline, reference-loss and source-loss
+failures, including two retained uncertain attempts, remain unchanged.
+
+Actual V6/V7 six-analyst outputs cover the original material goal but their
+strict citation assessments fail5/6. V8 completes with six analysts, maximum
+observed overlap two,18 native requests,237 original words and all35 structure
+patterns. Its isolated six-topic assessment passes6/6 in each context using12
+requests. Independent review still identifies overbroad memory/telemetry
+wording; neither that native pass nor the scope screen proves truth. An explicit
+bounded feedback revision is recorded separately: its initial native reviewer
+rejects both issues, and its241-word writer corrects them. The overall revision
+workflow **fails** when final review exhausts its fixed6-call allocation; this
+is never relabelled. Separate12-call assessment labels all six actual corrected
+spans supported in each context. Independent review still finds the selected
+Skills quote ends before the uncertain-effect rule object, although the full
+corpus contains it: another same-model false-positive/precision limitation.
+See the review for exact original statements and source boundaries. The last
+finite48-request batch used18+12+6+12 attempts; no retry campaign follows.
+
+Current Windows and actual Linux all-feature regressions each pass371 with17
+explicit ignores; minimal84, actual Windows Rust1.86, strict Clippy/rustdoc and
+related offline controls pass. P1/P2 real PostgreSQL/SQLite, browser, Collector,
+backup/migration and finite-load evidence remains independently hash-checked.
+Source-only packaging and exact credential/private-path exclusion are final
+delivery controls. The integrating agent verifies the actual GitHub main SHA
+after a normal fast-forward push; no public tag or asset is replaced. This
+checklist does not substitute for that actual remote verification.
 
 ## Invariants
 
@@ -28,7 +70,7 @@ trial is a controlled integration baseline, not an independent API benchmark.
 
 ## P0.1 — Complex tasks and multi-agent effectiveness
 
-- [ ] A versioned suite with realistic research, planning, role handoff,
+- [x] A versioned suite with realistic research, planning, role handoff,
   parallel work, bounded reviewer revisions, tool-error repair and long tasks.
 - [x] Real model decisions through an explicitly configured local or remote
   native API, with prompts, outputs, tool observations, framework/model versions,
@@ -39,7 +81,7 @@ trial is a controlled integration baseline, not an independent API benchmark.
   agentUniverse and LangGraph under the same model, task and spending rules.
   Unsupported cases remain visible with reasons; manually assisted latency or
   cost must never enter native-API rankings.
-- [ ] Evaluate source coverage/exact quotes separately from claim support,
+- [x] Evaluate source coverage/exact quotes separately from claim support,
   factual accuracy and research quality. Publish the method and limitations.
 
 2026-11-27 native increment: verified public Qwen weights ran through the
@@ -216,7 +258,7 @@ quality gate is closed. See `grounded-research.md` for migration and scope.
   CLI, API and UI; index/model/corpus binding remains strict.
 - [x] The default research host can select lexical or configured hybrid search;
   operator search and model tools use the same retriever.
-- [ ] A relevance-labelled retrieval set and real embedding acceptance report;
+- [x] A relevance-labelled retrieval set and real embedding acceptance report;
   preserve empty recalls, skipped evidence and stale-index failures.
 
 2026-11-27 increment: field retrieval, deterministic host aliases, configured

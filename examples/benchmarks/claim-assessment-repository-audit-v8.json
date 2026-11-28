@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "name": "Actual v8 six-document writer: exact complete condition-bound topic spans",
+  "provenance": "Exact original complete V8 writer text, divided only at the six topic heading boundaries. Every assertion and separator is retained; concatenating claims reproduces the original text byte for byte. Actual selected chunk IDs from the writer own completed native knowledge_search are bound per source topic. No gold labels, no rewriting, no scope-issue removal. Original V7 failed semantic result remains unchanged. Source-relative same-model judgments remain distinct from deterministic provenance, scope screening and independent session review.",
+  "origin_report_sha256": "f9ac1979cafafb06bfa0f9cecb74d58fbe7bd96128da7d37ae37d9e9b50573cb",
+  "documents": [
+    {
+      "id": "queue",
+      "title": "docs/durable-queue.md Ownership, interruption and recovery",
+      "source": "repo:docs/durable-queue.md",
+      "text": "## Ownership, interruption and recovery\n\nClaiming a job, increasing its attempt count and marking it Running is one SQL\ntransaction. Database time determines renewable lease validity. A candidate is\neligible only when both its queue owner and every associated runtime owner have\nexpired. A live owner is never stolen. Recovery claims are prioritized over new\npending jobs; healthy workers then take jobs in creation/ID order. This is not a\nguarantee of fair CPU allocation among worker processes.\n\nRun/workflow/session stores bind to the exact queue capability. Runtime writes\nand pre-dispatch checks verify both fences, with another check before commit\nafter potentially expensive decoding/accounting. Generation reservations still\ncommit before each provider attempt. Removing a capability cannot authorize\ndispatch through a plain SQL handle. Lease loss or an unverified monitor stops\nnew work; the former owner cannot overwrite the successor's checkpoint or budget.\nExternal services are not transactional participants, so no exactly-once external\neffect guarantee is added.",
+      "metadata": {
+        "topic": "queue release readiness operational audit"
+      }
+    },
+    {
+      "id": "quota",
+      "title": "docs/generation-quota.md Accounting and recovery",
+      "source": "repo:docs/generation-quota.md",
+      "text": "## Accounting and recovery\n\nAdmission and the run's reservation journal commit in the same transaction,\nbefore provider dispatch. The lock order is runtime ownership, project quota,\nthen accounting records. Administrator imports lock the project control row\nand read committed journals without taking runtime leases. PostgreSQL row locks\nand SQLite's immediate writer serialize competing processes.\n\nHeld cost is `committed_micros + in_flight_micros`. Uncertain cost is already\nincluded in committed and is not counted twice. Outstanding attempts are\n`in_flight_attempts + uncertain_attempts`: zero-priced requests occupy slots.\nKnown settlement releases only that attempt's slot. A lost response or killed\nprocess retains its ceiling and slot; converting in-flight into uncertain does\nnot free capacity. The ledger does not silently refund or erase uncertain work.\n\nA quota `Budget` refusal means a transaction was rolled back and no dispatch\nwas admitted. The runtime removes only the refused reservation and records the\nbudget stop without inventing uncertain fees. Other storage/commit failures\nremain ambiguous and retain conservative uncertainty. Reservation registration\nis serialized per run; provider execution can still overlap.",
+      "metadata": {
+        "topic": "quota release readiness operational audit"
+      }
+    },
+    {
+      "id": "memory",
+      "title": "docs/long-term-memory.md Recovery, erasure and migration",
+      "source": "repo:docs/long-term-memory.md",
+      "text": "## Recovery, erasure and migration\n\nVersion-1 file snapshots live under `state_dir/memory/<scope-hash>.memory.json`.\nWrites take per-scope OS locks, verify CAS/audit prefixes, flush a temporary file\nand atomically replace the previous snapshot. Reads fail on corruption; they\ndo not silently reset state. Limits are 16 MiB, 4096 records, 16,384 forgotten\nsource bindings and 20,000 audit events. Admission also reserves 2 KiB, one\npossible tombstone and one possible erasure event per retained record, so\nadministrative forgetting is not stranded by an admitted full snapshot.\nA limit refuses the operation without\nreplacing the valid snapshot. Export/backup before planned migration; retain\nthe scope and revisions when implementing another `MemoryStore`.\n\nExtraction request IDs bind a scope and the exact selected input to a durable\n`memory-<hash>` child. Repeating a completed request with a fresh inspected\nmemory revision reuses its answer without another model request. If memory CAS\nor capacity fails after generation, the completed extraction run stays in the\nrun store; inspect it and retry the **same request ID**, with the correct\nrevision/configuration. Do not silently mint a new paid request. Interrupting\ngeneration preserves its spending uncertainty; normal interrupted-model\nrecovery can admit a further attempt within the original cap. API admission\nis released even if the extraction caller drops its future.",
+      "metadata": {
+        "topic": "memory release readiness operational audit"
+      }
+    },
+    {
+      "id": "skills",
+      "title": "docs/skill-packages.md Host activation and durable identity",
+      "source": "repo:docs/skill-packages.md",
+      "text": "## Host activation and durable identity\n\nHost configuration opts in separately, using the verified install pin:\n\n```json\n{\n  \"skills\": [{\n    \"package\": {\"name\":\"research-brief\", \"version\":\"1.0.0\", \"digest\":\"COPY_THE_EXACT_INSTALLED_DIGEST\"},\n    \"mount\": \"research\",\n    \"mode\": \"active\",\n    \"grant\": {\"tools\":[\"knowledge_search\"], \"permissions\":[\"knowledge:read\"], \"credentials\":[]}\n  }]\n}\n```\n\nThis is a fragment, not a complete provider configuration. The research host\nmust enable knowledge access and set an explicit generation ceiling for output\nrepairs. Mount prefixes are 1–14 lowercase ASCII letters/digits/hyphens;\nmounted role names cannot collide with host roles or other mounts.\n\nEvery dependency's tool requirements must match the host's actual registered\ntool effects and complete permission sets. Grants must be subsets of the\noriginal host policy. Required credential names need both explicit package\ngrants and a host-configured provider/service name; package text never receives\nthe environment values. Packages cannot downgrade a write to a read, define a\nservice endpoint for the host, enlarge a tool policy, waive exact approval,\nremove spending ceilings or silently retry an uncertain effect. Tool-service\nand embedding charges retain their separate host boundaries.",
+      "metadata": {
+        "topic": "skills release readiness operational audit"
+      }
+    },
+    {
+      "id": "telemetry",
+      "title": "docs/observability.md Trace and time semantics",
+      "source": "repo:docs/observability.md",
+      "text": "## Trace and time semantics\n\n`TraceSnapshot::run`, `workflow` and `session` build run or parent traces.\nWorkflow/node/durable-run and session/turn/durable-run relationships come from\npersisted references and exact initial-input bindings. Closed session children\nalso match the recorded report fingerprint. Unreferenced, duplicate or mismatched\nchildren fail; absent children are counted. Active durable children can be found\nthrough their frozen node context before an outcome returns to the parent.\nReads of separate records are individually atomic, **not** a cross-record\ntransaction or a guarantee that a live parent and child were read simultaneously.\n\nStable SHA-256-derived IDs use a trusted host namespace and logical identities.\nRevisions change the source revision key, not existing trace/span identities.\nChanging the namespace changes IDs. The application defaults to a namespace\nderived from its absolute state root; set an explicit namespace before moving\njournals if continuity across deployment paths matters. These hashes provide\ncorrelation and pseudonymization, not cryptographic storage authentication.",
+      "metadata": {
+        "topic": "telemetry release readiness operational audit"
+      }
+    },
+    {
+      "id": "retrieval",
+      "title": "docs/retrieval-relevance.md Controls and limits",
+      "source": "repo:docs/retrieval-relevance.md",
+      "text": "## Controls and limits\n\n`lexical.stop_words` contains at most 256 lowercase normalized tokens, each at\nmost 64 bytes. It filters both query tokens and indexed fields when scoring.\nThe document and its citable body remain unchanged. Multi-token phrases and\nnon-normalized entries are rejected. Languages/domain vocabularies require\nhost review; filtering a meaningful token can reduce recall. Query aliases are\nstill expanded once by host policy before token filtering. Source text never\nchanges this policy.\n\n`exact_identifiers` requires every query token that contains both ASCII letters\nand digits and is at least eight bytes long to occur as an exact case-folded\ntoken in each returned candidate. Token punctuation separates components. Pure\nwords, pure numbers and short names such as `Qwen3` are not constrained. Matching\nuses chunk body, title and the lexical metadata allowlist. Document IDs, source\npaths and excluded internal metadata never become implicit searchable evidence.\nThis intentionally narrow rule does not recognize every ticket/product-ID format.",
+      "metadata": {
+        "topic": "retrieval release readiness operational audit"
+      }
+    }
+  ],
+  "assessment_gates": {
+    "expected_cases": 6,
+    "minimum_cited_support": 1.0,
+    "minimum_corpus_factuality": 1.0,
+    "expected_final_count": 6,
+    "max_errors": 0
+  },
+  "cases": [
+    {
+      "id": "repository-v8-final-queue",
+      "claim": "Queue: Candidates become eligible only when queue and runtime owners expire, stopping new work upon lease loss; because external services are not transactional participants, the excerpt states no exactly-once external-effect guarantee is added and provides no reconciliation interface. ",
+      "citation_documents": [
+        "queue"
+      ],
+      "selected_chunk_ids": [
+        "89cbd86916af2999ba752dd2221aa39f176405cac559d1cbd8e186bb5d4d8eb3"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 0,
+        "end": 286,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    },
+    {
+      "id": "repository-v8-final-quota",
+      "claim": "Reservation: Admission and reservation journals commit in the same transaction before provider dispatch, where zero-priced requests occupy slots and lost responses retain ceilings without silent refunds, requiring operators to treat ambiguous failures as retaining conservative uncertainty. ",
+      "citation_documents": [
+        "quota"
+      ],
+      "selected_chunk_ids": [
+        "b1d50fc924404b781299ad9539244140f7ae7305dada82c504b7fd3f1120b4b0",
+        "c6d7616c171d200b972172dfcb0ff10932e9bd59eb45db0ba1d91c7e436d379c"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 286,
+        "end": 577,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    },
+    {
+      "id": "repository-v8-final-memory",
+      "claim": "Memory: If memory CAS or capacity fails after generation, inspect the retained completed run and retry the same request ID with correct revision; admission reserves 2 KiB, one tombstone and one erasure event per record, while other failure recovery remains an excerpt-scoped evidence gap. ",
+      "citation_documents": [
+        "memory"
+      ],
+      "selected_chunk_ids": [
+        "30a9dc9a72f748c0eb65eca1d86ad2a0bae8f504d420dce0b157da3d4620fb36",
+        "7c02b098ef2043463cbaae3d68238f905bd83bd33255f67cd0d7eba9d7936c0a"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 577,
+        "end": 866,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    },
+    {
+      "id": "repository-v8-final-skills",
+      "claim": "Skills: Grants must be subsets of original host policy since package text supplies no new authority; packages cannot waive exact approval, remove spending ceilings or silently retry uncertain effects, and mount-prefix syntax is distinct from mounted-role collision constraints prohibiting collisions with host roles. ",
+      "citation_documents": [
+        "skills"
+      ],
+      "selected_chunk_ids": [
+        "7a564c68b381531ba850826c32c20255423174394c8259e8d5d1a11e2302912d",
+        "95a157ea4fbe58d760297f1899f37bb48ad89cc68315d9b6c995e812eb3dd03f"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 866,
+        "end": 1183,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    },
+    {
+      "id": "repository-v8-final-telemetry",
+      "claim": "Telemetry: Parent/child identity binds through persisted references and report fingerprint checks where unreferenced or mismatched children fail and absent children are counted; reads are individually atomic but not cross-record transactions, so live reads alone cannot verify missing historical children. ",
+      "citation_documents": [
+        "telemetry"
+      ],
+      "selected_chunk_ids": [
+        "4b61ec80558a50810a592114841af132420023e2f7f51f0ce07d98dd5cebab05"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 1183,
+        "end": 1489,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    },
+    {
+      "id": "repository-v8-final-retrieval",
+      "claim": "Retrieval: Exact-identifier rules require mixed alphanumeric tokens ≥8 bytes to match case-folded, and stop-word filtering can reduce recall; the supplied excerpt does not establish a semantic-support validation method, constituting an explicit scoped gap without claiming global absence.",
+      "citation_documents": [
+        "retrieval"
+      ],
+      "selected_chunk_ids": [
+        "dbace938faf6d66cb93a550ad7c858892fe2e8b7a58d3f4c0b5459e8f9f5de68"
+      ],
+      "is_final": true,
+      "origin": {
+        "workflow_id": "source-readiness-six-role-audit",
+        "node_id": "draft",
+        "run_id": "workflow-f7e35ace5a852fed3836e1c58abc46f4dae34aec44a8c46e22754c4c8f3a31b2",
+        "start": 1489,
+        "end": 1777,
+        "original_text_sha256": "76f623892db3d03dc9318abac6c59ab6a13a2d268bdb9142dc013c49e7c3f619"
+      }
+    }
+  ]
+}

@@ -51,14 +51,20 @@ journals by default or explicitly configured [SQL Application stores](docs/sql-a
 SQL-backed [project generation quotas](docs/generation-quota.md) reserve cost
 and outstanding attempts transactionally across processes. Explicit
 [durable queues and workers](docs/durable-queue.md) retain approval/recovery
-occupancy and fence abandoned processes. Broader quality acceptance remains
-tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
+occupancy and fence abandoned processes. The current
+[P0–P2 checklist](docs/p0-p2-roadmap.md) records bounded implementation and
+acceptance, including failed model outputs and explicit deployment limits.
 The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool
 increments. [Task benchmarks](docs/task-benchmarks.md) provide versioned outcome
 checks and campaign budgets with explicit offline/provider provenance.
 The [native local evaluation](docs/native-evaluation.md) retains actual Qwen API
 and LangGraph trials, including failures and the limits of those comparisons.
+See the [current readiness assessment](docs/readiness.md) and
+[consolidated evidence](docs/acceptance/p0-p2-final-20261128.json) for actual
+Windows/Linux checks, realistic-corpus retrieval, long-session recovery and
+source-relative answer evaluation. Exact quotations and model review do not
+guarantee factual accuracy; these results establish no overall framework ranking.
 
 ## What you get
 
@@ -342,8 +348,10 @@ OPENAI_BASE_URL=... OPENAI_API_KEY=... OPENAI_MODEL=... \
 
 ## Status
 
-0.1 is an early GitHub preview: the API may still change. taskloom was extracted from a production
-video pipeline that runs some sixty model tasks through it.
+The published `0.1` and `0.2.0-alpha.1` tags are immutable preview snapshots;
+this development checkout includes the later opt-in P0–P2 work recorded in the
+[current acceptance checklist](docs/p0-p2-roadmap.md). The API may still change.
+taskloom was extracted from a production video pipeline with some sixty model tasks.
 
 This release is distributed on GitHub; the installation example pins its Git
 tag. It has not been published to crates.io. The tagged single-task API reports

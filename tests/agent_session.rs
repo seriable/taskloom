@@ -91,6 +91,7 @@ async fn successive_session_turns_keep_full_history_while_model_context_is_compr
         max_input_bytes: 2200,
         keep_recent_blocks: 1,
         max_summary_bytes: 100,
+        pin_first_user: false,
     };
     let agent = AgentLoop::new(&model, &tools, "test").with_context(context);
     let durable = DurableAgent::new(&agent, &runs);

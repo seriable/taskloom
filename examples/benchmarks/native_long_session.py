@@ -39,6 +39,11 @@ def answer_length(verified, stage):
     return {'words': words, 'user_limit': limit, 'passed': words <= limit}
 
 
+def required_sources_present(verified, required):
+    """Check source identities, never just the number of selected documents."""
+    return set(required) <= {source['document_id'] for source in verified['sources']}
+
+
 def wait_turn(api, session, run):
     for _ in range(1800):
         state = api('/runs/' + run)
@@ -63,7 +68,9 @@ def main():
     parser.add_argument('--selected-sources',action='store_true',help='explicit host-rendered full source bodies; model selects IDs instead of copying quotations')
     parser.add_argument('--strict-length',action='store_true',help='explicit frozen answer schema caps every original answer at150 whitespace words, including final consolidation; no transcript truncation')
     parser.add_argument('--grounded',action='store_true',help='use shared default research guidance and a frozen exact boundary between factual findings and task context')
+    parser.add_argument('--context-bytes',type=int,default=32768,help='explicit original host projection budget,32768..262144; not a resume-time override')
     args = parser.parse_args()
+    if not 32768<=args.context_bytes<=262144:raise ValueError('declared context bytes outside bounded history example limits')
     cfg = json.loads(args.config.read_text(encoding='utf-8'))
     provider = cfg['provider']; url = urlsplit(provider['base_url'])
     if (provider['type'] != 'openai' or url.scheme != 'http' or url.hostname not in {'127.0.0.1', 'localhost', '::1'}
@@ -89,7 +96,7 @@ def main():
     defaults = json.loads((root / 'defaults.json').read_text(encoding='utf-8'))
     cfg.update(state_dir=str(root / 'state'), knowledge=True, mcp=[], skills=[], roles=[], memory=None,
                database=None, research={}, sandbox=None, sandbox_top_level=False, observability=None,
-               context={'max_input_bytes': 32768, 'keep_recent_blocks': 2, 'max_summary_bytes': 4096},
+               context={'max_input_bytes': args.context_bytes, 'keep_recent_blocks': 2, 'max_summary_bytes': 4096},
                retrieval={'mode': 'lexical'}, output_tokens=2048,
                limits=dict(defaults['limits'], max_cost_micros=0, max_steps=8),
                final_output={'type': 'cited_report', 'min_sources': 1, 'max_repairs': 2},
@@ -142,6 +149,10 @@ def main():
             'the fixed authority constraint. Findings must not infer one delivery guarantee from '
             'absence of another. Use directly stated actions/constraints rather than invent a '
             'procedure; keep any evidence gap explicitly scoped to the supplied excerpt.')
+        cfg['system'] += (' Source hashes belong only in the sources array, not in Findings or task context. '
+            'An answer-level host bibliography is explicit. On final consolidation give a compact '
+            'behavior and a limitation or directly documented action for EACH of the six topics. '
+            'Keep all six topics inside the original word bound; do not spend words copying hashes.')
         text_schema=cfg['final_output'].setdefault('answer_schema',{'type':'object','properties':{},'required':['text']})['properties'].setdefault('text',{'type':'string'})
         text_schema.setdefault('allOf',[]).append({'pattern':GROUNDING_PATTERN})
     save(root / 'app.json', cfg)
@@ -215,7 +226,7 @@ def main():
                         turn['source_assertions']=grounded_assertions(verified)
                         turn['reference_retained']=turn['source_assertions']['reference']==reference
                     required = set(topics) if index == 11 else {topics[index % 6]}
-                    turn['required_sources_present'] = required <= {source['document_id'] for source in verified['sources']}
+                    turn['required_sources_present'] = required_sources_present(verified, required)
                     turn['compressed_context_observed'] = any(context['summary'] is not None for context in state['state']['report']['contexts'])
                 except Exception as error:
                     turn['error'] = str(error)

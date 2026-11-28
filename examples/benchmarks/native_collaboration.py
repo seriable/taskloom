@@ -27,6 +27,8 @@ def run_case(case, api, root, verifier):
     request = {"id": case["id"], "input": {"goal": case["goal"]}, "definition": None, "peer": None,
         "limits": {"max_nodes": 32, "max_parallel": case.get("max_parallel", 2), "max_dispatches": 64, "max_duration": {"secs": case.get("duration_seconds", 300), "nanos": 0},
                    "shutdown_grace": {"secs": 5, "nanos": 0}, "max_output_bytes": 131072, "max_cost_micros": 1}}
+    if "input_context" in case:
+        request["input"]["review_context"] = case["input_context"]
     if case["kind"] == "peer":
         request["peer"] = {"planner": "planner", "executor": "analyst", "writer": writer_role, "reviewer": "reviewer",
                            "max_tasks": case.get("max_tasks", 2), "max_revisions": 1}
@@ -176,7 +178,7 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11} or not suite["cases"]:
+    if suite["version"] not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17} or not suite["cases"]:
         raise ValueError("unsupported suite")
     for case in suite["cases"]:
         for field, low, high, default in [("duration_seconds", 1, 1800, 300), ("max_tasks", 1, 8, 2), ("min_completed_analysts", 0, 8, 0), ("min_native_requests", 0, 256, 0)]:

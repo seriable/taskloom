@@ -1,5 +1,14 @@
 # Evidence scope and research guidance
 
+Current integration status (2026-11-28): the failures below are retained
+historical campaigns. Subsequent explicit first-User retention and bound-source
+continuation passed twelve recovery checks; the fresh twelve-turn task passed
+its declared runtime/length checks. See [context retention](context-retention.md),
+[whole-goal review](reviews/p0-p2-audit-20261128.md) and the
+[consolidated evidence](acceptance/p0-p2-final-20261128.json) for later results,
+semantic disagreements and current delivery status. No old report is relabelled.
+
+
 The application default system instruction now distinguishes source findings,
 host/user task constraints, inferences and proposed investigations. The shared
 source is `src/runtime/app/research-guidance.txt`. This is prompt guidance, not
