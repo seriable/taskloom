@@ -14,6 +14,11 @@ use super::{BudgetSnapshot, RunState, RuntimeError};
 /// asynchronous checkpoint writes. Implementations must provide equivalent
 /// exclusion and atomic, monotonic replacement semantics.
 pub trait RunLease: Send + Sync {
+    /// Wrappers must forward this policy. SQL owners always require priced
+    /// generation reservations so enabling a quota cannot race an unpriced call.
+    fn requires_cost_ceiling(&self) -> bool {
+        false
+    }
     /// Revalidate immediately before a model/tool callback. The default is for
     /// non-expiring structural locks; renewable stores must check their fence.
     fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {

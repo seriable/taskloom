@@ -9,7 +9,9 @@ choose an Application, state root, credential or tool grant.
 
 This is a bounded identity/service increment. Project Applications use file
 journals by default or explicitly configured [SQL persistence](sql-application.md).
-The durable queue, global quotas, distributed workers and operational/load acceptance remain unfinished. P2.2
+SQL-backed Applications also enforce explicitly configured
+[project generation quotas](generation-quota.md) across all run writers. The
+durable queue, distributed workers and operational/load acceptance remain unfinished. P2.2
 remains open. The existing single-operator `router`/CLI/UI is unchanged; selecting
 it does not enable the new multi-user boundary.
 

@@ -1,0 +1,2291 @@
+{
+  "version": 1,
+  "date": "2026-11-28",
+  "parent_commit": "910a8954e7dc895fe2379f6327c7d5e003b12c3f",
+  "scope": "Bounded transactional SQL project generation quotas, known atomic refusal, schema-v2 barrier, retained-v1 migration and native separate-process recovery. Whole P0-P2 goal remains active.",
+  "checks": {
+    "all_features": {
+      "passed": 341,
+      "failed": 0,
+      "ignored": 15
+    },
+    "minimal": {
+      "passed": 84,
+      "failed": 0,
+      "ignored": 0
+    },
+    "focused_sqlite": {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 2
+    },
+    "actual_postgres_focused": {
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "executed_separately": [
+        "postgres_project_quota_atomic_admission_and_accounting",
+        "postgres_v1_upgrade_requires_quiescence_and_preserves_dataset_and_history"
+      ],
+      "output": "Retained in task tool transcript; not counted from default ignored tests."
+    },
+    "strict_all_feature_clippy": "passed",
+    "strict_app_without_database_clippy": "passed",
+    "rust_1_86_all_targets": "passed",
+    "strict_rustdoc": "passed",
+    "fmt": "passed",
+    "python_compile": "passed",
+    "source_package_excludes_databases_dumps_credentials_weights_and_bytecode": "passed"
+  },
+  "source": [
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 21940,
+      "sha256": "dcbb298afd07eaba3906d9bd8f6c455d42ccb642be7ed89b43c0c02a3861f289"
+    },
+    {
+      "path": "README.md",
+      "bytes": 20984,
+      "sha256": "36f3a0eaa1bae233ca7df4e7d7c8648a6637d94ee2b8a018dea5ca5ac37ecfd1"
+    },
+    {
+      "path": "docs/generation-quota.md",
+      "bytes": 9790,
+      "sha256": "582aa1845648e7b1eaba4d5cd47b26641e27da49536ab8d0e5c927fd478ac9ca"
+    },
+    {
+      "path": "docs/multi-user-service.md",
+      "bytes": 9646,
+      "sha256": "72c25501949cb1fb1dccb126cc1c7a7fcd0f31cb26bdc51cba4b32f01a6c643e"
+    },
+    {
+      "path": "docs/p0-p2-roadmap.md",
+      "bytes": 28519,
+      "sha256": "244bbfe0f56f82af35f7c7ebb020e925f78195d0122104f0847f7227470c3a80"
+    },
+    {
+      "path": "docs/sql-application.md",
+      "bytes": 13181,
+      "sha256": "c00882b916af1cfa20d0f9f6306d7325ea67d15c4bf020a97ca135a8838251c0"
+    },
+    {
+      "path": "docs/sql-storage.md",
+      "bytes": 11765,
+      "sha256": "5fb935ed32fabc6fddb67ce72cadaacc30ffe49694518f8c2f70623df7f63d52"
+    },
+    {
+      "path": "examples/database/accept_quota.py",
+      "bytes": 12034,
+      "sha256": "113916e3c9784c4c1e4f94fc8467c4d3ff172063230826c97c05026352d849ff"
+    },
+    {
+      "path": "examples/database/accept_quota_migration.py",
+      "bytes": 8780,
+      "sha256": "49ec3cbc07d8daa09b402b228c696a3d86f4d0b807c20156e876ccbe0fefb90e"
+    },
+    {
+      "path": "examples/database/backup_acceptance.py",
+      "bytes": 8794,
+      "sha256": "eb1a89148ee5d5b16dc66cb050b8211da3cbc1b1f50d83297da269a3af519d7d"
+    },
+    {
+      "path": "examples/database/native.rs",
+      "bytes": 9142,
+      "sha256": "000c22e666841fb98b6fe1fc58fd34399c10eb84669982726a0bef59deaf20ca"
+    },
+    {
+      "path": "examples/service/host.rs",
+      "bytes": 6278,
+      "sha256": "db6cb12c099e8d6ce1c136454803d7106b3c29302f35a951b741e55b789f2d00"
+    },
+    {
+      "path": "src/provider/runtime.rs",
+      "bytes": 7413,
+      "sha256": "2f1636d433d0cb9cdf0f650247e134be3216c1b3f6e3a6837695e074ab20ba8b"
+    },
+    {
+      "path": "src/runtime/app/cli.rs",
+      "bytes": 24277,
+      "sha256": "ffe04f8df47b1729115a2fc379f73e708d50e3e3bc5d6a4b8d5d81c0e9b111be"
+    },
+    {
+      "path": "src/runtime/app/multiuser.rs",
+      "bytes": 11907,
+      "sha256": "948d30163457a287a2ae8ac72161a4a5696ea7843c3a61d2d5719a6d0dfc5aca"
+    },
+    {
+      "path": "src/runtime/budget.rs",
+      "bytes": 13148,
+      "sha256": "20d936da1473cc01aa7b2149d3e649da526ce5bee2cf1e7fcd2125c952ea9434"
+    },
+    {
+      "path": "src/runtime/database.rs",
+      "bytes": 47144,
+      "sha256": "146ce2bf6de724287530bdb4a9ad27d80cff83cdefbe40b74fbc1266f8eccd58"
+    },
+    {
+      "path": "src/runtime/database/quota.rs",
+      "bytes": 17330,
+      "sha256": "7ad071f0645aaa07d776f62a1e6b9f5f204d72642e5d06741559d1191e6d6fe1"
+    },
+    {
+      "path": "src/runtime/durable.rs",
+      "bytes": 51856,
+      "sha256": "010eae870e0eafc368a065b3e502816d0d41de6d7d6a1fcd9e55cce2e7289b58"
+    },
+    {
+      "path": "src/runtime/store.rs",
+      "bytes": 15301,
+      "sha256": "54351f54ec96f795b98a3ff91b818a827e2e866958f39098f1caedb846dc3cab"
+    },
+    {
+      "path": "tests/database.rs",
+      "bytes": 24572,
+      "sha256": "24910c57994fbdb393ca8c54b253fbc04a3c90d406c651bd95958af81c9d01f1"
+    },
+    {
+      "path": "tests/database_quota.rs",
+      "bytes": 16316,
+      "sha256": "0e4f6bca5bd799acc27e66a247fc450ed71b08d9f007c82162cd39a2d49f62f5"
+    }
+  ],
+  "native": {
+    "version": 1,
+    "completed": true,
+    "cases": [
+      {
+        "backend": "sqlite",
+        "tenant": "quota-native",
+        "project": "4d130dab36cb45fc90bf178be2f50980",
+        "checks": {
+          "separate_process_refused_while_actual_native_attempt_live": true,
+          "known_refusal_has_zero_uncertain_attempts": true,
+          "process_death_does_not_release_quota_slot": true,
+          "new_process_cannot_erase_dead_attempt": true,
+          "explicit_recovery_stops_before_new_dispatch": true,
+          "crash_uncertainty_retains_zero_price_slot": true,
+          "native_generation_after_explicit_review_completed": true,
+          "known_settlement_releases_only_new_attempt": true,
+          "terminal_reentry_unchanged_without_api_dispatch": true,
+          "other_project_cannot_read_retained_accounting": true
+        },
+        "failures": [],
+        "killed_owned_process_id": 12552,
+        "killed_exit_code": 1,
+        "observed_native_requests": 2,
+        "completed_native_usage": {
+          "requests": 1,
+          "input_tokens": 29,
+          "output_tokens": 3,
+          "cost_micros": 0
+        },
+        "unknown_native_response_usage_attempts": 1,
+        "status": "passed"
+      },
+      {
+        "backend": "postgres",
+        "tenant": "quota-native",
+        "project": "47910ec2e5184348b2999474c0d8493e",
+        "checks": {
+          "separate_process_refused_while_actual_native_attempt_live": true,
+          "known_refusal_has_zero_uncertain_attempts": true,
+          "process_death_does_not_release_quota_slot": true,
+          "new_process_cannot_erase_dead_attempt": true,
+          "explicit_recovery_stops_before_new_dispatch": true,
+          "crash_uncertainty_retains_zero_price_slot": true,
+          "native_generation_after_explicit_review_completed": true,
+          "known_settlement_releases_only_new_attempt": true,
+          "terminal_reentry_unchanged_without_api_dispatch": true,
+          "other_project_cannot_read_retained_accounting": true
+        },
+        "failures": [],
+        "killed_owned_process_id": 31240,
+        "killed_exit_code": 1,
+        "observed_native_requests": 2,
+        "completed_native_usage": {
+          "requests": 1,
+          "input_tokens": 29,
+          "output_tokens": 3,
+          "cost_micros": 0
+        },
+        "unknown_native_response_usage_attempts": 1,
+        "status": "passed"
+      }
+    ],
+    "failures": [],
+    "scope": "native SQL Application generation, simultaneous separate-process rejection, killed-process reservation, explicit quota review and cold reentry",
+    "taskloom_sha256": "ad2340a842c1cc2a5cbdc8c76b90840ddbdf6c99b6ee0d096f7675fc4e518915",
+    "admin_sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660",
+    "postgres_public_provenance": {
+      "version": 1,
+      "source": "explicit cached official PostgreSQL digest; no new image pull",
+      "image": "postgres@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139",
+      "image_id": "sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139",
+      "container_id": "f4b4fde1a7eca28c6f2ad45069080942c82b26d0ea1e50cbd50dbff8f64c2534",
+      "loopback_port": 64825,
+      "credential_environment": "TASKLOOM_TEST_POSTGRES_URL",
+      "credential_values": "private credentials.json; never publish",
+      "settings": {
+        "server_version": "16.15",
+        "fsync": "on",
+        "full_page_writes": "on",
+        "default_transaction_isolation": "read committed"
+      },
+      "scope": "owned local disposable database acceptance, not application deployment or load evidence"
+    },
+    "fees": {
+      "currency": "USD",
+      "input_per_million": 0,
+      "output_per_million": 0,
+      "total_cap_micros": 0,
+      "credential_environment": "TASKLOOM_LOCAL_API_KEY",
+      "database_environment": "TASKLOOM_DATABASE_URL",
+      "excluded": "hardware/electricity/current chat; no embedding or tool service"
+    },
+    "limits": [
+      "Short completed generation and interrupted long-output probe, no research/long-task quality acceptance.",
+      "Unknown response usage from killed request is retained; model may continue generating after connection death.",
+      "10-second production lease; no short-TTL/load/distributed-queue claim.",
+      "Trusted local administrator selects currency/prices and increases the cap; no model grants authority."
+    ],
+    "status": "passed"
+  },
+  "native_artifacts": {
+    "sqlite": {
+      "migration": {
+        "dataset_identity": "99d09c56-08f1-43c7-a8cd-e09477e8a920",
+        "migration_applied": true,
+        "project": "4d130dab36cb45fc90bf178be2f50980",
+        "schema_version": 2,
+        "tenant": "quota-native"
+      },
+      "configured": {
+        "revision": 1,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 0,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "before-kill-quota": {
+        "revision": 3,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 1,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 1,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "simultaneous-refusal": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:9d77fc19e5f5a5ed1dd4bb29be0a18ff1b667394e2c0cda7e4305e099bde0836",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "simultaneous",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply READY."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 11,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825473092,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825473105,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825473109,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825473109,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 112
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825473114,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "fd9b65005c783ac2c1ec1ce4babdc548c161dd35fa5d8c90c945bfecf1e1bb18",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 112,
+              "input_bytes": 112
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "after-kill-quota": {
+        "revision": 5,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 2,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 1,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "after-death-refusal": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:9d77fc19e5f5a5ed1dd4bb29be0a18ff1b667394e2c0cda7e4305e099bde0836",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "after-death",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply READY."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 11,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825473208,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825473220,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825473224,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825473224,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 112
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825473229,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "fd9b65005c783ac2c1ec1ce4babdc548c161dd35fa5d8c90c945bfecf1e1bb18",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 112,
+              "input_bytes": 112
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "recovery": {
+        "version": 2,
+        "revision": 7,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:9d77fc19e5f5a5ed1dd4bb29be0a18ff1b667394e2c0cda7e4305e099bde0836",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "interrupted",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Write 100 numbered paragraphs explaining reliable task execution in detail. Continue until complete."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 2,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 4,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 1,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 10544,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825472963,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825472980,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 9,
+              "unix_ms": 1795825472987,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 9,
+              "unix_ms": 1795825472987,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 200
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 10532,
+              "unix_ms": 1795825483509,
+              "kind": {
+                "type": "recovered_model"
+              }
+            },
+            {
+              "sequence": 5,
+              "elapsed_ms": 10533,
+              "unix_ms": 1795825483514,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 6,
+              "elapsed_ms": 10538,
+              "unix_ms": 1795825483519,
+              "kind": {
+                "type": "model_started",
+                "step": 2,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 7,
+              "elapsed_ms": 10538,
+              "unix_ms": 1795825483519,
+              "kind": {
+                "type": "context_prepared",
+                "step": 2,
+                "omitted_messages": 0,
+                "input_bytes": 200
+              }
+            },
+            {
+              "sequence": 8,
+              "elapsed_ms": 10544,
+              "unix_ms": 1795825483526,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "2e28b2d1dc7d65672abf121e43ab1391072eff155f02ef47028ca88861bcb8bb",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 200,
+              "input_bytes": 200
+            },
+            {
+              "step": 2,
+              "source_message_count": 2,
+              "source_fingerprint": "2e28b2d1dc7d65672abf121e43ab1391072eff155f02ef47028ca88861bcb8bb",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 200,
+              "input_bytes": 200
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "recovered-quota": {
+        "revision": 9,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 3,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "review": {
+        "revision": 10,
+        "policy_revision": 2,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 2
+        },
+        "usage": {
+          "runs": 3,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          },
+          {
+            "policy_revision": 2,
+            "operator": "acceptance-operator",
+            "note": "explicitly permit another attempt while retaining the crashed unknown request",
+            "unix_ms": 1795825483617,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 2
+            }
+          }
+        ]
+      },
+      "completed": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:9d77fc19e5f5a5ed1dd4bb29be0a18ff1b667394e2c0cda7e4305e099bde0836",
+          "temperature": 0.0,
+          "max_output_tokens": 64,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "finished"
+        },
+        "report": {
+          "run_id": "after-review",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply exactly READY."
+            },
+            {
+              "role": "assistant",
+              "turn": {
+                "content": "READY.",
+                "tool_calls": []
+              }
+            }
+          ],
+          "stop_reason": "completed",
+          "detail": null,
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 1,
+            "input_tokens": 29,
+            "output_tokens": 3,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": null
+          },
+          "elapsed_ms": 32683,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825483690,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825483702,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825483706,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 6,
+              "unix_ms": 1795825483706,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 120
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 32683,
+              "unix_ms": 1795825516383,
+              "kind": {
+                "type": "model_finished",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 5,
+              "elapsed_ms": 32683,
+              "unix_ms": 1795825516383,
+              "kind": {
+                "type": "stopped",
+                "reason": "completed"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "f95c0dc741215b8f39b71b63f32184383c41603bfe1392c2d88ca79d828981ae",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 120,
+              "input_bytes": 120
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "final-quota": {
+        "revision": 13,
+        "policy_revision": 2,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 2
+        },
+        "usage": {
+          "runs": 4,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825472891,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          },
+          {
+            "policy_revision": 2,
+            "operator": "acceptance-operator",
+            "note": "explicitly permit another attempt while retaining the crashed unknown request",
+            "unix_ms": 1795825483617,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 2
+            }
+          }
+        ]
+      }
+    },
+    "postgres": {
+      "migration": {
+        "dataset_identity": "4b638f06-a383-4592-b093-1d7c4c27aeb5",
+        "migration_applied": true,
+        "project": "47910ec2e5184348b2999474c0d8493e",
+        "schema_version": 2,
+        "tenant": "quota-native"
+      },
+      "configured": {
+        "revision": 1,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 0,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "before-kill-quota": {
+        "revision": 3,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 1,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 1,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "simultaneous-refusal": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:22f29d700629e90d4feba60bb0c1f3da9bc436db7df1a8b969e9d44681cf34ad",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "simultaneous",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply READY."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 29,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825517339,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825517369,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 12,
+              "unix_ms": 1795825517379,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 12,
+              "unix_ms": 1795825517379,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 112
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 29,
+              "unix_ms": 1795825517397,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "fd9b65005c783ac2c1ec1ce4babdc548c161dd35fa5d8c90c945bfecf1e1bb18",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 112,
+              "input_bytes": 112
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "after-kill-quota": {
+        "revision": 5,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 2,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 1,
+          "uncertain_attempts": 0
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "after-death-refusal": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:22f29d700629e90d4feba60bb0c1f3da9bc436db7df1a8b969e9d44681cf34ad",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "after-death",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply READY."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 28,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825517680,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825517710,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825517719,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825517719,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 112
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 28,
+              "unix_ms": 1795825517736,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "fd9b65005c783ac2c1ec1ce4babdc548c161dd35fa5d8c90c945bfecf1e1bb18",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 112,
+              "input_bytes": 112
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "recovery": {
+        "version": 2,
+        "revision": 7,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:22f29d700629e90d4feba60bb0c1f3da9bc436db7df1a8b969e9d44681cf34ad",
+          "temperature": 0.0,
+          "max_output_tokens": 1024,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "model_ready"
+        },
+        "report": {
+          "run_id": "interrupted",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Write 100 numbered paragraphs explaining reliable task execution in detail. Continue until complete."
+            }
+          ],
+          "stop_reason": "budget",
+          "detail": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review",
+          "steps": 2,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 4,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 1,
+            "denial": "project generation quota refused admission; inspect retained spending/outstanding attempts and request explicit host review"
+          },
+          "elapsed_ms": 11180,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825516974,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825517000,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825517010,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 11,
+              "unix_ms": 1795825517010,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 200
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 11147,
+              "unix_ms": 1795825528145,
+              "kind": {
+                "type": "recovered_model"
+              }
+            },
+            {
+              "sequence": 5,
+              "elapsed_ms": 11148,
+              "unix_ms": 1795825528160,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 6,
+              "elapsed_ms": 11162,
+              "unix_ms": 1795825528175,
+              "kind": {
+                "type": "model_started",
+                "step": 2,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 7,
+              "elapsed_ms": 11162,
+              "unix_ms": 1795825528175,
+              "kind": {
+                "type": "context_prepared",
+                "step": 2,
+                "omitted_messages": 0,
+                "input_bytes": 200
+              }
+            },
+            {
+              "sequence": 8,
+              "elapsed_ms": 11180,
+              "unix_ms": 1795825528192,
+              "kind": {
+                "type": "stopped",
+                "reason": "budget"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "2e28b2d1dc7d65672abf121e43ab1391072eff155f02ef47028ca88861bcb8bb",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 200,
+              "input_bytes": 200
+            },
+            {
+              "step": 2,
+              "source_message_count": 2,
+              "source_fingerprint": "2e28b2d1dc7d65672abf121e43ab1391072eff155f02ef47028ca88861bcb8bb",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 200,
+              "input_bytes": 200
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "recovered-quota": {
+        "revision": 9,
+        "policy_revision": 1,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 1
+        },
+        "usage": {
+          "runs": 3,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          }
+        ]
+      },
+      "review": {
+        "revision": 10,
+        "policy_revision": 2,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 2
+        },
+        "usage": {
+          "runs": 3,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          },
+          {
+            "policy_revision": 2,
+            "operator": "acceptance-operator",
+            "note": "explicitly permit another attempt while retaining the crashed unknown request",
+            "unix_ms": 1795825528402,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 2
+            }
+          }
+        ]
+      },
+      "completed": {
+        "version": 2,
+        "revision": 4,
+        "initial_message_count": 2,
+        "config": {
+          "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B",
+          "label": "app-0ed8fb0aaf9c8b6e86f544d7abecd01db9bbbbfd8bb34868dce9f3723855f145:sql:22f29d700629e90d4feba60bb0c1f3da9bc436db7df1a8b969e9d44681cf34ad",
+          "temperature": 0.0,
+          "max_output_tokens": 64,
+          "limits": {
+            "max_steps": 4,
+            "max_tool_calls": 0,
+            "max_duration": {
+              "secs": 300,
+              "nanos": 0
+            },
+            "tool_timeout": {
+              "secs": 5,
+              "nanos": 0
+            },
+            "max_tool_result_bytes": 65536,
+            "max_model_result_bytes": 65536,
+            "max_cost_micros": null
+          },
+          "policy": {
+            "allowed_tools": [],
+            "grants": []
+          },
+          "approvals": {
+            "read_only": false,
+            "idempotent": true,
+            "non_idempotent": true,
+            "tools": []
+          },
+          "tools": [],
+          "context": {
+            "max_input_bytes": 65536,
+            "keep_recent_blocks": 4,
+            "max_summary_bytes": 4096
+          },
+          "compressor_id": "extractive-v1"
+        },
+        "status": "finished",
+        "cursor": {
+          "type": "finished"
+        },
+        "report": {
+          "run_id": "after-review",
+          "messages": [
+            {
+              "role": "system",
+              "content": "Follow the user request. No tools."
+            },
+            {
+              "role": "user",
+              "content": "Reply exactly READY."
+            },
+            {
+              "role": "assistant",
+              "turn": {
+                "content": "READY.",
+                "tool_calls": []
+              }
+            }
+          ],
+          "stop_reason": "completed",
+          "detail": null,
+          "steps": 1,
+          "tool_calls": 0,
+          "usage": {
+            "requests": 1,
+            "input_tokens": 29,
+            "output_tokens": 3,
+            "cost_micros": 0
+          },
+          "budget": {
+            "generation": 2,
+            "limit_micros": null,
+            "committed_micros": 0,
+            "in_flight_micros": 0,
+            "in_flight_attempts": 0,
+            "uncertain_micros": 0,
+            "uncertain_attempts": 0,
+            "denial": null
+          },
+          "elapsed_ms": 32647,
+          "events": [
+            {
+              "sequence": 0,
+              "elapsed_ms": 1,
+              "unix_ms": 1795825528602,
+              "kind": {
+                "type": "started"
+              }
+            },
+            {
+              "sequence": 1,
+              "elapsed_ms": 2,
+              "unix_ms": 1795825528644,
+              "kind": {
+                "type": "resumed"
+              }
+            },
+            {
+              "sequence": 2,
+              "elapsed_ms": 13,
+              "unix_ms": 1795825528656,
+              "kind": {
+                "type": "model_started",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 3,
+              "elapsed_ms": 13,
+              "unix_ms": 1795825528656,
+              "kind": {
+                "type": "context_prepared",
+                "step": 1,
+                "omitted_messages": 0,
+                "input_bytes": 120
+              }
+            },
+            {
+              "sequence": 4,
+              "elapsed_ms": 32647,
+              "unix_ms": 1795825561290,
+              "kind": {
+                "type": "model_finished",
+                "step": 1,
+                "model": "E:/projects/taskloom/target/local-models-4b/Qwen3-4B"
+              }
+            },
+            {
+              "sequence": 5,
+              "elapsed_ms": 32647,
+              "unix_ms": 1795825561290,
+              "kind": {
+                "type": "stopped",
+                "reason": "completed"
+              }
+            }
+          ],
+          "contexts": [
+            {
+              "step": 1,
+              "source_message_count": 2,
+              "source_fingerprint": "f95c0dc741215b8f39b71b63f32184383c41603bfe1392c2d88ca79d828981ae",
+              "compressor_id": "extractive-v1",
+              "retained_indices": [
+                0,
+                1
+              ],
+              "summary": null,
+              "original_bytes": 120,
+              "input_bytes": 120
+            }
+          ]
+        },
+        "tool_steps": []
+      },
+      "final-quota": {
+        "revision": 13,
+        "policy_revision": 2,
+        "currency": "USD",
+        "policy": {
+          "currency": "USD",
+          "max_cost_micros": 0,
+          "max_outstanding_attempts": 2
+        },
+        "usage": {
+          "runs": 4,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 1
+        },
+        "overrun": false,
+        "events": [
+          {
+            "policy_revision": 1,
+            "operator": "acceptance-operator",
+            "note": "initial zero-price single outstanding attempt",
+            "unix_ms": 1795825516798,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 1
+            }
+          },
+          {
+            "policy_revision": 2,
+            "operator": "acceptance-operator",
+            "note": "explicitly permit another attempt while retaining the crashed unknown request",
+            "unix_ms": 1795825528402,
+            "policy": {
+              "currency": "USD",
+              "max_cost_micros": 0,
+              "max_outstanding_attempts": 2
+            }
+          }
+        ]
+      }
+    }
+  },
+  "native_model_provenance": "docs/acceptance/native-models-4b-20261128.lock.json; official Transformers 5.20.2, torch 2.14.1+cu126; RTX 3080 Ti Laptop 16GiB; bfloat16; reasoning off; seed 42; preverified Qwen3-4B cache, no new download.",
+  "native_harness_failure_before_model_dispatch": {
+    "report": {
+      "version": 1,
+      "completed": true,
+      "cases": [
+        {
+          "backend": "sqlite",
+          "tenant": "quota-native",
+          "project": "4ddf152ea35f43569d54d300ff0acc5c",
+          "checks": {},
+          "failures": [
+            "Expecting value: line 1 column 1 (char 0)"
+          ],
+          "status": "failed"
+        },
+        {
+          "backend": "postgres",
+          "tenant": "quota-native",
+          "project": "96ace4863aea4390b2a4900acce41187",
+          "checks": {},
+          "failures": [
+            "Expecting value: line 1 column 1 (char 0)"
+          ],
+          "status": "failed"
+        }
+      ],
+      "failures": [
+        "sqlite: Expecting value: line 1 column 1 (char 0)",
+        "postgres: Expecting value: line 1 column 1 (char 0)"
+      ],
+      "scope": "native SQL Application generation, simultaneous separate-process rejection, killed-process reservation, explicit quota review and cold reentry",
+      "taskloom_sha256": "ad2340a842c1cc2a5cbdc8c76b90840ddbdf6c99b6ee0d096f7675fc4e518915",
+      "admin_sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660",
+      "postgres_public_provenance": {
+        "version": 1,
+        "source": "explicit cached official PostgreSQL digest; no new image pull",
+        "image": "postgres@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139",
+        "image_id": "sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139",
+        "container_id": "f4b4fde1a7eca28c6f2ad45069080942c82b26d0ea1e50cbd50dbff8f64c2534",
+        "loopback_port": 64825,
+        "credential_environment": "TASKLOOM_TEST_POSTGRES_URL",
+        "credential_values": "private credentials.json; never publish",
+        "settings": {
+          "server_version": "16.15",
+          "fsync": "on",
+          "full_page_writes": "on",
+          "default_transaction_isolation": "read committed"
+        },
+        "scope": "owned local disposable database acceptance, not application deployment or load evidence"
+      },
+      "fees": {
+        "currency": "USD",
+        "input_per_million": 0,
+        "output_per_million": 0,
+        "total_cap_micros": 0,
+        "credential_environment": "TASKLOOM_LOCAL_API_KEY",
+        "database_environment": "TASKLOOM_DATABASE_URL",
+        "excluded": "hardware/electricity/current chat; no embedding or tool service"
+      },
+      "limits": [
+        "Short completed generation and interrupted long-output probe, no research/long-task quality acceptance.",
+        "Unknown response usage from killed request is retained; model may continue generating after connection death.",
+        "10-second production lease; no short-TTL/load/distributed-queue claim.",
+        "Trusted local administrator selects currency/prices and increases the cap; no model grants authority."
+      ],
+      "status": "failed"
+    },
+    "diagnosis": "Partial RunLimits JSON omitted required max_steps. CLI reported missing field; first harness obscured stderr with JSON parse error. Corrected required fields and failure reporting; rerun 2 passed."
+  },
+  "backup_restore": {
+    "version": 1,
+    "completed": true,
+    "checks": {
+      "sqlite_online_backup_restores_identical_native_state": true,
+      "postgres_transactional_restore_retains_identical_native_state": true,
+      "quota_cap_audit_and_unknown_native_attempt_retained": true
+    },
+    "failures": [],
+    "scope": "quiescent project quota policy/audit/aggregate and native Application run accounting; no whole-app/files/skill/embedding-ledger backup or worker-service completion",
+    "native_reference": "E:\\projects\\taskloom\\target\\quota-native-20261128-2",
+    "binary_sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660",
+    "model_requests_performed": false,
+    "credential_values": "private fixture environment only; never included in output",
+    "artifacts_private": "all database/dump files contain runtime data; excluded from source publication",
+    "sqlite_backup": {
+      "bytes": 49152,
+      "sha256": "67720940af471915dc5a54172665fee8a3ff91eb7f513853e5c48d51bda8a800"
+    },
+    "postgres_backup": {
+      "bytes": 11179,
+      "sha256": "dbbb040e71310058c5466939a3e086aa814cad0ddea7f9c10b3ba6a1bbd28aa1"
+    },
+    "restored_owned_database_name": "taskloom_restore_5182665c24c848b9",
+    "status": "passed"
+  },
+  "actual_retained_v1_migration": {
+    "version": 1,
+    "completed": true,
+    "checks": {
+      "sqlite_v2_barrier_preserves_every_existing_record": true,
+      "sqlite_quota_import_matches_newest_native_budgets": true,
+      "postgres_v2_barrier_preserves_every_existing_record": true,
+      "postgres_quota_import_matches_newest_native_budgets": true
+    },
+    "failures": [],
+    "cases": [
+      {
+        "backend": "sqlite",
+        "retained_records": 31,
+        "imported_usage": {
+          "runs": 8,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 0
+        }
+      },
+      {
+        "backend": "postgres",
+        "retained_records": 146,
+        "imported_usage": {
+          "runs": 7,
+          "committed_micros": 0,
+          "in_flight_micros": 0,
+          "uncertain_micros": 0,
+          "in_flight_attempts": 0,
+          "uncertain_attempts": 0
+        }
+      }
+    ],
+    "scope": "actual retained native schema-v1 SQLite/PostgreSQL copies, v2 migration and first quota import",
+    "model_api_calls": false,
+    "admin_binary": {
+      "bytes": 35371520,
+      "sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660"
+    },
+    "v1_inputs": {
+      "sqlite": {
+        "bytes": 262144,
+        "sha256": "49a8dba913cecdd306241ab9456e5ca4b6b6706936bd300e05defd28910ede37"
+      },
+      "postgres_dump": {
+        "bytes": 95797,
+        "sha256": "9ee2fee03097b788884066bf609ffe29b023a838e6cab22225b6fc65134c1bc3"
+      }
+    },
+    "limits": [
+      "Copies only; original acceptance databases/dumps remain untouched.",
+      "No old-binary dispatch or production rolling-upgrade/load acceptance; old hosts must be stopped.",
+      "Runtime data and credential URLs remain private ignored local artifacts."
+    ],
+    "status": "passed"
+  },
+  "retained_migration_probes": [
+    {
+      "report": {
+        "version": 1,
+        "completed": false,
+        "checks": {
+          "sqlite_v2_barrier_preserves_every_existing_record": true,
+          "sqlite_quota_import_matches_newest_native_budgets": true
+        },
+        "failures": [
+          "'NoneType' object has no attribute 'strip'"
+        ],
+        "cases": [
+          {
+            "backend": "sqlite",
+            "retained_records": 31,
+            "imported_usage": {
+              "runs": 8,
+              "committed_micros": 0,
+              "in_flight_micros": 0,
+              "uncertain_micros": 0,
+              "in_flight_attempts": 0,
+              "uncertain_attempts": 0
+            }
+          }
+        ],
+        "scope": "actual retained native schema-v1 SQLite/PostgreSQL copies, v2 migration and first quota import",
+        "model_api_calls": false,
+        "admin_binary": {
+          "bytes": 35371520,
+          "sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660"
+        },
+        "v1_inputs": {
+          "sqlite": {
+            "bytes": 262144,
+            "sha256": "49a8dba913cecdd306241ab9456e5ca4b6b6706936bd300e05defd28910ede37"
+          },
+          "postgres_dump": {
+            "bytes": 95797,
+            "sha256": "9ee2fee03097b788884066bf609ffe29b023a838e6cab22225b6fc65134c1bc3"
+          }
+        },
+        "limits": [
+          "Copies only; original acceptance databases/dumps remain untouched.",
+          "No old-binary dispatch or production rolling-upgrade/load acceptance; old hosts must be stopped.",
+          "Runtime data and credential URLs remain private ignored local artifacts."
+        ],
+        "status": "failed"
+      },
+      "diagnosis": "Inherited Docker text reader used Windows GBK, raising UnicodeDecodeError on PostgreSQL native source content. Read UTF-8 explicitly; initial SQLite controls passed, PostgreSQL incomplete."
+    },
+    {
+      "report": {
+        "version": 1,
+        "completed": true,
+        "checks": {
+          "sqlite_v2_barrier_preserves_every_existing_record": true,
+          "sqlite_quota_import_matches_newest_native_budgets": true,
+          "postgres_v2_barrier_preserves_every_existing_record": true,
+          "postgres_quota_import_matches_newest_native_budgets": true
+        },
+        "failures": [],
+        "cases": [
+          {
+            "backend": "sqlite",
+            "retained_records": 31,
+            "imported_usage": {
+              "runs": 8,
+              "committed_micros": 0,
+              "in_flight_micros": 0,
+              "uncertain_micros": 0,
+              "in_flight_attempts": 0,
+              "uncertain_attempts": 0
+            }
+          },
+          {
+            "backend": "postgres",
+            "retained_records": 146,
+            "imported_usage": {
+              "runs": 7,
+              "committed_micros": 24,
+              "in_flight_micros": 0,
+              "uncertain_micros": 0,
+              "in_flight_attempts": 0,
+              "uncertain_attempts": 0
+            }
+          }
+        ],
+        "scope": "actual retained native schema-v1 SQLite/PostgreSQL copies, v2 migration and first quota import",
+        "model_api_calls": false,
+        "admin_binary": {
+          "bytes": 35371520,
+          "sha256": "7cff0922778852a9f7e28230d3b63b6126efdd3889e39a85fd942e4f7db7a660"
+        },
+        "v1_inputs": {
+          "sqlite": {
+            "bytes": 262144,
+            "sha256": "49a8dba913cecdd306241ab9456e5ca4b6b6706936bd300e05defd28910ede37"
+          },
+          "postgres_dump": {
+            "bytes": 95797,
+            "sha256": "9ee2fee03097b788884066bf609ffe29b023a838e6cab22225b6fc65134c1bc3"
+          }
+        },
+        "limits": [
+          "Copies only; original acceptance databases/dumps remain untouched.",
+          "No old-binary dispatch or production rolling-upgrade/load acceptance; old hosts must be stopped.",
+          "Runtime data and credential URLs remain private ignored local artifacts."
+        ],
+        "status": "passed"
+      },
+      "qualification": "Record preservation passed. Automatic first namespace selected a separately labelled PostgreSQL fixture scope (24 micro-units), not the native project. Superseded for native-scope import evidence by probe 3, which selects recorded native configuration explicitly."
+    }
+  ],
+  "invariants": [
+    "Run/checkpoint and reservation quota accounting share one transaction before dispatch.",
+    "Uncertain amounts are a subset of committed cost; do not double count them.",
+    "Outstanding attempts include zero-price uncertainty after process death; explicit cap review never refunds unknown work.",
+    "Known atomic Budget refusal rolls back and removes only the refused reservation. Other ambiguous journal failures remain conservatively uncertain.",
+    "All SQL gateway dispatches require known conservative prices, including retries/fallbacks and runs without private caps.",
+    "Host declares retained currency/price units; no automatic conversion, tool/embedding billing or model-expanded authority.",
+    "Schema v2 upgrade requires quiescent old hosts; preserves envelopes/dataset identity and refuses unknown schema versions."
+  ],
+  "limits": [
+    "No durable queue/worker, cross-process service control, throughput/load or whole P2 completion.",
+    "Quota tests use real SQL and labelled fixture models; native evidence separately observes 2 requests/backend, one with unknown response usage.",
+    "Native killed long-output probe proves lifecycle, not successful long-task or research quality.",
+    "Old v1 binary dispatch/rolling-upgrade acceptance was not executed; version barrier controls and actual retained data migration are distinct.",
+    "Historical import is bounded to 100000 rows/64MiB; policy audit 1024 events. Refuse oversize/corruption instead of resetting spending.",
+    "No automatic calendar reset, rate window, pruning, uncertainty refund, per-user billing or currency conversion.",
+    "P0 embedding negative-query/research and broader semantic/complex/long-task quality remain open."
+  ],
+  "cleanup": {
+    "owned_native_model_server": "stopped after native campaign",
+    "owned_postgres_container": "removed with ownership/nonce/image check; backups remain private ignored artifacts"
+  },
+  "delivery": {
+    "local_increment": true,
+    "published_main": false,
+    "goal_complete": false
+  }
+}

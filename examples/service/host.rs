@@ -1,5 +1,6 @@
 //! Explicit local identity administration / project-scoped JSON service.
-//! This is not the durable queue/worker or SQL-backed Application increment.
+//! Supports explicit SQL Applications and trusted quota administration; durable
+//! queue/worker scheduling remains a separate increment.
 use serde::Deserialize;
 use std::{
     path::{Path, PathBuf},
@@ -41,7 +42,7 @@ fn read<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn std::e
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    const HELP:&str="multiuser_host migrate | catalog | put-user USER.json REV OPERATOR | issue USER NEW_PRIVATE_TOKEN_FILE OPERATOR | revoke TOKEN_ID OPERATOR | serve HOST.json; TASKLOOM_DATABASE_URL required";
+    const HELP:&str="multiuser_host migrate | catalog | put-user USER.json REV OPERATOR | issue USER NEW_PRIVATE_TOKEN_FILE OPERATOR | revoke TOKEN_ID OPERATOR | quota-get TENANT PROJECT | quota-set TENANT PROJECT POLICY_OR_NULL.json EXPECTED_POLICY_REV OPERATOR NOTE | serve HOST.json; TASKLOOM_DATABASE_URL required";
     if args.is_empty() || args[0] == "--help" {
         println!("{HELP}");
         return Ok(());
@@ -53,7 +54,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args[0].as_str() {
         "migrate" if args.len() == 1 => {
             db.migrate().await?;
-            println!("schema v1 ready");
+            println!("schema v{DATABASE_SCHEMA_VERSION} ready");
+        }
+        "quota-get" if args.len() == 3 => {
+            let quota = db.generation_quota(DatabaseNamespace::new(&args[1], &args[2])?);
+            println!("{}", serde_json::to_string(&quota.snapshot().await?)?);
+        }
+        "quota-set" if args.len() == 7 => {
+            let quota = db.generation_quota(DatabaseNamespace::new(&args[1], &args[2])?);
+            let policy: Option<GenerationQuota> = read(Path::new(&args[3]))?;
+            let value = quota
+                .configure(policy, args[4].parse()?, &args[5], &args[6])
+                .await?;
+            println!("{}", serde_json::to_string(&value)?);
         }
         "catalog" if args.len() == 1 => {
             // Trusted local admin output includes token hashes/metadata, never bearers.

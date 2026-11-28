@@ -1254,6 +1254,9 @@ impl<'a, 'model> DurableAgent<'a, 'model> {
 
 struct LeaseJournal(Arc<dyn RunLease>);
 impl BudgetJournal for LeaseJournal {
+    fn requires_cost_ceiling(&self) -> bool {
+        self.0.requires_cost_ceiling()
+    }
     fn persist<'a>(
         &'a self,
         snapshot: &'a BudgetSnapshot,

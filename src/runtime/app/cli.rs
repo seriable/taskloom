@@ -96,8 +96,12 @@ pub async fn run(
             .as_ref()
             .ok_or("SQL database configuration is required")?;
         let identity = database.migrate().await?;
+        #[cfg(feature = "database")]
+        let schema_version = crate::runtime::database::DATABASE_SCHEMA_VERSION;
+        #[cfg(not(feature = "database"))]
+        let schema_version = 0; // migrate above refuses without the feature
         output(
-            &serde_json::json!({"schema_version":1,"dataset_identity":identity,"tenant":database.tenant,"project":database.project,"migration_applied":true}),
+            &serde_json::json!({"schema_version":schema_version,"dataset_identity":identity,"tenant":database.tenant,"project":database.project,"migration_applied":true}),
         )?;
         return Ok(());
     }

@@ -48,7 +48,8 @@ knowledge and reviewed-memory state in SQLite/PostgreSQL. The separate
 [project-scoped JSON service](docs/multi-user-service.md) uses SQL identities,
 roles and live token revocation; its project Applications still use file
 journals by default or explicitly configured [SQL Application stores](docs/sql-application.md).
-Durable service quotas/queues/workers and broader quality acceptance
+SQL-backed [project generation quotas](docs/generation-quota.md) reserve cost
+and outstanding attempts transactionally across processes. Durable queues/workers and broader quality acceptance
 remain tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
 The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool

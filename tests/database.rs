@@ -677,7 +677,7 @@ async fn sqlite_transactions_leases_namespaces_and_durable_sdk() {
     close_drains_releases(&db, &url).await;
     immediate_owner_reentry(&db).await;
     let admin = sql(&url).await;
-    sqlx::query("UPDATE taskloom_meta SET version=2 WHERE singleton=1")
+    sqlx::query("UPDATE taskloom_meta SET version=3 WHERE singleton=1")
         .execute(&admin)
         .await
         .unwrap();

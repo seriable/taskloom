@@ -74,7 +74,7 @@ impl<P: Provider> GatewayTransport<P> {
                             "agent output allowance exceeds the model profile",
                         ));
                     }
-                    let limited = budget.snapshot().limit_micros.is_some();
+                    let limited = budget.requires_cost_ceiling();
                     let price = self.gateway.config().prices.price(&model);
                     let ceiling = if limited {
                         let ceiling = price

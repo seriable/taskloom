@@ -120,7 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ns = DatabaseNamespace::new(&args[1], &args[2])?;
     if args[0] == "init" {
         db.migrate().await?;
-        println!("{{\"schema_version\":1,\"migration_applied\":true}}");
+        println!(
+            "{}",
+            json!({"schema_version":DATABASE_SCHEMA_VERSION,"migration_applied":true})
+        );
         db.close().await;
         return Ok(());
     }

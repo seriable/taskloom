@@ -5,7 +5,8 @@ of `RunStore`, `WorkflowStore`, `SessionStore`, `CorpusStore` and `MemoryStore`.
 empty and the supported Rust version remains 1.86. The later
 [SQL Application integration](sql-application.md) explicitly selects these stores
 for the API/CLI/UI, skills and embedding state. [SQL identities](multi-user-service.md)
-protect a separate project-scoped service. Global quotas, a durable queue and
+protect a separate project-scoped service. [Generation quotas](generation-quota.md)
+now use transactional project admission. A durable queue and
 distributed workers remain unfinished, so the full P2.2 package remains open.
 
 ## Explicit setup
@@ -44,12 +45,18 @@ out of the source repository.
 
 ## Transactions, ownership and limits
 
-Schema version 1 contains `taskloom_meta`, `taskloom_records` and
+Schema version 2 contains `taskloom_meta`, `taskloom_records` and
 `taskloom_leases`. Versioned JSON TEXT envelopes bind the namespace, record
 family and object ID. Checkpoints and budget generations advance monotonically;
 equal revisions require identical content. Trace parent bindings are immutable.
 Session updates use append-only compare-and-swap. Large integers and decimal
 values retain the runtime's existing JSON semantics.
+
+V1→v2 migration is explicit and requires stopping old hosts with no live leases.
+The version barrier fences binaries that do not participate in quota admission;
+dataset identity and version-1 JSON envelopes/checkpoints are preserved. See
+[quota migration](generation-quota.md#schema-v2-migration). All SQL models now
+require known priced ceilings even when no individual run cap is configured.
 
 SQLite uses WAL, synchronous FULL and immediate write transactions. PostgreSQL
 uses synchronous commit and five-second statement/lock timeouts. The default
@@ -178,4 +185,5 @@ example does not accept broad extraction quality, semantic retrieval or
 authenticated multi-user isolation. See
 `acceptance/p2-sql-knowledge-20261128.json`. At that increment all P2.2 boxes
 remained open. The later `sql-application.md` accepts the bounded persistence
-integration; global quotas, queue/workers and operational/load gates stay open.
+integration, and `generation-quota.md` accepts bounded project generation
+admission. Queue/workers and operational/load gates stay open.

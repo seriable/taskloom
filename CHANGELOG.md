@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- SQL project generation quotas atomically admit conservative monetary ceilings
+  and outstanding attempts across pools/processes; unknown zero-priced attempts
+  retain capacity through crashes. Explicit CAS administration imports prior
+  journals, audits policy changes and continues accounting while disabled.
+  Known refusal no longer invents uncertain spending; already incurred overruns
+  persist and require explicit review. Schema-v2 migration requires quiescent
+  hosts and fences old v1 binaries. All SQL generation requires known prices,
+  including runs without an individual cap. File stores, minimal features,
+  AgentTask and Rust 1.86 remain compatible. Queue/workers and broader quality
+  gates remain open. See `docs/generation-quota.md`.
+
 - Native collaboration V5 adds explicit submitted-draft review and corrected
   bounded role guidance, with a pinned optional Qwen3-4B download profile. Real
   local results remain 1/3, not general quality acceptance. An actual upstream

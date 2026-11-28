@@ -31,6 +31,7 @@ struct BudgetInner {
     state: Mutex<BudgetSnapshot>,
     journal: Option<Arc<dyn BudgetJournal>>,
     journal_failure: Mutex<Option<String>>,
+    admission: tokio::sync::Mutex<()>,
 }
 
 impl std::fmt::Debug for RunBudget {
@@ -41,7 +42,14 @@ impl std::fmt::Debug for RunBudget {
 
 /// Persist a reservation before a paid request may be dispatched. Settlements
 /// are included in subsequent reservations or the next full run checkpoint.
+/// `RuntimeError::Budget` means admission was atomically refused and nothing
+/// was written. Other errors may be ambiguous and retain uncertain spending.
 pub trait BudgetJournal: Send + Sync {
+    /// SQL journals require priced ceilings even before a project administrator
+    /// enables a quota. A later policy change cannot race an unpriced dispatch.
+    fn requires_cost_ceiling(&self) -> bool {
+        false
+    }
     fn persist<'a>(
         &'a self,
         snapshot: &'a BudgetSnapshot,
@@ -57,6 +65,7 @@ impl RunBudget {
             }),
             journal: None,
             journal_failure: Mutex::new(None),
+            admission: tokio::sync::Mutex::new(()),
         }))
     }
 
@@ -72,6 +81,17 @@ impl RunBudget {
         let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
         state.denial = Some(detail);
         state.generation = state.generation.saturating_add(1);
+    }
+
+    /// Model adapters must require known prices and reserve a conservative
+    /// ceiling whenever this is true, including all retries and fallbacks.
+    pub fn requires_cost_ceiling(&self) -> bool {
+        self.snapshot().limit_micros.is_some()
+            || self
+                .0
+                .journal
+                .as_ref()
+                .is_some_and(|journal| journal.requires_cost_ceiling())
     }
 
     pub(crate) fn restore(
@@ -116,6 +136,7 @@ impl RunBudget {
             state: Mutex::new(snapshot),
             journal: Some(journal),
             journal_failure: Mutex::new(None),
+            admission: tokio::sync::Mutex::new(()),
         })))
     }
 
@@ -134,9 +155,16 @@ impl RunBudget {
         &self,
         ceiling_micros: u64,
     ) -> Result<Reservation, RuntimeError> {
+        // Serialize reservation registration, not provider execution. A denied
+        // snapshot must never contain another, still-unadmitted reservation.
+        let _admission = self.0.admission.lock().await;
         let reservation = self.reserve_inner(ceiling_micros)?;
         if let Some(journal) = &self.0.journal {
             if let Err(error) = journal.persist(&self.snapshot()).await {
+                if let RuntimeError::Budget(detail) = error {
+                    reservation.refuse_before_dispatch(detail.clone());
+                    return Err(RuntimeError::Budget(detail));
+                }
                 let detail = error.to_string();
                 *self
                     .0
@@ -198,6 +226,20 @@ pub struct Reservation {
 }
 
 impl Reservation {
+    fn refuse_before_dispatch(mut self, detail: String) {
+        let mut state = self
+            .budget
+            .0
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        state.in_flight_micros -= self.ceiling_micros;
+        state.in_flight_attempts -= 1;
+        state.denial = Some(detail);
+        state.generation = state.generation.saturating_add(1);
+        self.settled = true;
+    }
+
     pub fn settle(mut self, actual_micros: u64) {
         let mut state = self
             .budget
@@ -238,5 +280,92 @@ impl Drop for Reservation {
             state.uncertain_attempts = state.uncertain_attempts.saturating_add(1);
             state.generation = state.generation.saturating_add(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Journal {
+        calls: AtomicUsize,
+        unknown: bool,
+    }
+    impl BudgetJournal for Journal {
+        fn persist<'a>(&'a self, _: &'a BudgetSnapshot) -> BoxFuture<'a, Result<(), RuntimeError>> {
+            Box::pin(async move {
+                let call = self.calls.fetch_add(1, Ordering::SeqCst);
+                if self.unknown {
+                    return Err(RuntimeError::Storage("lost commit response".into()));
+                }
+                if call == 0 {
+                    Ok(())
+                } else {
+                    Err(RuntimeError::Budget("known atomic refusal".into()))
+                }
+            })
+        }
+    }
+    #[tokio::test]
+    async fn atomic_refusal_retains_only_the_other_admitted_attempt() {
+        let budget = RunBudget::restore(
+            BudgetSnapshot::default(),
+            Arc::new(Journal {
+                calls: AtomicUsize::new(0),
+                unknown: false,
+            }),
+        )
+        .unwrap();
+        let (a, b) = tokio::join!(
+            budget.reserve_before_dispatch(7),
+            budget.reserve_before_dispatch(9)
+        );
+        assert!(matches!(b, Err(RuntimeError::Budget(_))));
+        assert!(budget.journal_failure().is_none());
+        let state = budget.snapshot();
+        assert_eq!(
+            (
+                state.in_flight_attempts,
+                state.in_flight_micros,
+                state.uncertain_attempts
+            ),
+            (1, 7, 0)
+        );
+        a.unwrap().settle(3);
+        let state = budget.snapshot();
+        assert_eq!(
+            (
+                state.committed_micros,
+                state.in_flight_attempts,
+                state.uncertain_attempts
+            ),
+            (3, 0, 0)
+        );
+    }
+    #[tokio::test]
+    async fn ambiguous_journal_failure_remains_uncertain() {
+        let budget = RunBudget::restore(
+            BudgetSnapshot::default(),
+            Arc::new(Journal {
+                calls: AtomicUsize::new(0),
+                unknown: true,
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            budget.reserve_before_dispatch(7).await,
+            Err(RuntimeError::Storage(_))
+        ));
+        assert!(budget.journal_failure().is_some());
+        let state = budget.snapshot();
+        assert_eq!(
+            (
+                state.committed_micros,
+                state.uncertain_micros,
+                state.uncertain_attempts
+            ),
+            (7, 7, 1)
+        );
     }
 }

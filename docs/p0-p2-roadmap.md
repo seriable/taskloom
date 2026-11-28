@@ -391,6 +391,22 @@ queue/workers, cross-process service control and load/deployment gates remain
 unfinished. See `sql-application.md` and
 `acceptance/p2-sql-application-20261128.json`.
 
+Later generation-quota increment: project-wide cumulative cost and outstanding
+attempt caps now share the reservation/checkpoint SQL transaction across every
+run writer. Unknown zero-priced attempts retain their slots after process death;
+known atomic refusal incurs no invented uncertainty. Explicit CAS administration
+imports prior journals, audits cap changes and keeps accounting while disabled.
+All SQL gateway attempts require known prices even without private run caps.
+Quiescent schema-v2 migration fences old v1 binaries and preserves existing
+dataset identity/checkpoints. Both databases passed ten actual native API /
+separate-process admission/recovery controls; backup/restore passed three and
+retained actual-v1 migration/import passed four controls. Earlier configuration,
+Unicode-codec and automatic fixture-scope probe faults remain recorded. These
+accept bounded generation quotas, not durable queue/workers, cross-process
+service controls, load or P0 effectiveness. P2.2's broader boxes remain open.
+See `generation-quota.md` and
+`acceptance/p2-generation-quota-20261128.json`.
+
 - [x] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
 - [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.

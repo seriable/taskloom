@@ -1,6 +1,7 @@
 //! Optional JSON service boundary for host-registered project Applications.
-//! Identities live in SQL; project Applications still use their file stores.
-//! Durable service queues/quotas and user-specific memory routes remain open.
+//! Identities live in SQL; project Applications explicitly choose file or SQL.
+//! SQL run writers share project quotas. Durable queues and user-specific
+//! memory routes remain open.
 use super::Application;
 use crate::runtime::{database::*, RuntimeError};
 use axum::{

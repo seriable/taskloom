@@ -5,6 +5,7 @@
 mod identity;
 mod knowledge;
 mod objects;
+mod quota;
 mod skills;
 pub use identity::{
     ApiToken, AuthenticatedActor, IdentityEvent, IdentitySnapshot, IssuedToken, ProjectMembership,
@@ -12,6 +13,10 @@ pub use identity::{
 };
 pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
 pub use objects::{SqlObjectLease, SqlObjectStore};
+pub use quota::{
+    GenerationQuota, GenerationQuotaEvent, GenerationQuotaSnapshot, GenerationQuotaUsage,
+    SqlGenerationQuotaStore,
+};
 pub use skills::SqlSkillStore;
 use std::path::Path;
 use std::sync::{
@@ -33,7 +38,8 @@ use super::{
     BudgetSnapshot, RunLease, RunState, RunStore, RuntimeError, Session, SessionStore,
 };
 
-const SCHEMA_VERSION: i64 = 1;
+/// V2 fences binaries that do not participate in project quota admission.
+pub const DATABASE_SCHEMA_VERSION: i64 = 2;
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -240,17 +246,44 @@ impl SqlDatabase {
                 .map_err(database_error)?;
         }
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_meta (singleton BIGINT PRIMARY KEY CHECK(singleton=1),version BIGINT NOT NULL)").execute(&mut *tx).await.map_err(database_error)?;
-        sqlx::query("INSERT INTO taskloom_meta(singleton,version) VALUES(1,1) ON CONFLICT(singleton) DO NOTHING").execute(&mut *tx).await.map_err(database_error)?;
+        sqlx::query("INSERT INTO taskloom_meta(singleton,version) VALUES(1,$1) ON CONFLICT(singleton) DO NOTHING").bind(DATABASE_SCHEMA_VERSION).execute(&mut *tx).await.map_err(database_error)?;
         let version: i64 =
             sqlx::query_scalar("SELECT version FROM taskloom_meta WHERE singleton=1")
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(database_error)?;
-        if version != SCHEMA_VERSION {
+        if version != 1 && version != DATABASE_SCHEMA_VERSION {
             return Err(config("unsupported database schema; migration refused"));
         }
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_records (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,revision BIGINT NOT NULL CHECK(revision>=0),body TEXT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_leases (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,owner TEXT NOT NULL,epoch BIGINT NOT NULL CHECK(epoch>0),expires_ms BIGINT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
+        if version == 1 {
+            // Quiesce old hosts before upgrading. The table lock also excludes
+            // old acquire/renew/commit queries during the version barrier.
+            if matches!(self.0.backend, Backend::Postgres) {
+                sqlx::query("LOCK TABLE taskloom_leases IN ACCESS EXCLUSIVE MODE")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(database_error)?;
+            }
+            let active: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM taskloom_leases WHERE expires_ms>{}",
+                self.0.backend.now()
+            ))
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(database_error)?;
+            if active != 0 {
+                return Err(conflict(
+                    "schema v2 migration requires quiescent hosts and no live leases",
+                ));
+            }
+            sqlx::query("UPDATE taskloom_meta SET version=$1 WHERE singleton=1")
+                .bind(DATABASE_SCHEMA_VERSION)
+                .execute(&mut *tx)
+                .await
+                .map_err(database_error)?;
+        }
         let identity_key = dataset_key()?;
         let value = uuid::Uuid::new_v4().to_string();
         let body = self.serialize(&identity_key, &value)?;
@@ -311,13 +344,18 @@ impl SqlDatabase {
     pub fn skills(&self, namespace: DatabaseNamespace) -> SqlSkillStore {
         SqlSkillStore::new(self.clone(), namespace)
     }
+    /// Trusted project-wide generation quota administration. Every SQL run
+    /// writer participates, including stores created without app configuration.
+    pub fn generation_quota(&self, namespace: DatabaseNamespace) -> SqlGenerationQuotaStore {
+        SqlGenerationQuotaStore::new(self.clone(), namespace)
+    }
     async fn schema(&self) -> Result<(), RuntimeError> {
         let value: Option<i64> =
             sqlx::query_scalar("SELECT version FROM taskloom_meta WHERE singleton=1")
                 .fetch_optional(&self.0.pool)
                 .await
                 .map_err(database_error)?;
-        if value != Some(SCHEMA_VERSION) {
+        if value != Some(DATABASE_SCHEMA_VERSION) {
             return Err(config(
                 "database schema is absent or unsupported; migrate explicitly",
             ));
@@ -455,7 +493,7 @@ impl SqlDatabase {
         self.schema().await?;
         let owner = uuid::Uuid::new_v4().to_string();
         let now = self.0.backend.now();
-        let sql=format!("INSERT INTO taskloom_leases(namespace,family,object_id,owner,epoch,expires_ms) VALUES($1,$2,$3,$4,1,{now}+$5) ON CONFLICT(namespace,family,object_id) DO UPDATE SET owner=excluded.owner,epoch=taskloom_leases.epoch+1,expires_ms=excluded.expires_ms WHERE taskloom_leases.expires_ms<={now} AND taskloom_leases.epoch<9223372036854775807 RETURNING epoch");
+        let sql=format!("INSERT INTO taskloom_leases(namespace,family,object_id,owner,epoch,expires_ms) SELECT $1,$2,$3,$4,1,{now}+$5 WHERE EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version={DATABASE_SCHEMA_VERSION}) ON CONFLICT(namespace,family,object_id) DO UPDATE SET owner=excluded.owner,epoch=taskloom_leases.epoch+1,expires_ms=excluded.expires_ms WHERE taskloom_leases.expires_ms<={now} AND taskloom_leases.epoch<9223372036854775807 RETURNING epoch");
         let epoch: Option<i64> = sqlx::query_scalar(&sql)
             .bind(&key.namespace.0)
             .bind(key.family)
@@ -597,7 +635,7 @@ impl Lease {
         Ok(())
     }
     fn ownership_query(&self) -> String {
-        format!("SELECT epoch FROM taskloom_leases WHERE namespace=$1 AND family=$2 AND object_id=$3 AND owner=$4 AND epoch=$5 AND expires_ms>{} AND EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version=1)",self.db.0.backend.now())
+        format!("SELECT epoch FROM taskloom_leases WHERE namespace=$1 AND family=$2 AND object_id=$3 AND owner=$4 AND epoch=$5 AND expires_ms>{} AND EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version={DATABASE_SCHEMA_VERSION})",self.db.0.backend.now())
     }
     fn renewal_query(&self) -> String {
         renewal_query(&self.db)
@@ -701,7 +739,7 @@ impl Drop for PendingRelease {
 }
 fn renewal_query(db: &SqlDatabase) -> String {
     let now = db.0.backend.now();
-    format!("UPDATE taskloom_leases SET expires_ms={now}+$6 WHERE namespace=$1 AND family=$2 AND object_id=$3 AND owner=$4 AND epoch=$5 AND expires_ms>{now} AND EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version=1)")
+    format!("UPDATE taskloom_leases SET expires_ms={now}+$6 WHERE namespace=$1 AND family=$2 AND object_id=$3 AND owner=$4 AND epoch=$5 AND expires_ms>{now} AND EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version={DATABASE_SCHEMA_VERSION})")
 }
 
 #[derive(Clone)]
@@ -755,6 +793,9 @@ impl RunStore for SqlRunStore {
 }
 struct RunDatabaseLease(Arc<Lease>);
 impl RunLease for RunDatabaseLease {
+    fn requires_cost_ceiling(&self) -> bool {
+        true
+    }
     fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
         Box::pin(self.0.check())
     }
@@ -781,6 +822,11 @@ impl RunLease for RunDatabaseLease {
             let body = self.0.db.serialize(&self.0.key, state)?;
             let mut tx = self.0.db.write_transaction().await?;
             self.0.lock(&mut tx).await?;
+            self.0
+                .db
+                .generation_quota(self.0.key.namespace.clone())
+                .reconcile(&mut tx, &self.0.key.id, &state.report.budget, false)
+                .await?;
             if let Some(old) = self.0.db.read_tx(&mut tx, &self.0.key).await? {
                 let previous = parse_run(old, &self.0.key.id)?;
                 if previous.trace_binding != state.trace_binding {
@@ -830,6 +876,11 @@ impl RunLease for RunDatabaseLease {
             let body = self.0.db.serialize(&key, value)?;
             let mut tx = self.0.db.write_transaction().await?;
             self.0.lock(&mut tx).await?;
+            self.0
+                .db
+                .generation_quota(self.0.key.namespace.clone())
+                .reconcile(&mut tx, &self.0.key.id, value, true)
+                .await?;
             if let Some(old) = self.0.db.read_tx(&mut tx, &key).await? {
                 let old = parse_budget(old)?;
                 if old.generation > value.generation {
