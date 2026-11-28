@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "generated_utc": "2026-11-28T14:41:14.025582+00:00",
+  "scope": "mcp-persistence opt-in protected SQL host SDK; HTTP original-session SSE; callbacks/OAuth/ephemeral extensions refused",
+  "source_sha256": {
+    "Cargo.toml": "17eed7aa17570427d3f0565145392c021c5d6ce4ce13951710a16996479a879a",
+    "src/runtime/mcp.rs": "8f19a87bb46a80d014962090abca98ffd23f5fea77d36b74a71d0c6191fb601f",
+    "src/runtime/mcp/persistent.rs": "c2855dc3ec5910753e840b181929962616c89da7c408a0e6802eedcf653a624a",
+    "tests/agent_mcp_persistent.rs": "4fa588c5a393fb09e28cd5f18bcb95c2599fa6b99c6f02cac795a79ef6a4f6e5",
+    "docs/mcp-durable-recovery.md": "c82c0edb98ba422da954c8f9af04c1579950f8e64825407a9c6d760fbf0b4751",
+    "docs/mcp-oauth-and-resumption.md": "51cd3227ce126cee5d4869c1211fe87fedd01949a346a5fba35afd3d7fb80cd9",
+    "docs/mcp-extensions.md": "a4248d97a298167131cc64d57d666880e6bbd1a1c8a9f74c9e3b301042cae7ee"
+  },
+  "default_new_tests": {
+    "passed": 4,
+    "failed": 0,
+    "ignored": 2,
+    "log": "target/mcp-persistent-tests-final-20261128.log"
+  },
+  "owned_postgresql": {
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "log": "target/mcp-persistent-owned-pg-tests-final-20261128.log"
+  },
+  "legacy_mcp_and_durable_sql_core": {
+    "passed": 53,
+    "failed": 0,
+    "ignored": 1,
+    "log": "target/mcp-persistent-core-regression-final-20261128.log"
+  },
+  "validation": {
+    "rust_1_86": "library and durable MCP test target passed",
+    "strict_clippy": "library and durable MCP test target passed",
+    "cargo_fmt": "passed",
+    "owned_postgresql_container_removed": true,
+    "actual_cloud_model_calls": 0,
+    "helper_processes": "ignored worker is actually spawned by parent SQLite/PG crash tests; not counted as an independent default pass"
+  },
+  "controls": [
+    "SQL unknown reservation before original effect POST",
+    "fsynced external effect before exact child hard kill; successor only GET; POST/effect counters stay one",
+    "Observed SQL result survives producer death before host RunStore adoption; successor reads SQL without GET/POST",
+    "two actual successor processes contend for one SQL lease",
+    "forced epoch change stops stale SDK owner before new HTTP/state mutation",
+    "exact response SHA ACK and adoption digest; logical response/cursor deletion; binding tombstone retained",
+    "failed SQL reservation sends zero tool POST and poisons owner until release/reopen",
+    "wrong principal/input, no cursor, unsupported callbacks, 404, wrong session/request, malformed/oversized response, duplicate IDs and capacity fail closed"
+  ],
+  "independent_source_review": {
+    "reviewer": "parent agent independent of implementation agent",
+    "runtime_source_sha256": "c2855dc3ec5910753e840b181929962616c89da7c408a0e6802eedcf653a624a",
+    "scope": [
+      "private checkpoint types and public summary privacy",
+      "bearer transport header is not a checkpoint field",
+      "generic SQL errors and opaque session/header state",
+      "fenced save before POST, unknown-commit poison and new-epoch reopen",
+      "Observed before return and exact ACK/adoption contract",
+      "static callback refusal, original-session GET only and bounded state"
+    ],
+    "finding": "no definite blocking issue found in scoped source review",
+    "limit": "agent source review, not external security certification; actual crash/fencing tests recorded separately"
+  },
+  "limitations": [
+    "protected SQL and principal binding are trusted host responsibilities; opaque bearer does not prove subject",
+    "SQLite is same-host multi-process; PostgreSQL lease coordination cannot recall already-dispatched remote effects",
+    "no automatic original POST replay, callbacks/reply replay, replacement initialization, OAuth refresh or Durable NeedsRecovery reconciliation",
+    "service event retention and GET support are required; absent source/cursor or rejection remains unknown",
+    "ACK must follow host durable adoption; no cross-RunStore atomic transaction or physical secure erasure"
+  ]
+}

@@ -462,3 +462,364 @@ async fn session_id_first_assigned_after_initialize_is_rejected() {
     assert!(error.contains("after initialization"), "{error}");
     worker.await.unwrap();
 }
+
+// Actual dependency-free subprocess fixture, separate from HTTP protocol fixtures.
+fn stdio_fixture() -> &'static std::path::Path {
+    static FIXTURE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let directory = FIXTURE.get_or_init(|| {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join(if cfg!(windows) {
+            "mcp-fixture.exe"
+        } else {
+            "mcp-fixture"
+        });
+        let status = std::process::Command::new("rustc")
+            .arg("--edition=2021")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/data/mcp_stdio_fixture.rs"
+            ))
+            .arg("-o")
+            .arg(&executable)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        directory
+    });
+    // A separate OnceLock keeps a borrowed stable canonical executable path.
+    static EXECUTABLE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    EXECUTABLE
+        .get_or_init(|| {
+            directory.path().join(if cfg!(windows) {
+                "mcp-fixture.exe"
+            } else {
+                "mcp-fixture"
+            })
+        })
+        .as_path()
+}
+fn stdio_config(mode: &str) -> McpStdioConfig {
+    let mut config = McpStdioConfig::new(stdio_fixture(), std::env::current_dir().unwrap());
+    config.args = vec![mode.into()];
+    config.timeout = Duration::from_secs(3);
+    config.max_message_bytes = 4096;
+    config
+}
+#[tokio::test]
+async fn stdio_real_process_resources_bindings_and_explicit_teardown() {
+    let client = McpClient::connect_stdio(stdio_config("normal"))
+        .await
+        .unwrap();
+    assert_eq!(client.protocol_version(), "2025-06-18");
+    let mut host_binding = binding();
+    host_binding.remote_name = "echo".into();
+    let tool = client.bind(host_binding.clone()).unwrap();
+    assert_eq!(tool.definition().effect, ToolEffect::NonIdempotent);
+    assert_eq!(tool.definition().permissions, host_binding.permissions);
+    assert_eq!(
+        tool.execute(json!({}), context()).await.unwrap()["content"][0]["text"],
+        "done"
+    );
+    let resources = client.list_resources(4).await.unwrap();
+    assert_eq!(resources[0].uri, "fixture://one");
+    assert_eq!(
+        client.read_resource("fixture://one").await.unwrap()["contents"][0]["text"],
+        "resource evidence"
+    );
+    let mut changed = stdio_config("normal");
+    changed.namespace = "other-account".into();
+    let other = McpClient::connect_stdio(changed).await.unwrap();
+    assert_ne!(
+        tool.definition().description,
+        other.bind(host_binding).unwrap().definition().description
+    );
+    client.close().await.unwrap();
+    client.close().await.unwrap();
+    assert!(tool
+        .execute(json!({}), context())
+        .await
+        .unwrap_err()
+        .0
+        .contains("closed"));
+    other.close().await.unwrap();
+}
+#[tokio::test]
+async fn stdio_environment_is_cleared_and_only_named_values_are_forwarded() {
+    // Unique names are not used by other tests or subprocesses.
+    std::env::set_var(
+        "TASKLOOM_MCP_FORBIDDEN_SECRET",
+        "do-not-forward-fixture-secret",
+    );
+    std::env::set_var("TASKLOOM_MCP_ALLOWED_TEST", "allowed");
+    let mut config = stdio_config("environment");
+    config
+        .environment
+        .insert("TASKLOOM_MCP_ALLOWED_TEST".into());
+    let client = McpClient::connect_stdio(config).await.unwrap();
+    let mut b = binding();
+    b.remote_name = "echo".into();
+    let result = client
+        .bind(b)
+        .unwrap()
+        .execute(json!({}), context())
+        .await
+        .unwrap();
+    assert_eq!(
+        result["structuredContent"],
+        json!({"inherited":false,"allowed":true})
+    );
+    client.close().await.unwrap();
+    std::env::remove_var("TASKLOOM_MCP_FORBIDDEN_SECRET");
+    std::env::remove_var("TASKLOOM_MCP_ALLOWED_TEST");
+}
+#[tokio::test]
+async fn stdio_bad_frames_eof_and_notification_flood_close_without_replay() {
+    for mode in ["badid", "oversize", "eof", "notifications"] {
+        let client = McpClient::connect_stdio(stdio_config(mode)).await.unwrap();
+        let mut b = binding();
+        b.remote_name = "echo".into();
+        let tool = client.bind(b).unwrap();
+        assert!(tool.execute(json!({}), context()).await.is_err(), "{mode}");
+        assert!(tool.execute(json!({}), context()).await.is_err(), "{mode}");
+    }
+}
+#[tokio::test]
+async fn stdio_cancel_timeout_and_close_stop_active_wire_work() {
+    let mut config = stdio_config("slow");
+    config.timeout = Duration::from_millis(250);
+    let client = McpClient::connect_stdio(config).await.unwrap();
+    let mut b = binding();
+    b.remote_name = "echo".into();
+    let tool = client.bind(b.clone()).unwrap();
+    assert!(tool.execute(json!({}), context()).await.is_err());
+    assert!(tool.execute(json!({}), context()).await.is_err());
+    let client = McpClient::connect_stdio(stdio_config("slow"))
+        .await
+        .unwrap();
+    let tool = client.bind(b).unwrap();
+    let worker = tokio::spawn(async move { tool.execute(json!({}), context()).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    worker.abort();
+    let _ = worker.await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(client.list_resources(1).await.is_err());
+    let client = McpClient::connect_stdio(stdio_config("slow"))
+        .await
+        .unwrap();
+    let mut b = binding();
+    b.remote_name = "echo".into();
+    let tool = client.bind(b).unwrap();
+    let worker = tokio::spawn(async move { tool.execute(json!({}), context()).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(2), client.close())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(worker.await.unwrap().is_err());
+}
+#[tokio::test]
+async fn http_resources_are_explicit_bounded_and_never_follow_nested_uris() {
+    let (url,requests,worker)=server(vec![
+        Reply::Result(json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}}})),Reply::Initialized,catalog(),
+        Reply::Result(json!({"resources":[{"uri":"private://one","name":"one"}],"nextCursor":"two"})),
+        Reply::Result(json!({"resources":[{"uri":"private://two","name":"two"}]})),
+        Reply::Result(json!({"contents":[{"uri":"private://one","text":"Do not follow https://example.invalid"}]})),
+        Reply::Status(200),
+    ]).await;
+    let client = McpClient::connect(McpHttpConfig::new(url)).await.unwrap();
+    assert_eq!(client.list_resources(2).await.unwrap().len(), 2);
+    assert!(
+        client.read_resource("private://one").await.unwrap()["contents"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("example.invalid")
+    );
+    client.close().await.unwrap();
+    worker.await.unwrap();
+    let requests = requests.lock().unwrap();
+    assert_eq!(requests.len(), 7);
+    assert_eq!(requests[4].body["params"]["cursor"], "two");
+    assert_eq!(requests[5].body["params"]["uri"], "private://one");
+}
+
+#[tokio::test]
+async fn stdio_invalid_launch_request_bounds_and_queue_backpressure_are_pre_dispatch() {
+    let mut config = stdio_config("normal");
+    config.program = "relative-program".into();
+    assert!(McpClient::connect_stdio(config)
+        .await
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("configuration"));
+    let mut config = stdio_config("normal");
+    config.environment.insert("BAD=NAME".into());
+    assert!(McpClient::connect_stdio(config).await.is_err());
+    let client = McpClient::connect_stdio(stdio_config("normal"))
+        .await
+        .unwrap();
+    let mut b = binding();
+    b.remote_name = "echo".into();
+    let tool = client.bind(b.clone()).unwrap();
+    assert!(tool
+        .execute(json!({"oversize":"x".repeat(8192)}), context())
+        .await
+        .unwrap_err()
+        .0
+        .contains("request exceeds"));
+    assert!(tool.execute(json!({}), context()).await.is_ok());
+    client.close().await.unwrap();
+    let mut config = stdio_config("slow");
+    config.max_pending_requests = 1;
+    let client = McpClient::connect_stdio(config).await.unwrap();
+    let tool = client.bind(b).unwrap();
+    let first = tool.clone();
+    let active = tokio::spawn(async move { first.execute(json!({}), context()).await });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let second = tool.clone();
+    let queued = tokio::spawn(async move { second.execute(json!({}), context()).await });
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    let refused = tool.execute(json!({}), context()).await.unwrap_err();
+    assert!(refused.0.contains("queue full"));
+    client.close().await.unwrap();
+    assert!(active.await.unwrap().is_err());
+    assert!(queued.await.unwrap().is_err());
+}
+#[tokio::test]
+async fn resource_capability_missing_and_mismatched_content_are_rejected() {
+    let (url, requests, worker) = server(vec![
+        initialize(),
+        Reply::Initialized,
+        catalog(),
+        Reply::Status(200),
+    ])
+    .await;
+    let client = McpClient::connect(McpHttpConfig::new(url)).await.unwrap();
+    assert!(client.list_resources(1).await.is_err());
+    assert!(client.read_resource("file:///not-granted").await.is_err());
+    client.close().await.unwrap();
+    worker.await.unwrap();
+    assert_eq!(requests.lock().unwrap().len(), 4);
+    let (url, _, worker) = server(vec![
+        Reply::Result(
+            json!({"protocolVersion":"2025-06-18","capabilities":{"tools":{},"resources":{}}}),
+        ),
+        Reply::Initialized,
+        catalog(),
+        Reply::Result(json!({"contents":[{"uri":"other://identity","text":"wrong source"}]})),
+        Reply::Status(200),
+    ])
+    .await;
+    let client = McpClient::connect(McpHttpConfig::new(url)).await.unwrap();
+    assert!(client
+        .read_resource("requested://identity")
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("URI"));
+    client.close().await.unwrap();
+    worker.await.unwrap();
+}
+
+#[tokio::test]
+async fn stdio_durable_exact_approval_and_lost_effect_never_replay() {
+    let directory = tempfile::tempdir().unwrap();
+    let effects = directory.path().join("effects.log");
+    let mut config = stdio_config("effectlost");
+    config.args.push(effects.to_str().unwrap().into());
+    let client = McpClient::connect_stdio(config).await.unwrap();
+    let mut b = binding();
+    b.remote_name = "echo".into();
+    let mut registry = ToolRegistry::new();
+    registry.register(client.bind(b).unwrap()).unwrap();
+    let model = ToolModel;
+    let agent = AgentLoop::new(&model, &registry, "fixture")
+        .with_policy(ToolPolicy::default().allow("save").grant("remote:write"));
+    let store = FileRunStore::new(directory.path().join("runs"));
+    let durable = DurableAgent::new(&agent, &store);
+    let waiting = durable
+        .start("stdio-effect", vec![Message::user("save")])
+        .await
+        .unwrap();
+    assert_eq!(waiting.status, RunStatus::WaitingApproval);
+    assert!(!effects.exists());
+    durable
+        .decide(
+            "stdio-effect",
+            &waiting.pending_approval().unwrap().request_id,
+            ApprovalDecision {
+                approved: true,
+                actor: "operator".into(),
+                note: "exact fixture write".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let unknown = durable.resume("stdio-effect").await.unwrap();
+    assert_eq!(unknown.status, RunStatus::NeedsRecovery);
+    assert!(matches!(
+        unknown.tool_steps[0].progress,
+        ToolProgress::Uncertain { .. }
+    ));
+    assert_eq!(std::fs::read_to_string(&effects).unwrap(), "effect\n");
+    assert_eq!(
+        durable.resume("stdio-effect").await.unwrap().revision,
+        unknown.revision
+    );
+    assert_eq!(std::fs::read_to_string(&effects).unwrap(), "effect\n");
+    client.close().await.unwrap();
+}
+
+#[cfg(feature = "app")]
+#[tokio::test]
+async fn application_stdio_configuration_is_reviewed_without_launch_and_preserves_approval() {
+    use taskloom::runtime::app::*;
+    let directory = tempfile::tempdir().unwrap();
+    let effects = directory.path().join("app-effects.log");
+    let config = AppConfig {
+        state_dir: directory.path().join("state"),
+        knowledge: false,
+        mcp_stdio: vec![AppMcpStdio {
+            program: stdio_fixture().into(),
+            cwd: directory.path().into(),
+            args: vec!["effectlost".into(), effects.to_str().unwrap().into()],
+            environment: Default::default(),
+            namespace: "app-subprocess-test".into(),
+            bindings: vec![McpToolBinding {
+                remote_name: "echo".into(),
+                ..binding()
+            }],
+        }],
+        ..Default::default()
+    };
+    let preview = preview_configuration(config.clone()).unwrap();
+    assert!(!preview.services_contacted);
+    assert!(!effects.exists());
+    assert!(preview
+        .declared_tools
+        .iter()
+        .any(|t| t.name == "save" && t.effect == ToolEffect::NonIdempotent));
+    assert!(serde_json::to_value(AppConfig::default())
+        .unwrap()
+        .get("mcp_stdio")
+        .is_none());
+    let app = Application::with_model(
+        config,
+        Arc::new(ToolModel),
+        ToolRegistry::new(),
+        ToolPolicy::default(),
+    )
+    .await
+    .unwrap();
+    app.start("app-stdio", "save").await.unwrap();
+    let waiting = loop {
+        let state = app.inspect("app-stdio").await.unwrap();
+        if !app.job("app-stdio").unwrap().active {
+            break state;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(waiting.status, RunStatus::WaitingApproval);
+    assert!(!effects.exists());
+    app.shutdown(Duration::from_secs(2)).await.unwrap();
+}

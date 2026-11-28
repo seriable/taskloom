@@ -12,7 +12,7 @@
 <details id="config-wizard"><summary>Configuration wizard</summary>
 <div class="row"><div><label for="config-file">Import existing configuration</label><input id="config-file" type="file" accept=".json,application/json"></div><button id="config-defaults" class="secondary">Start from offline defaults</button></div>
 <p class="muted">Use credential environment names only. Configure their values on the host. Keep advanced fields in the complete JSON below.</p>
-<fieldset><legend>1 · Model & budget</legend><div class="row"><div><label for="config-state">State directory</label><input id="config-state"></div><div><label for="config-provider">Provider</label><select id="config-provider"><option value="offline">Offline excerpts</option><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic compatible</option></select></div><div><label for="config-model">Model name</label><input id="config-model"></div></div>
+<fieldset><legend>1 · Model & budget</legend><div class="row"><div><label for="config-state">State directory</label><input id="config-state"></div><div><label for="config-provider">Provider</label><select id="config-provider"><option value="offline">Offline excerpts</option><option value="openai">OpenAI compatible</option><option value="anthropic">Anthropic compatible</option><option value="native:responses">OpenAI Responses</option><option value="native:gemini">Gemini native</option><option value="native:vertex">Vertex native (host bearer)</option><option value="native:bedrock">Bedrock Converse (host bearer)</option><option value="native:azure">Azure deployment</option></select></div><div><label for="config-model">Model name</label><input id="config-model"></div></div>
 <div class="row"><div><label for="config-endpoint">Model API URL</label><input id="config-endpoint" placeholder="https://api.example.com/v1"></div><div><label for="config-key">Credential environment name</label><input id="config-key" placeholder="MODEL_API_KEY" autocomplete="off"></div><div><label for="config-namespace">Provider namespace</label><input id="config-namespace"></div></div>
 <div class="row"><div><label for="config-cap">Generation cap (USD micro-units, or null)</label><input id="config-cap"></div><div><label for="config-output">Output tokens per request</label><input id="config-output"></div><div><label for="config-price-input">USD / million input tokens</label><input id="config-price-input"></div><div><label for="config-price-output">USD / million output tokens</label><input id="config-price-output"></div></div></fieldset>
 <fieldset><legend>2 · Tools, roles & retrieval</legend><label><input id="config-knowledge" type="checkbox" style="width:auto"> Offer local knowledge search</label>
@@ -69,7 +69,7 @@
   }
   function configFields(value) {
     el('config-state').value = value.state_dir;
-    el('config-provider').value = value.provider.type;
+    el('config-provider').value = value.provider.type === 'native' ? 'native:' + value.provider.protocol : value.provider.type;
     el('config-model').value = value.model;
     el('config-endpoint').value = value.provider.base_url || '';
     el('config-key').value = value.provider.key_env || '';
@@ -93,6 +93,7 @@
     value.state_dir = el('config-state').value; value.model = el('config-model').value;
     value.provider = type === 'offline' ? {type} : {type, base_url: el('config-endpoint').value,
       key_env: el('config-key').value, namespace: el('config-namespace').value};
+    if (type.startsWith('native:')) { value.provider.type = 'native'; value.provider.protocol = type.slice(7); }
     value.limits.max_cost_micros = parse(el('config-cap').value);
     value.output_tokens = parse(el('config-output').value);
     value.knowledge = el('config-knowledge').checked; value.mcp = parse(el('config-mcp').value);

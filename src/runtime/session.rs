@@ -101,7 +101,7 @@ impl Session {
                 .actor
                 .as_ref()
                 .is_some_and(|actor| !actor.trim().is_empty() && actor.len() <= 256)
-                || !turn.note.as_ref().is_some_and(|note| note.len() <= 4096)
+                || turn.note.as_ref().is_none_or(|note| note.len() > 4096)
             {
                 return Err(invalid("failed turn has no operator acknowledgement"));
             }

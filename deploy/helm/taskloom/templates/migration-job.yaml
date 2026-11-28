@@ -1,0 +1,51 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "taskloom.fullname" . }}-migrate-{{ required "set a unique migration.jobId" .Values.migration.jobId }}
+  labels:
+    {{- include "taskloom.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskloom
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "taskloom.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: migrate
+          image: {{ include "taskloom.image" . | quote }}
+          args:
+            - sh
+            - -ec
+            - >-
+              taskloom --config /etc/taskloom/project.json database-migrate
+              {{- if .Values.migration.configureQueue }}
+              && taskloom --config /etc/taskloom/project.json queue-configure /etc/taskloom/queue.json {{ .Values.queue.expectedPolicyRevision }} {{ .Values.migration.operator | quote }} "explicit reviewed queue capacity"
+              {{- end }}
+          env:
+            - name: TASKLOOM_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret | quote }}, key: {{ .Values.secretKeys.databaseUrl | quote }}}}
+            - name: TASKLOOM_MODEL_KEY
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret | quote }}, key: {{ .Values.secretKeys.modelKey | quote }}}}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {cpu: "1", memory: 512Mi}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/taskloom, readOnly: true}
+            - {name: state, mountPath: /var/lib/taskloom}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "taskloom.fullname" . }}-config}
+        - name: state
+          emptyDir: {sizeLimit: 64Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+{{- end }}

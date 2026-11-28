@@ -44,6 +44,9 @@ pub fn preview_configuration(config: AppConfig) -> Result<AppConfigPreview, Runt
         credential(&database.url_env, &mut credentials)?;
     }
     provider(&config.provider, &mut credentials)?;
+    if let Some(rerank) = &config.retrieval.http_rerank {
+        credential(&rerank.provider.key_env, &mut credentials)?;
+    }
     if !matches!(config.provider, AppProvider::Offline)
         && (config.limits.max_cost_micros.is_none()
             || PriceTable::new(config.prices.clone())
@@ -143,6 +146,23 @@ pub fn preview_configuration(config: AppConfig) -> Result<AppConfigPreview, Runt
             )?;
         }
     }
+    for process in &config.mcp_stdio {
+        process.validate()?;
+        for name in &process.environment {
+            credential(name, &mut credentials)?;
+        }
+        for binding in &process.bindings {
+            if binding.remote_name.trim().is_empty() || binding.remote_name.len() > 256 {
+                return Err(config_error("invalid subprocess MCP remote tool name"));
+            }
+            declare(
+                &binding.name,
+                binding.effect,
+                binding.permissions.clone(),
+                "explicit MCP subprocess; startup deferred",
+            )?;
+        }
+    }
     if tools.len() > 256 {
         return Err(config_error(
             "at most 256 tool declarations may be configured",
@@ -155,6 +175,15 @@ pub fn preview_configuration(config: AppConfig) -> Result<AppConfigPreview, Runt
     }
     if let Some(embedding) = &config.retrieval.embedding {
         provider(&embedding.provider, &mut credentials)?;
+    }
+    #[cfg(feature = "qdrant")]
+    if let Some(name) = config
+        .retrieval
+        .qdrant
+        .as_ref()
+        .and_then(|target| target.api_key_env.as_ref())
+    {
+        credential(name, &mut credentials)?;
     }
     if let Some(name) = config
         .observability
@@ -251,6 +280,19 @@ fn credential(name: &str, names: &mut BTreeSet<String>) -> Result<(), RuntimeErr
 fn provider(provider: &AppProvider, names: &mut BTreeSet<String>) -> Result<(), RuntimeError> {
     match provider {
         AppProvider::Offline => Ok(()),
+        AppProvider::Native {
+            protocol,
+            base_url,
+            key_env,
+            namespace,
+        } => {
+            crate::native_providers::NativeProvider::validate_endpoint(*protocol, base_url)
+                .map_err(|e| config_error(e.detail()))?;
+            if namespace.trim().is_empty() || namespace.len() > 256 {
+                return Err(config_error("invalid provider namespace"));
+            }
+            credential(key_env, names)
+        }
         AppProvider::Openai {
             base_url,
             key_env,

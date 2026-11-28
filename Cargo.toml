@@ -9,7 +9,14 @@ readme = "README.md"
 keywords = ["llm", "agent", "openai", "anthropic", "gateway"]
 categories = ["api-bindings", "asynchronous"]
 repository = "https://github.com/seriable/taskloom"
-include = ["src/**", "examples/**", "!examples/**/__pycache__/**", "!examples/**/*.pyc", "tests/**", "!tests/**/__pycache__/**", "!tests/**/*.pyc", "docs/**", "sandbox/**", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*"]
+include = [
+    "src/**", "examples/**", "tests/**", "docs/**", "sandbox/**", "sdks/**", "deploy/**",
+    "README.md", "README.en.md", "CHANGELOG.md", "CONTRIBUTING.md", "LICENSE-*",
+    # Cargo patterns use last-match precedence: put exclusions after README and
+    # license patterns, which can otherwise re-include dependency documentation.
+    "!**/__pycache__/**", "!**/*.pyc", "!sdks/**/node_modules/**",
+    "!sdks/**/build/**", "!sdks/**/dist/**", "!sdks/**/*.egg-info/**",
+]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -24,12 +31,18 @@ anthropic = ["dep:reqwest", "dep:base64"]
 schemars = ["dep:schemars"]
 # Autonomous tool execution, kept separate from the typed single-task API.
 runtime = ["dep:jsonschema", "dep:uuid"]
+skill-registry = ["runtime", "dep:ed25519-dalek"]
+oidc = ["database", "dep:jsonwebtoken"]
+office = ["runtime", "dep:zip", "dep:quick-xml", "dep:flate2"]
+qdrant = ["runtime", "dep:reqwest"]
+ocr = ["sandbox", "uuid/v4"]
 # Opt-in transactional runtime stores; never enabled for the minimal library.
 database = ["runtime", "dep:sqlx", "dep:home", "uuid/v4"]
 # Explicit OTLP/HTTP JSON export of bounded, redacted journal projections.
 telemetry = ["runtime", "dep:reqwest"]
 # Explicitly configured MCP Streamable HTTP tool clients.
-mcp = ["runtime", "dep:reqwest"]
+mcp = ["runtime", "dep:reqwest", "dep:base64", "uuid/v4", "tokio/process", "tokio/io-util"]
+mcp-persistence = ["mcp", "database"]
 # Opt-in bounded web ingestion/search and a configured PDF text extractor.
 research = ["runtime", "dep:reqwest", "dep:scraper", "dep:html5ever", "tokio/net", "tokio/process", "tokio/io-util"]
 # Explicit Linux-container Python execution, never a host-shell fallback.
@@ -53,7 +66,12 @@ jsonschema = { version = "0.29", default-features = false, optional = true }
 # Constrain downstream resolution too, not only this repository's lockfile.
 uuid = { version = "=1.18.1", default-features = false, optional = true }
 fs2 = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"], optional = true }
+jsonwebtoken = { version = "=9.3.1", default-features = false, optional = true }
+zip = { version = "=2.4.2", default-features = false, features = ["deflate-flate2", "flate2"], optional = true }
+flate2 = { version = "=1.1.11", default-features = false, features = ["rust_backend"], optional = true }
+quick-xml = { version = "=0.37.5", optional = true }
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls", "stream"], optional = true }
 schemars = { version = "1", optional = true }
 scraper = { version = "0.23", optional = true }
 serde = { version = "1", features = ["derive"] }
@@ -77,6 +95,14 @@ required-features = ["anthropic"]
 [[example]]
 name = "agent_loop"
 required-features = ["runtime"]
+
+[[example]]
+name = "agent_qdrant"
+required-features = ["qdrant"]
+
+[[example]]
+name = "agent_ocr"
+required-features = ["ocr"]
 
 [[example]]
 name = "agent_openai"
@@ -106,6 +132,11 @@ required-features = ["app"]
 name = "benchmark_citations"
 path = "examples/benchmarks/citations.rs"
 required-features = ["runtime"]
+
+[[example]]
+name = "skill_registry"
+path = "examples/skills/registry.rs"
+required-features = ["skill-registry"]
 
 [[example]]
 name = "database_native"

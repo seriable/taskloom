@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taskloom-client"
+version = "0.1.0a1"
+description = "Explicit JSON API client for Taskloom durable agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT OR Apache-2.0"}
+
+[tool.setuptools]
+packages = ["taskloom_client"]
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]

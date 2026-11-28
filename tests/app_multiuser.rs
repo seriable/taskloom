@@ -240,7 +240,7 @@ async fn controls(db: &SqlDatabase, root: &Path) {
         .unwrap();
     assert_eq!(
         identity,
-        json!({"user":runner_id,"tenant":"tenant-a","project":project,"role":"runner"})
+        json!({"user":runner_id,"tenant":"tenant-a","project":project,"role":"runner","semantic_memory_enabled":false})
     );
     for bearer in [
         reader.bearer.as_str(),

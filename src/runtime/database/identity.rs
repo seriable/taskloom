@@ -159,6 +159,8 @@ pub struct IssuedToken {
 pub struct AuthenticatedActor {
     user: String,
     token_id: String,
+    #[cfg(all(feature = "oidc", feature = "app"))]
+    external_expires_ms: Option<i64>,
 }
 impl AuthenticatedActor {
     pub fn user_id(&self) -> &str {
@@ -349,6 +351,33 @@ impl SqlIdentityStore {
         Ok(AuthenticatedActor {
             user: user.id.clone(),
             token_id: token.id.clone(),
+            #[cfg(all(feature = "oidc", feature = "app"))]
+            external_expires_ms: None,
+        })
+    }
+    /// Trusted OIDC host integration only. The proof has no public constructor
+    /// and the host explicitly maps its verified issuer/subject to a local user.
+    /// This never imports roles, groups, ownership or membership from claims.
+    #[cfg(all(feature = "oidc", feature = "app"))]
+    pub async fn authenticate_oidc_subject(
+        &self,
+        subject: &crate::runtime::app::oidc::VerifiedOidcSubject,
+        user_id: &str,
+    ) -> Result<AuthenticatedActor, RuntimeError> {
+        identity(user_id)?;
+        let (snapshot, now) = self.checked_snapshot().await?;
+        if subject.expires_ms() <= now {
+            return Err(denied());
+        }
+        let user = snapshot
+            .users
+            .get(user_id)
+            .filter(|user| user.enabled)
+            .ok_or_else(denied)?;
+        Ok(AuthenticatedActor {
+            user: user.id.clone(),
+            token_id: String::new(),
+            external_expires_ms: Some(subject.expires_ms()),
         })
     }
     pub async fn authorize(
@@ -358,11 +387,17 @@ impl SqlIdentityStore {
         permission: ProjectPermission,
     ) -> Result<ProjectRole, RuntimeError> {
         let (snapshot, now) = self.checked_snapshot().await?;
-        snapshot
-            .tokens
-            .get(&actor.token_id)
-            .filter(|t| t.user == actor.user && !t.revoked && t.expires_ms > now)
-            .ok_or_else(denied)?;
+        #[cfg(all(feature = "oidc", feature = "app"))]
+        let external = actor.external_expires_ms.is_some_and(|expiry| expiry > now);
+        #[cfg(not(all(feature = "oidc", feature = "app")))]
+        let external = false;
+        if !external {
+            snapshot
+                .tokens
+                .get(&actor.token_id)
+                .filter(|t| t.user == actor.user && !t.revoked && t.expires_ms > now)
+                .ok_or_else(denied)?;
+        }
         let user = snapshot
             .users
             .get(&actor.user)

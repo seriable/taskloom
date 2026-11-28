@@ -37,6 +37,8 @@ pub mod ledger;
 pub mod locale;
 pub mod many;
 #[cfg(feature = "openai")]
+pub mod native_providers;
+#[cfg(feature = "openai")]
 pub mod openai;
 mod prompt_task;
 pub mod prompts;

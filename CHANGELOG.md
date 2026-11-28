@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+- Opt-in `mcp-persistence` adds protected SQL session ownership, durable unknown
+  admission before the original POST, observed-result storage before host adoption,
+  explicit same-session GET takeover and ACK tombstones. This SDK statically
+  refuses callbacks/OAuth-helper combinations, never replays an unknown POST,
+  and cannot recall already dispatched remote effects or prove global exactly-once.
+
+- Real local old/new same-schema worker rolling/revert, Prometheus authorized
+  scraping/alert recovery, source checksum/Ed25519 preparation and a documented
+  compatibility matrix add reproducible operational gates. Actual learned-model
+  Taskloom/LangGraph arithmetic comparison retains both frameworks' 2/5 outcomes;
+  experimental local answerability reranking also retains failed quality gates.
+
+- Framework-parity extensions add native Responses/Gemini/Vertex/Bedrock-bearer/
+  Azure generation and Gemini/Vertex embeddings, explicit MCP stdio/resources,
+  host-reviewed sampling/forms, pinned OAuth/PKCE and process-local SSE GET
+  resumption. Framework-owned HTTP clients disable implicit protocol retries;
+  explicit Gateway attempts retain durable admission. No automatic tool POST
+  replay or opaque-token principal proof is implied; the separate opt-in durable
+  SDK has the restricted recovery contract described above.
+
+- Optional loaders add bounded DOCX/XLSX/PPTX, CSV/JSONL/UTF-8 mail, read-only
+  SQL snapshots and exact presigned object snapshots. Lexical/HTTP rerankers,
+  explicit incremental embedding updates and a Qdrant REST connector preserve
+  source/model/scope bindings. External embedding/rerank spending has separate
+  journals; source ingestion and remote index publication remain explicit host
+  actions rather than automatic model-selected writes.
+
+- SQL services gain owner-isolated private history/child runs, reviewed private
+  memory, explicit paid semantic recall and project-wide atomic generation
+  accounting. An optional Chinese team console and pinned-JWKS OIDC/PKCE login
+  use live SQL authorization. Private generation remains no-tools-v1; browser
+  sessions and in-memory event recovery do not establish multi-node scheduling.
+
+- Signed skill trust is enforced through file/SQL/App activation and local CLI
+  installation, retaining pending rollback watermarks after lost acknowledgments.
+  Host commands, health/readiness, SIGTERM drain, Docker/Compose/Helm sources,
+  Python/TypeScript clients and repeatable local outage/backup drills are included.
+  These do not establish a hosted control plane, rolling schema migration,
+  multi-region recovery or production SLO acceptance.
+
+- Versioned multilingual evaluation separates provenance, source support,
+  corpus-relative factuality, coverage and declared inter-rater agreement.
+  Two real local Qwen embedding campaigns failed at least one frozen quality
+  gate; no independent human labels or general framework-quality leadership
+  are claimed. See `docs/framework-parity-roadmap.md` for current scope/status.
+
 - Citation output contracts optionally bind a JSON Schema to the original
   model answer. Structure and exact source provenance/coverage must pass
   together before durable success; repairs retain read-only retrieval grants.

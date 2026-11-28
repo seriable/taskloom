@@ -1,0 +1,484 @@
+{
+  "version": 1,
+  "name": "Multilingual and domain-disambiguation development parity set v1",
+  "provenance": "Maintainer Agent-authored development queries over six already observed repository documents and two explicitly fictional bilingual policy documents. Frozen source text and labels before any dispatch of this new suite. Not held-out, blind, externally human-labelled, medical/financial advice, semantic truth, a native model run or a competitor result. Query groups overlap; negative labels mean no supplied document answers that question, not no keyword overlap.",
+  "documents": [
+    {
+      "id": "durable-queue",
+      "title": "Durable SQL queues and workers",
+      "source": "repository:docs/durable-queue.md",
+      "text": "# Durable SQL queues and workers\n\nThe `app,database` features provide explicit SQLite/PostgreSQL project queues\nand independent worker processes. Submission persists immutable task input and\nhost contracts before execution. Workers reuse the existing durable run,\nworkflow, PEER and session controllers; a second job log never decides that an\nunknown external write is safe to repeat.\n\nDefault features remain empty. File-based/local execution and `AgentTask` remain\ncompatible, with Rust 1.86. Queues are explicitly configured by a trusted local\nadministrator. The multi-user JSON service uses the same SQL project and live\nrole/token checks. The existing browser UI is the local operator UI; queue\nsubmission/control currently uses the queue API or CLI. Legacy `job.active`\nfields describe process-local workers. **Use queue job state and its runtime\nbindings for distributed activity**, including a worker running on another host.\n\n## Setup and migration\n\n1. Stop old API hosts and workers. Back up the complete database and separately\n   protect host configs, credentials, model weights and external tool data.\n2. Build/install with `app,database` and run `taskloom database-migrate` against\n   the intended database. This explicitly upgrades schema v1/v2 to **v3** in\n   one transaction. No live database-clock lease may remain. PostgreSQL locks\n   the lease table during the barrier. Unknown versions/downgrades are refused.\n3. Configure model/prices, tools, role grants and SQL tenant/project normally.\n   Initialize a reviewed generation quota separately; queue capacity does not\n   replace the generation spending ledger.\n4. Configure queue capacity, then start the project API and separate workers\n   with the same frozen host contracts and SQL dataset/project identity.\n\nSchema v3 adds `taskloom_jobs` and `taskloom_job_bindings` with claim/resource\nindexes. Existing dataset UUID, runtime envelopes, budgets, quotes, approvals\nand exact host bindings are preserved. V1/v2 binaries fail schema/ownership\nchecks after migration; do not mix them into a running v3 deployment. There is\nno automatic file-to-SQL import, partial journal import or schema downgrade.\nRestore a complete backup with its matching binary when a rollback is required.\n\nThe retained v2 migration probe rebuilds the actual pre-queue SDK at `8f681b0`\nin an ignored, separate source directory. Copy\n`examples/database/legacy_owner.rs` to that archive's\n`examples/old_queue_owner.rs` and build it plus `database_native` with\n`--all-features --target-dir target/archived-v2-build`. Always use a different\nCargo target directory from the current checkout: equal package names/versions\ncan otherwise collide in cached artifacts. The lease-only fixture refuses any SDK schema other than v2.\nPass those binaries as `--old-owner` and `--old-probe` to\n`accept_quota_migration.py --source-version 2`, using copies of the retained\nv2 native SQLite file/dump and matching `--native-campaign`. The probe verifies\na real old process blocks upgrade while live, kills only that owned process,\nwaits its original lease, then verifies record/quota preservation and old-binary\nschema rejection. It makes no model/tool call and is not a rolling-upgrade or\nold-binary native-dispatch benchmark. Original databases stay untouched.\n\n```powershell\ncargo build --all-features --bin taskloom --example multiuser_host\ntaskloom --config project.json database-migrate\n# limits.json: {\"max_open_jobs\":24,\"max_running\":4}\ntaskloom --config project.json queue-configure limits.json 0 local-admin \"reviewed project capacity\"\n# task.json: {\"type\":\"run\",\"id\":\"hello\",\"prompt\":\"Summarize the supplied task.\"}\ntaskloom --config project.json queue-submit task.json local-operator\ntaskloom --config project.json worker worker-a\n# Another independent process, same host contract and namespace:\ntaskloom --config project.json worker worker-b\n```\n\n`queue-configure` needs expected **policy** revision, operator and note. A JSON\n`null` disables new queue admission/claiming. It never erases jobs, refunds\ngeneration uncertainty or reopens the multi-user service's direct execution\nroutes. Already executing owners can finish. Explicit control is required to\nstop them. Host-contract changes require all open jobs to be resolved first;\nuse the original config/grants for recovery rather than rewriting input.\n\n`max_open_jobs` (1–100000) includes pending, running, waiting, paused and failed\njobs. `max_running` (1–256, within open capacity) bounds live queue/runtime\nowners across processes. Reducing it constrains recovery as well as new work;\nunexpired original owners are not retroactively killed. Expired jobs without\nlive runtime owners can be recovered without consuming stale capacity forever.\n\nWorkers are trusted host programs with their configured model/tool credentials;\nordinary service users do not receive these credentials. Custom model adapters\nand SDK workers must use the guarded SQL stores and priced generation\nreservations. The built-in Application worker does so. CLI queue inspection,\nresume requests and control requests do not initialize model/MCP clients.\nSubmission/configuration/worker boot currently validates the configured host\nmodel and MCP bindings and therefore needs their named credentials, even though\nenqueue/configuration performs no model generation or tool invocation.\n\nThe source service example listens on loopback. Use a host-configured TLS reverse\nproxy when serving remote clients; keep database/model/tool credentials in the\nbackend environment. Supervise the API and worker processes independently,\nmonitor Failed/Waiting jobs and unresolved effects, and drain admission/workers\nbefore backup or host-contract changes. SQLite is one durable database file/WAL\non a suitable local filesystem; PostgreSQL supports separate process hosts using\nthe same project database. The supplied acceptance uses one local host and a\nreal loopback PostgreSQL container, not a multi-machine failover or production\nnetwork partition campaign.\n\n## Task input and service roles\n\nThe API accepts only the following task forms; input cannot install tools,\nselect another database or grant itself permissions:\n\n```json\n{\"type\":\"run\",\"id\":\"answer\",\"prompt\":\"A bounded user request\"}\n```\n\n```json\n{\"type\":\"session_turn\",\"id\":\"conversation\",\"turn\":\"first\",\"prompt\":\"A bounded request\"}\n```\n\nCreate the conversation explicitly first. Different open jobs cannot occupy the\nsame conversation, including approval/recovery waits. A completed turn permits\nthe next queued turn; failed terminal turns still require the existing explicit\nabandon operation. Historical child runs retain their original queue association.\n\nFor a workflow, call `/workflow-design/preview`, review its registered roles,\nlimits and exact input, then submit:\n\n```json\n{\"type\":\"workflow\",\"launch\":{\"request\":{\"id\":\"flow\",\"input\":{},\"definition\":{\"nodes\":[]},\"peer\":null,\"limits\":{}},\"preview_key\":\"the actual reviewed preview_key\"}}\n```\n\nThis schematic example omits a useful graph and complete limits; use the real\nvalidated request returned by your preview. DAG and PEER tasks use the same role\ncompiler and frozen task definitions as local execution. The worker rejects a\nchanged preview/host configuration before dispatch. Reusing a job identity with\ndifferent exact input or resource is refused. Repeating the same submission\nreturns its original receipt and submitter, including after completion.\n\nThe single-operator routes below are under `/api`. In the authenticated service\nthey are under `/tenants/T/projects/P/api`, with per-request role checks:\n\n| Route | Permission and meaning |\n| --- | --- |\n| `GET /queue` | Reader: policy and this host's binding |\n| `GET /queue/jobs` | Reader: bounded job listing (1000 records/64MiB) |\n| `GET /queue/jobs/ID` | Reader: job plus current runtime/child associations |\n| `POST /queue/jobs` | Runner: `{task, actor}`; service replaces actor with authenticated user |\n| `POST /queue/jobs/ID/resume` | Runner: exact `expected_revision`, actor and note |\n| `POST /queue/jobs/ID/control` | Operator: exact revision, `action: pause|cancel|abandon`, actor and note |\n\nApprovers retain their existing exact-ticket approval/rejection routes, and\noperators retain explicit child reconciliation and failed-turn abandonment.\nNeither operation dispatches work. An explicit queue resume is required after\napproval/reconciliation. Actor spoofing is rejected by replacing body identity\nat the authenticated boundary. Role changes, expiry and revocation are checked\non every request. Revocation does not undo an already accepted task: explicitly\ncancel it when required.\n\nOnce the project has a queue policy, the multi-user service refuses its direct\nrun/workflow/session dispatch/resume/pause/cancel routes with 409. Users must use\nqueue admission/control, including while queue admission is disabled. This\nprevents bypassing queue capacity through the old endpoints. Trusted local SDK\nand single-operator administration remain separate host authority. A previously\nqueue-bound runtime cannot dispatch without its current queue capability even\nthrough a plain `db.runs(scope)` handle.\n\n## Ownership, interruption and recovery\n\nClaiming a job, increasing its attempt count and marking it Running is one SQL\ntransaction. Database time determines renewable lease validity. A candidate is\neligible only when both its queue owner and every associated runtime owner have\nexpired. A live owner is never stolen. Recovery claims are prioritized over new\npending jobs; healthy workers then take jobs in creation/ID order. This is not a\nguarantee of fair CPU allocation among worker processes.\n\nRun/workflow/session stores bind to the exact queue capability. Runtime writes\nand pre-dispatch checks verify both fences, with another check before commit\nafter potentially expensive decoding/accounting. Generation reservations still\ncommit before each provider attempt. Removing a capability cannot authorize\ndispatch through a plain SQL handle. Lease loss or an unverified monitor stops\nnew work; the former owner cannot overwrite the successor's checkpoint or budget.\nExternal services are not transactional participants, so no exactly-once external\neffect guarantee is added.\n\n| Job state | Next action |\n| --- | --- |\n| Pending | Eligible for one fenced worker |\n| Running | Current owner executes; only expired abandoned owners recover automatically |\n| Waiting | Approval, reconciliation or session abandonment required; explicit resume afterward |\n| Paused | Explicit queue resume |\n| Failed | Inspect saved error/runtime intent; explicit resume using the same immutable input |\n| Completed / Stopped | Terminal; idle workers never reclaim it |\n| Abandoned | Operator permanently stopped scheduling; original runtime outcome remains unchanged |\n\n`abandon` is an explicit scheduling retirement for an unavailable old host\ncontract or malformed host-only input. It requires the exact open job revision\nand no live queue/runtime owner; an expired Running journal is eligible. The\ncold CLI needs only SQL access. It records actor/note and releases queue capacity\nwithout modifying runtime journals, session occupancy, spending or uncertain\neffects. It does not claim that an external call failed or cancel a request\nalready executing at an external service. Abandoned scheduling cannot resume.\nOld conversations can remain occupied until their existing controller receives\nthe required observed reconciliation/abandonment; use a new conversation for\nindependent work rather than rewriting history. After all open scheduling is\nresolved or explicitly abandoned, a reviewed host-binding change is possible\nwhile original unknown spending remains held.\n\nThere is no automatic retry of Failed/Waiting/Paused jobs. A worker killed during\na non-idempotent tool leaves the original approved call uncertain. A replacement\nclassifies the saved intent and waits for observed operator reconciliation; it\ndoes not repeat the write. Lost/cancelled model responses retain conservative\ngeneration reservations, even at zero declared API prices.\n\nControl responses acknowledge **durable request delivery**, not instantaneous\ncompletion. Workers observe control every 100ms when SQL is responsive; active\ncallbacks use the runtime's cooperative cancellation and unknown-effect rules.\nA cancellation request can race a just-completed operation; inspect the actual\nworker/runtime result. Pause stops at a durable boundary and can wait for an\nactive callback. Worker Ctrl+C requests pause; process death relies on lease\nexpiry. There is currently no bounded forced-shutdown CLI deadline: an active\ncallback may run to its configured timeout. A supervisor that hard-stops a worker\nmust preserve its journals and allow lease expiry before recovery.\n\nQueue histories are bounded to 2048 events/1024 claims per job. New work is\nrefused before these limits exhaust outcome-recording capacity; oversized or\ncorrupt histories are never truncated or silently reset. Host-only malformed task\npayloads become Failed without model dispatch. Generic SDK jobs outside the\nApplication task format require an explicit host/migration review, not edits to\ntheir immutable payload. Current runtime association inspection is bounded to\n8192 entries per job. Larger retained datasets require explicit future archival\nor migration rather than deleting spending/uncertainty records.\n\n## Reproduce and operate\n\n```powershell\ntaskloom --config project.json queue\ntaskloom --config project.json queue-inspect run-hello\ntaskloom --config project.json queue-control run-hello 2 pause local-operator \"review execution\"\ntaskloom --config project.json queue-resume run-hello 3 local-operator \"reviewed continuation\"\ntaskloom --config project.json worker-once diagnostic-worker\ncargo test --all-features --test database_queue --test app_queue\n# Set the owned test PostgreSQL environment privately:\ncargo test --all-features --test database_queue --test app_queue postgres -- --ignored\n```\n\n`worker-once` returns a job outcome or `null` when nothing can be claimed. Process\nsuccess means the outcome was acknowledged; inspect `state`, including Failed\nand Stopped, rather than treating exit 0 as model success. Long-running `worker`\ncontinues with other eligible jobs. Status, errors, audit actors, immutable input,\nclaim count and runtime associations are inspectable without model credentials.\nNew immutable inputs need new job/run identities; changing host contracts while\nopen jobs exist requires resolving them using their original contracts first.\n\nFor backup, stop API admission and workers, then verify no database-clock lease\nis live. Back up all SQL tables/indexes together: runtime/budget, quota, queue\npolicy/jobs and runtime associations are one dataset. SQLite online backup and\nPostgreSQL `pg_dump`/transactional `pg_restore` examples verify cold inspection\nwithout model or connector credentials. Preserve the dataset UUID. Do not restore\npartial journals or treat a backup as authority to repeat external effects.\nRestore host secrets/configs/tool data separately, review credential revocations\nand unresolved effects, and only then enable admission/workers.\n\n```powershell\npython examples/database/accept_queue.py target/NEW-native-queue --config target/native-generation-4b-config.json --taskloom target/debug/taskloom.exe --admin target/debug/examples/multiuser_host.exe --postgres-fixture target/OWNED-postgres --model-log target/OWNED-generation.log\npython examples/database/queue_load.py target/NEW-load --taskloom target/debug/taskloom.exe --admin target/debug/examples/multiuser_host.exe --postgres-fixture target/OWNED-postgres\npython examples/database/backup_acceptance.py target/NEW-queue-backup --kind queue --native target/NEW-native-queue --postgres-fixture target/OWNED-postgres --example target/debug/examples/multiuser_host.exe --taskloom target/debug/taskloom.exe\n```\n\nThe bounded load uses four actual worker processes and the explicitly offline\nfixture, 48 healthy jobs plus a paused/restarted control job per backend. It also\nretires one never-executed job with unavailable model/MCP credentials to verify\nthe cold metadata path. It is\nservice/storage evidence, not native inference throughput. HTTP polling can miss\nshort active intervals; the report separately reconstructs running/open peaks\nfrom persisted enqueue/claim/finish event clocks and retains all four actual\nworker labels. Negative or inconsistent clock intervals are reported as failures.\nFinite local results do not establish a production SLO or unlimited scalability.\n\nThe actual Qwen3-4B campaign separately observes eight native requests per backend\n(seven reported usages, one unknown cancelled response), two overlapping worker\nlifecycles, exact approval and actual process death during an fsynced MCP append.\nOperator observation/reconciliation is labelled. Successful short role outputs\nand lifecycle controls do not close the broader P0 research/semantic/long-task\nquality gates. The retained first probe found unsupported MCP DELETE teardown;\nthe example connector now authenticates session deletion correctly. A contended\n300ms heartbeat probe expired safely; the ordinary smoke uses one second and\nnative/process/load acceptance uses the ten-second production lease. No short-TTL\nload guarantee is claimed. See `acceptance/p2-durable-queue-20261128.json` for raw\nreports, failed probes, final source hashes and qualification of later diagnostics.\n",
+      "metadata": {
+        "topic": "durable queue"
+      }
+    },
+    {
+      "id": "generation-quota",
+      "title": "Project generation quotas",
+      "source": "repository:docs/generation-quota.md",
+      "text": "# Project generation quotas\n\nThe opt-in SQL stores enforce one cumulative monetary cap and one outstanding\nattempt cap per authenticated host-selected tenant/project. Every SQL run writer\nuses the same project control lock, including Application/API/CLI, workflows,\nsessions, memory extraction and direct `db.runs(scope)` calls. Creating another\npool or omitting a quota from a process configuration does not bypass a stored\npolicy. File journals do not gain distributed quotas.\n\nThis is generation accounting. Embedding has its separate ledger; generic tool\nservice charges remain separately unknown. A generation quota is not a durable\ntask queue, a rate limit or per-user billing. Separate\n[queue/worker and bounded load evidence](durable-queue.md) covers those service\noperations; broad native quality remains in P0.\n\n## Configure explicitly\n\n```rust,no_run\nuse taskloom::runtime::database::*;\n# async fn example() -> Result<(), taskloom::runtime::RuntimeError> {\nlet db = SqlDatabase::sqlite(\"service.sqlite\", DatabaseOptions::default()).await?;\ndb.migrate().await?;\nlet project = DatabaseNamespace::new(\"tenant-a\", \"project-a\")?;\nlet quota = db.generation_quota(project);\nlet current = quota.snapshot().await?;\nquota.configure(Some(GenerationQuota {\n    currency: \"USD\".into(), max_cost_micros: 2_000_000,\n    max_outstanding_attempts: 4,\n}), current.policy_revision, \"local-admin\", \"explicit reviewed USD generation cap\").await?;\ndb.close().await;\n# Ok(()) }\n```\n\nOnly trusted administration exposes `configure`; it is not a model tool or a\npublic HTTP mutation. The source example supplies local administration without\nmodel/connector credentials:\n\n```powershell\ncargo build --all-features --example multiuser_host\n# Resolve TASKLOOM_DATABASE_URL privately on this host; never print its value.\ntarget/debug/examples/multiuser_host quota-get tenant-a project-a\n# policy.json: {\"currency\":\"USD\",\"max_cost_micros\":2000000,\"max_outstanding_attempts\":4}\ntarget/debug/examples/multiuser_host quota-set tenant-a project-a policy.json 0 local-admin \"explicit reviewed cap\"\n```\n\nPolicy changes require the exact `policy_revision`, operator and a bounded audit\nnote. Ordinary usage changes advance `revision` without invalidating policy CAS.\nThe database supplies audit time. At most 1024 policy changes are retained; the\nstore refuses further changes rather than silently truncating audit history.\n\nPrices in the model gateway must use the declared currency; this is an explicit\nhost attestation, not conversion or provider-billing verification. Currency is\nimmutable after initialization, including while enforcement is disabled.\nCustom trusted model adapters must obey `RunBudget::requires_cost_ceiling()`,\nreserve a conservative known ceiling through `reserve_before_dispatch` for\nevery retry/fallback and settle only with known usage. The built-in gateway does\nthis. **All SQL runs require known prices even without an individual run cap or\nan active project quota**, closing the race with later quota configuration.\nLease/journal wrappers must forward `requires_cost_ceiling`; defaults preserve\ncompatibility for existing file/non-expiring implementations.\n\n## Accounting and recovery\n\nAdmission and the run's reservation journal commit in the same transaction,\nbefore provider dispatch. The lock order is runtime ownership, project quota,\nthen accounting records. Administrator imports lock the project control row\nand read committed journals without taking runtime leases. PostgreSQL row locks\nand SQLite's immediate writer serialize competing processes.\n\nHeld cost is `committed_micros + in_flight_micros`. Uncertain cost is already\nincluded in committed and is not counted twice. Outstanding attempts are\n`in_flight_attempts + uncertain_attempts`: zero-priced requests occupy slots.\nKnown settlement releases only that attempt's slot. A lost response or killed\nprocess retains its ceiling and slot; converting in-flight into uncertain does\nnot free capacity. The ledger does not silently refund or erase uncertain work.\n\nA quota `Budget` refusal means a transaction was rolled back and no dispatch\nwas admitted. The runtime removes only the refused reservation and records the\nbudget stop without inventing uncertain fees. Other storage/commit failures\nremain ambiguous and retain conservative uncertainty. Reservation registration\nis serialized per run; provider execution can still overlap.\n\nAlready incurred cost is saved even if it exceeds the project cap or its\nreservation. Such a checkpoint sets a sticky `overrun` marker and stops fresh\nadmission. A trusted administrator can explicitly review/reconfigure the policy\nwhen retained usage fits. Increasing an outstanding cap permits recovery/new\nwork while retaining the original unknown attempt. It cannot change a finished\nrun's terminal result or replay an uncertain external write.\n\nAn absent/unconfigured scope reports `usage: null`, meaning historical spending\nis uninitialized. First configuration imports the newest checkpoint/reservation\ngeneration for **every** existing run, including orphan reservation journals,\nunder the same project lock. Equal generations require identical budgets;\ncommitted/uncertain amounts cannot decrease. The bounded import streams up to\n100000 run/journal rows and 64MiB and refuses oversized/corrupt histories; it\ndoes not use the UI's truncated listing or reset history. Each run gets a small\naccounting record. Unconfigured SDK users do not trigger a historical scan.\n\nDisabling enforcement requires an explicit `configure(None, ...)` (CLI JSON\n`null`). Accounting continues so reenabling cannot reset spending. There is no\nautomatic calendar reset, historical currency conversion, pruning/refund API or\nrenewable rate window in this increment.\n\n## Schema-v2 migration\n\nSchema v2 introduced the generation-quota barrier. The current\n`SqlDatabase::migrate` / `taskloom database-migrate` creates schema v3 or upgrades\nv1/v2 in one transaction, including queue indexes/ownership. Stop all old hosts and workers first. Upgrade\nrefuses while any database-clock lease is live; PostgreSQL also locks the lease\ntable during the version barrier. Dataset UUID and existing version-1 JSON\nenvelopes/runtime checkpoints are preserved. Unknown versions and downgrades are\nrefused. Back up the complete database before upgrading and restore the complete\nbackup with its matching binary if rollback is required.\n\nOld v1 binaries do not participate in quota enforcement. Their schema/ownership\nchecks fail after the barrier; old v2 binaries also lack queue enforcement.\nNew SQL acquisition, renewal, ownership and commit checks require\n`DATABASE_SCHEMA_VERSION` (3). Historical v2 acceptance below remains v2 evidence.\nOpening an Application does not run migrations. Re-run the explicit migration\non the intended database; do not create an empty replacement and call it migrated.\n\nThe schema changes neither `AgentTask`, minimal default features, Rust 1.86 nor\nthe file journal format. The added default trait methods preserve source\ncompatibility for existing stores; wrappers around SQL must forward them.\n\n## Reproduce controls\n\n```powershell\ncargo test --all-features --test database_quota\n# Owned local PostgreSQL only; resolve its private URL into the named env.\ncargo test --all-features --test database_quota postgres_project_quota_atomic_admission_and_accounting -- --ignored --exact\ncargo build --all-features --bin taskloom --example multiuser_host\npython examples/database/accept_quota.py target/NEW-quota-native --config target/native-generation-4b-config.json --taskloom target/debug/taskloom.exe --admin target/debug/examples/multiuser_host.exe --postgres-fixture target/OWNED-postgres --model-log target/OWNED-generation.log\npython examples/database/backup_acceptance.py target/NEW-quota-backup --native target/NEW-quota-native --postgres-fixture target/OWNED-postgres --example target/debug/examples/multiuser_host.exe --taskloom target/debug/taskloom.exe --kind quota\n# Upgrade copies of retained v1 native data, never the original artifacts:\npython examples/database/accept_quota_migration.py target/NEW-quota-migration --sqlite-v1 target/V1-native/application.sqlite --postgres-v1-dump target/V1-backup/application.dump --postgres-fixture target/OWNED-postgres --native-campaign target/V1-native --admin target/debug/examples/multiuser_host.exe\n```\n\nThe native harness requires explicitly zero-priced loopback inference, uses\nseparate CLI/admin processes, observes a real native request before killing its\nown child, waits the production ten-second lease, retains uncertainty and tests\nexplicit quota review plus cold terminal reentry. Failed probes and actual\nacceptance results are recorded separately; fixture tests are not model quality,\nnative cost/latency rankings or service-worker/load evidence.\n\n2026-11-28 acceptance: each real database passed ten native/separate-process\ncontrols, observing two real generation requests (one interrupted with unknown\nresponse usage). Both retained the original uncertain slot after known new-run\nsettlement. Quiescent SQLite online backup and PostgreSQL transactional restore\npassed three additional controls. Copies of the actual preceding schema-v1\nnative databases passed four migration/import controls: all 31 SQLite and 146\nPostgreSQL records remained byte-identical across the version barrier, and the\nexplicit native scopes imported their latest seven/eight run budgets. The\nPostgreSQL dump also contains separately labelled fixture scopes; those are not\nnative API costs. See `acceptance/p2-generation-quota-20261128.json`.\n\nRetained harness faults include missing required RunLimits fields before any\nnative dispatch, a Windows default-text-codec failure reading Unicode SQL data,\nand an intermediate migration probe that automatically selected a fixture scope.\nThe final migration probe selects the recorded native scope explicitly. These\ndo not become successful native trials or evidence of old-binary dispatch/rolling\nupgrade safety; operators must quiesce old hosts before migration.\n",
+      "metadata": {
+        "topic": "generation quota"
+      }
+    },
+    {
+      "id": "long-term-memory",
+      "title": "Reviewed cross-session memory",
+      "source": "repository:docs/long-term-memory.md",
+      "text": "# Reviewed cross-session memory\n\nEnable `runtime` for the SDK and `app` for the local API/CLI. Memory is opt-in\nand separate from conversation history, the knowledge corpus and model spending.\nThe minimal default feature set and typed `AgentTask` API are unchanged.\n\n## Host configuration and access\n\nAdd this fragment to a complete application configuration:\n\n```json\n{\n  \"memory\": {\n    \"scope\": {\"tenant\":\"local\", \"project\":\"assistant\", \"owner\":\"alice\"},\n    \"actor\": \"local-operator\",\n    \"curate\": true,\n    \"recall\": {\"max_items\":8, \"max_bytes\":16384, \"include_preferences\":true}\n  }\n}\n```\n\nThe host chooses this scope and authenticated actor. API/model input cannot\nselect a tenant, project, owner, actor or curator grant. `curate` defaults to\nfalse; readers can inspect/recall their namespace but cannot extract, review,\nedit or forget. Memory is disabled when the optional property is absent.\nExtraction additionally requires `limits.max_cost_micros` and explicit prices\nfor the configured model. No extraction happens automatically after a chat.\n\nFor the SDK, construct `MemoryAccess::reader` or `MemoryAccess::curator` only\nafter authenticating and authorizing the caller. The type deliberately cannot\nbe deserialized. `MemoryManager` takes this access object, with no second\ncaller-selected scope. `MemoryStore` is a trusted persistence interface;\ncalling its raw methods is not an authorization API. Protect its filesystem.\n\nThe current local application still has one bearer-authenticated operator.\nIts memory namespace isolation does **not** provide multi-user authorization\nfor sessions, runs or the rest of the application. P2's authenticated service\nscope and database work remain separate delivery gates.\n\n## Extraction and review\n\nChoose a successful, closed session turn. The host loads that session and\nselects its actual User message. Assistant/tool replies, open/failed turns and\npreviously recalled memory are ineligible sources. For a memory-aware turn,\nonly its original `request` field is eligible; injected records never become\nfresh user testimony.\n\nThe configured native model proposes up to sixteen `{kind,key,value,quote}`\nrecords. `kind` is `fact` or `preference`; `key` is a bounded lowercase semantic\nslot such as `language` or `project.runtime`. The host supplies source session,\nturn/run/message identity and fingerprints, and checks the quote verbatim.\nModel output cannot supply ownership or permission fields. The extraction\nchild has no tools, uses exact JSON/schema validation, reserves its model\nspending durably and retains failed or uncertain attempts under normal rules.\n\nAll proposals begin as **candidates**. Only explicit host/operator review\nactivates them. An exact quote establishes provenance, not that the proposed\nvalue follows from it. Review values and their sources before accepting; a\nwrong statement or sensitive value can still be proposed by a model. This is\nnot a general secret detector or factual-truth verifier.\n\nSlots use exact `(kind,key)` identity. A second candidate for an occupied slot\ncannot become active without `replace:true`; replacement retains the previous\nversion as superseded. There is no automatic semantic deduplication between\n`language`, `reply.language` and `preferred_language`. Inspect such proposals\nand reject inappropriate aliases; do not assume model-selected keys are a\ncanonical ontology. Editing an active value creates a new active version\nlinked to the previous version and the operator's note. Its original source\nquote remains provenance of the earlier proposal, not proof of the edit.\n\n## API and CLI\n\nAll HTTP routes below are under `/api` with the existing bearer authentication.\nJSON requests deny unknown identity/grant fields. Every mutation requires the\nexact current `expected_revision`; conflicts require inspection, not a force\noverwrite or silent model retry.\n\n| Operation | API | CLI |\n|---|---|---|\n| Export records, versions, sources and audit hashes | `GET /memory` | `memory` |\n| Bounded recall | `POST /memory/recall` with `{\"text\":\"project runtime\"}` | `memory-recall \"project runtime\"` |\n| Explicit model extraction | `POST /memory/extract` | `memory-extract extract.json` |\n| Accept/reject a candidate | `POST /memory/review` | `memory-review review.json` |\n| Edit an active value | `POST /memory/edit` | `memory-edit edit.json` |\n| Forget a slot and all its versions | `POST /memory/forget` | `memory-forget forget.json` |\n| Start a turn with frozen recall | `POST /sessions/{id}/memory-turns` | SDK/API |\n\nExample request files, used with `taskloom --config local-provider.json COMMAND`:\n\n```json\n{\"expected_revision\":0,\"session_id\":\"source\",\"turn_id\":\"one\",\"request_id\":\"learn-source\"}\n```\n\n```json\n{\"expected_revision\":1,\"id\":\"actual-candidate-hash\",\"accept\":true,\"replace\":false,\"note\":\"checked against the user's source statement\"}\n```\n\n```json\n{\"expected_revision\":2,\"id\":\"actual-active-hash\",\"value\":\"Chinese\",\"note\":\"owner clarified the preference\"}\n```\n\n```json\n{\"expected_revision\":3,\"kind\":\"preference\",\"key\":\"language\"}\n```\n\nCreate the destination session through `POST /sessions` as usual. Its\n`memory-turns` body is the ordinary `{turn_id,prompt}` shape. Ordinary `turns`\ncontinues to omit memory. The memory-aware route freezes query, namespace,\nrevision and source-linked hits in a clearly labelled **User-data** JSON\nenvelope with a separate original `request`. It changes neither the system\nprefix nor tools/grants. Prompt-like memory content cannot grant a tool. The\nenvelope is visible in the archived transcript and durable input; clients can\nrender its `request` separately. Reentering the same turn reuses this envelope\neven if memory changed. A different original request or scope is rejected.\n\nRecall is local lexical overlap using the existing Unicode tokenizer. Explicitly\nreviewed preferences can also be included without overlap; turn this off for\nstrict query-only recall. Candidate/rejected/superseded records are excluded.\nItem/serialized-byte limits are enforced; oversized higher-ranked records are\nreported and lower-ranked fitting records may still be returned. Inspect\n`matched_terms`, `preference`, `omitted` and `skipped_oversize`. This is not an\nembedding index or a promise of semantic recall across languages/paraphrases.\n\nCLI export, recall, review, edit and forget operate without loading generation\nor MCP credentials. CLI extraction loads only the configured generation model;\nit does not contact configured MCP services or offer tools. SDK usage:\n\n```rust,no_run\nuse taskloom::runtime::memory::*;\n# async fn example() -> Result<(),taskloom::runtime::RuntimeError> {\nlet store = FileMemoryStore::new(\"state/memory\");\nlet access = MemoryAccess::reader(MemoryScope {\n    tenant:\"local\".into(), project:\"assistant\".into(), owner:\"alice\".into()\n}, \"authenticated-actor\")?;\nlet manager = MemoryManager::new(&store);\nlet recalled = manager.recall(&access, \"project runtime\", &MemoryRecallPolicy::default()).await?;\n// Pass a curator access object for review/edit/forget; never derive it from\n// the model's answer. Extraction uses an explicitly bounded AgentLoop/RunStore.\nprintln!(\"{} source-linked memories\", recalled.hits.len());\n# Ok(()) }\n```\n\n## Recovery, erasure and migration\n\nVersion-1 file snapshots live under `state_dir/memory/<scope-hash>.memory.json`.\nWrites take per-scope OS locks, verify CAS/audit prefixes, flush a temporary file\nand atomically replace the previous snapshot. Reads fail on corruption; they\ndo not silently reset state. Limits are 16 MiB, 4096 records, 16,384 forgotten\nsource bindings and 20,000 audit events. Admission also reserves 2 KiB, one\npossible tombstone and one possible erasure event per retained record, so\nadministrative forgetting is not stranded by an admitted full snapshot.\nA limit refuses the operation without\nreplacing the valid snapshot. Export/backup before planned migration; retain\nthe scope and revisions when implementing another `MemoryStore`.\n\nExtraction request IDs bind a scope and the exact selected input to a durable\n`memory-<hash>` child. Repeating a completed request with a fresh inspected\nmemory revision reuses its answer without another model request. If memory CAS\nor capacity fails after generation, the completed extraction run stays in the\nrun store; inspect it and retry the **same request ID**, with the correct\nrevision/configuration. Do not silently mint a new paid request. Interrupting\ngeneration preserves its spending uncertainty; normal interrupted-model\nrecovery can admit a further attempt within the original cap. API admission\nis released even if the extraction caller drops its future.\n\nForgetting physically removes every candidate/current/superseded/rejected\nversion of that slot from the memory snapshot. It retains only audit record\nhashes and source-binding tombstones, preventing an old extraction of that same\nsource/slot from resurrecting the value, even if a later extractor proposes\ndifferent wording. A genuinely new user statement can propose the slot again.\nThis is memory-store erasure, not secure disk wiping or deletion of source\nsessions, completed extraction runs, already frozen turn inputs, exports or\nexternal backups. Those histories remain independently retained. New recalls\nexclude forgotten records; old frozen inputs remain reproducible.\n\nNo automatic legacy-history import or schema conversion runs on upgrade. Absent\n`memory` preserves previous application behavior, session format and durable\nconfiguration fingerprints. Direct `AppConfig` struct literals need the new\noptional field or `..Default::default()`.\n\n## Reproducible acceptance\n\n```powershell\ncargo test --locked --all-features --test agent_memory --test app_memory\npython examples/benchmarks/native_memory.py target/native-memory-new --config local-provider.json --taskloom target/debug/taskloom.exe\n```\n\nThe tests explicitly label model fixtures and cover CAS/isolation, source\nchecks, bounded Unicode/negative recall, permission injection, CRUD/restart,\nfrozen inputs, no resurrection, model-spend uncertainty and credential-free\nCLI management. The native example calls only an explicitly zero-priced\nloopback API. It retains model proposals unchanged, curates only prelabelled\nsource-supported values and tests actual new-session use, conflicts, CLI edits,\nhost restarts and erasure. `acceptance/p1-memory-20261128.json` records results\nand limitations; this visible small set is not a broad extraction benchmark.\n",
+      "metadata": {
+        "topic": "long term memory"
+      }
+    },
+    {
+      "id": "skill-packages",
+      "title": "Data-only skills, templates and connectors",
+      "source": "repository:docs/skill-packages.md",
+      "text": "# Data-only skills, templates and connectors\n\nThe `runtime` SDK and optional `app` host support installable, content-pinned\nskill packages. They contain UTF-8 guidance, typed role/output contracts,\nworkflow templates and connector configuration examples. Installation stores\ninert JSON objects: it does not execute scripts, register a tool, start a\nservice, read a declared credential or grant a permission.\n\n## Package format and authoring\n\nExamples live in `examples/skills/`:\n\n| Package | Purpose |\n|---|---|\n| `evidence-base` | Reusable evidence and permission guidance dependency |\n| `research-brief` | Local corpus research role and cited source-summary template |\n| `connector-notes` | Repository metadata, note-status and approved note-append templates |\n\nEach directory has a root `skill.json`. Format 1 declares name, exact version,\ndescription, SHA-256 for every asset, exact dependency `{name,version,digest}`\npins, tool effects/permissions, required credential **names**, roles, templates\nand optional connector-example metadata. Names use lowercase ASCII letters,\ndigits and hyphens; versions are exact canonical `major.minor.patch` integer\ntriples. Ranges, prereleases, network URLs, install hooks and implicit dependency\ndownloads are unavailable in this format.\n\nAsset paths are portable relative paths. Roles select an instruction asset,\noptional assets from explicitly pinned direct dependencies, declared tool names\nand a `WorkflowOutput` contract. Template DAGs/PEER specs refer to local roles;\nthe host mounts them under its own prefix. Template input is schema-validated\nbefore workflow persistence or model dispatch. Content includes do not expand\ndirectives found inside text. Connector JSON is documentation, never applied\nautomatically to the host configuration.\n\nCreate deterministic plain POSIX USTAR archives from trusted authoring sources:\n\n```powershell\npython examples/skills/pack.py examples/skills/evidence-base target/evidence-base.tar\npython examples/skills/pack.py examples/skills/research-brief target/research-brief.tar\npython examples/skills/pack.py examples/skills/connector-notes target/connector-notes.tar\n```\n\nThe helper creates a new archive only and checks declared asset hashes. Preserve\nLF content; the repository attributes pin these source files to LF on Windows.\nAfter an intentional asset edit, update its manifest hash and publish a new\nversion. Updating a dependency requires its new exact pin. The dependency pin in\nthe shipped research example matches the shipped evidence-base package.\n\nThe Rust reader independently enforces an 8 MiB transport limit, at most 128\nassets/256 entries, 256 KiB per entry, 4 MiB total content and a 128 KiB manifest.\nIt accepts uncompressed USTAR regular files/directories and rejects links,\ndevices, GNU/PAX extensions, gzip/zip, traversal, absolute/drive/stream paths,\nreserved Windows names, case collisions, malformed checksums, nonzero padding,\nduplicate entries and ambiguous trailing bytes. Assets become in-memory strings\nand a single digest-addressed JSON object; no archive path is extracted to disk.\nCombined role guidance is capped at 128 KiB. Dependency resolution is bounded\nto 32 packages/16 MiB, with a depth guard.\n\nThe package digest is the format-1 normalized manifest/assets identity, not the\ntar byte hash or a publisher signature. Formatting/default serialization is\nnormalized; all declared content and dependencies are bound. Review provenance\nand contents before granting a package access. Hashes establish identity and\nintegrity, not publisher trust or factual quality.\n\n## Install, inspect and retire\n\n```powershell\ntaskloom --config host.json skills\ntaskloom --config host.json skill-install target/evidence-base.tar 0\ntaskloom --config host.json skill-install target/research-brief.tar 1\ntaskloom --config host.json skill-install target/connector-notes.tar 2\n```\n\nThe final argument is the exact current catalog revision. Install dependencies\nfirst. The output includes the exact `package` pin and `activated:false`.\nThese commands do not initialize model/MCP services or load their credentials.\nWrite the bare `{name,version,digest}` object to `pin.json` to inspect or retire:\n\n```powershell\ntaskloom --config host.json skill-inspect pin.json\ntaskloom --config host.json skill-retire pin.json 3\n```\n\nCatalog/object writes use a catalog OS lock, CAS, flushed atomic replacement and\nimmutable content objects under `state_dir/skills`. A same-version/different-\ncontent install is refused, even after retirement. Identical reinstalls are\nidempotent after inspecting the current revision. An interrupted object write\ncannot create an activated package; retry the same archive and current catalog\nrevision. Corrupt catalogs/objects fail rather than silently resetting. Limits\nare 256 known versions and 20,000 audit events, with retirement-event headroom.\nKeep this directory trusted and back up catalog plus objects together.\n\nRetirement removes the package from new activation/selection. Installed\ndependents must be retired first; there is no implicit cascade. Objects remain\nfor audit and explicit recovery pins. An already loaded application keeps its\nfrozen snapshot; stop/reconfigure/restart it to change admissions. Retirement\nis not a running-process kill or deletion of old run history.\n\n## Host activation and durable identity\n\nHost configuration opts in separately, using the verified install pin:\n\n```json\n{\n  \"skills\": [{\n    \"package\": {\"name\":\"research-brief\", \"version\":\"1.0.0\", \"digest\":\"COPY_THE_EXACT_INSTALLED_DIGEST\"},\n    \"mount\": \"research\",\n    \"mode\": \"active\",\n    \"grant\": {\"tools\":[\"knowledge_search\"], \"permissions\":[\"knowledge:read\"], \"credentials\":[]}\n  }]\n}\n```\n\nThis is a fragment, not a complete provider configuration. The research host\nmust enable knowledge access and set an explicit generation ceiling for output\nrepairs. Mount prefixes are 1–14 lowercase ASCII letters/digits/hyphens;\nmounted role names cannot collide with host roles or other mounts.\n\nEvery dependency's tool requirements must match the host's actual registered\ntool effects and complete permission sets. Grants must be subsets of the\noriginal host policy. Required credential names need both explicit package\ngrants and a host-configured provider/service name; package text never receives\nthe environment values. Packages cannot downgrade a write to a read, define a\nservice endpoint for the host, enlarge a tool policy, waive exact approval,\nremove spending ceilings or silently retry an uncertain effect. Tool-service\nand embedding charges retain their separate host boundaries.\n\nNew durable skill children freeze root package, transitive pins, local role and\ngrant identity in `RunConfig.skill_binding`, alongside the existing exact tool\ndefinitions, limits and approval policy. Workflow task contracts also freeze\nguidance and output schema. Changing package/version/content/dependencies or\ngrants cannot approve or resume an old operation. Keep its original pin/config.\nThe original contracts remain necessary for approval and recovery; removing a\ntool or changing its definition does not invent permission to replay it.\n\nFor an explicitly retired original package, `mode:\"recovery_only\"` allows a\nhost to restore its exact contracts. The app hides its templates and refuses\nnew workflows using those roles, while allowing old workflows to resume.\nUse a separate recovery configuration rather than silently substituting the new\nversion. The SDK exposes mode on `ActivatedSkill`; SDK hosts must enforce\nstart/resume admission when using its low-level `configure_role` builder.\nHost authentication/authorization remains the caller's responsibility.\n\n`GET /api/templates` lists active templates; `GET /api/roles` includes compiled\nrole contracts. `POST /api/templates/{mount}/{template}/runs` accepts only\n`{id,input,limits}` and creates an ordinary persisted workflow. It cannot accept\na caller-provided grant, role implementation or package. Inspect, approve,\npause/resume and reconcile it through the existing workflow/node routes.\n\n## Working MCP connector source\n\n`connector_service.py` is an explicitly started loopback-only MCP HTTP service:\n\n```powershell\npython examples/skills/connector_service.py --notes target/example-notes --repository seriable/taskloom\n```\n\nConfigure `TASKLOOM_EXAMPLE_CONNECTOR_TOKEN` in the process environment first\n(at least sixteen characters; no need to send its value to chat). The connector\nexample JSON shows the explicit host endpoint, namespace, token environment\nand three bindings. Grant that credential name when activating connector-notes.\nNo service is started by installing it. A tool-calling model is needed to run\nits templates; the offline demonstration is not a substitute for native evidence.\n\nThe repository identity is a server startup argument, not model input. Metadata\nuses one bounded HTTPS request to public `api.github.com`, no environment proxy,\nno redirects, no automatic retries and a twenty-request process cap. Private\naccess requires a separately supplied `--github-token-env`; ambient credentials\nare never discovered. Public REST reads have an explicit zero API price in the\nexample; rate/response/failure observations are retained separately from model\ncharges. The service is a bounded example, not a production GitHub integration.\n\nNotes use an owned directory, bounded exact text and a flushed append. The tool\nis explicitly **non-idempotent**; JSON-RPC IDs do not deduplicate writes. Optional\n`--fail-after-append-once` persists a note and then loses the response to exercise\nreconciliation. Inspect `notes_status` and the external record before an operator\nrecords the observed result. Never turn response loss into an automatic append\nretry. The native harness performs these operator actions explicitly and labels\nthem separately from model generation. Repository/store identities participate\nin tool descriptions, so changing them changes the frozen tool contract.\n\n## Migration and acceptance\n\nNo automatic package import or activation occurs on upgrade. Empty `skills`\nand absent `skill_binding` serialize without new fields, preserving previous\nconfiguration fingerprints. Direct `AppConfig`/`RunConfig` literals need the new\nfield or an applicable default update. The typed task API, default features,\ndependency set and Rust 1.86 requirement are unchanged. Packages are guidance\ndata; they do not install Rust/Python dependencies or sandbox an ordinary host\ntool. Future package format changes must preserve format-1 digest semantics or\nuse a new format rather than silently rewriting old identities.\n\n```powershell\ncargo test --locked --all-features --test agent_skills --test app_skills\npython examples/benchmarks/native_skills.py target/native-skills-new --config local-provider.json --taskloom target/debug/taskloom.exe\n```\n\nThe automatic tests use explicitly labelled model fixtures for control,\npermission, archive and approval/restart behavior. The native campaign actually\ninstalls the example archives without model credentials, starts the MCP service,\ncalls the configured zero-priced local model, reads live GitHub data, appends to\nthe filesystem and reconciles a real lost response across a host restart and\npackage retirement. The cited research template's model failure is retained;\nneither package installation nor passing connector cases establishes general\nresearch quality. See `acceptance/p1-skills-20261128.json` for transcripts,\nfailures, prices, checks and source/artifact identities. P0-P2 is unfinished.\n\nAn explicit new source version, `examples/skills/research-located`, publishes\nthe **research-brief 1.1.0** manifest with `located_cited_report`. It depends on\nthe unchanged evidence-base 1.0.0. Its first native probe still failed due to\nwrong document identity, absent ordinal markers and source-prefixed quotations;\nthe host rejected these outputs. A second probe with clarified role guidance\nand JSON-formatted locator feedback passed all four templates and thirteen\ncontrol checks. The research answer quoted the actual approval document and\nretained its original ordinal-form model JSON alongside explicit host mappings.\nPrompts, package digest and output format changed; this is a new acceptance\ncampaign, not a controlled score improvement over 1.0.0.\n\n```powershell\npython examples/benchmarks/native_skills.py target/native-skills-located --config local-provider.json --taskloom target/debug/taskloom.exe --research-package research-located\n```\n\nVersion 1.0.0's source and failed evidence are unchanged. Select 1.1.0 for new\nruns only, keeping the original package/configuration for any old recovery.\nThe declared bounded source examples now have native execution evidence;\ngeneral research quality, larger collaboration, registry trust and multi-user\nauthorization are separate gates. See `final-output.md` and\n`acceptance/p0-locators-20261128.json` for exact conditions and retained failures.\n",
+      "metadata": {
+        "topic": "skill packages"
+      }
+    },
+    {
+      "id": "observability",
+      "title": "Journal diagnostics and explicit OpenTelemetry export",
+      "source": "repository:docs/observability.md",
+      "text": "# Journal diagnostics and explicit OpenTelemetry export\n\n`runtime::observability` projects **validated saved journals** into a correlated\ntrace. It performs no model, embedding or tool calls. There is no process-global\nsubscriber, automatic uploader, implicit `OTEL_*` environment discovery or\nsend-on-drop behavior. Network export requires the optional `telemetry` feature;\nthe application feature includes it, while default features remain empty.\n\n## Trace and time semantics\n\n`TraceSnapshot::run`, `workflow` and `session` build run or parent traces.\nWorkflow/node/durable-run and session/turn/durable-run relationships come from\npersisted references and exact initial-input bindings. Closed session children\nalso match the recorded report fingerprint. Unreferenced, duplicate or mismatched\nchildren fail; absent children are counted. Active durable children can be found\nthrough their frozen node context before an outcome returns to the parent.\nReads of separate records are individually atomic, **not** a cross-record\ntransaction or a guarantee that a live parent and child were read simultaneously.\n\nStable SHA-256-derived IDs use a trusted host namespace and logical identities.\nRevisions change the source revision key, not existing trace/span identities.\nChanging the namespace changes IDs. The application defaults to a namespace\nderived from its absolute state root; set an explicit namespace before moving\njournals if continuity across deployment paths matters. These hashes provide\ncorrelation and pseudonymization, not cryptographic storage authentication.\n\nSpans cover workflows, nodes, individual dispatches, durable runs, model\ndecisions, tool attempts, retrieval, approval waits, operator reconciliation and\noutput validation. A model decision can contain gateway HTTP retries; the native\nusage request count is a different quantity. A node can dispatch repeatedly to\nthe **same** durable child without repeating an uncertain external effect.\nChild usage is counted once, not again as parent workflow usage.\n\nNew managed children persist a host-owned `TraceBinding` before their first\ncheckpoint. Independently inspecting such a child uses the same trace, global\nroot, run and descendant span IDs as inspecting its workflow/session. The\nbinding is outside model input and execution configuration, changes no grants,\nand is immutable across checkpoint revisions, including cancellation. A model\ncannot create it through a prompt. SDK callers may attach an exact managed\nidentity with `DurableAgent::with_trace_binding`; invalid child IDs or workflow\ninput bindings fail before the initial budget journal is created.\n\nChild-only views have `selected_span_id` pointing at the real run and two\n`context_only` ancestor references. References have unknown outcome, no clocks\nand no asserted completion: they are omitted from OTLP as `omitted_context`,\nseparately from actually open or missing-clock observations. Inspect the owning\nparent for its current observed state. These projections do not install a live\nsubscriber or inject W3C headers into external services.\n\nNew `RunEvent` and `WorkflowEvent` records include optional `unix_ms`. Relative\nelapsed time still drives the existing execution limits; wall time never changes\napproval, budget or recovery admission. The OTLP projection uses actual recorded\nUnix times, including downtime between parent/run start and completion. Active\nelapsed time is a separate attribute and may exclude operator/offline waits.\nMissing, backwards or overflowing wall clocks stay visible and are omitted from\ntrace export; they are never synthesized from relative durations. Open spans are\nnot exported as completed. Sessions have no close operation, so their root stays\nopen; completed turns/runs can be exported with that still-open parent ID.\n\nA stopped uncertain tool span retains its historical uncertainty even after\nsuccessful reconciliation; the separate recovery span records the bounded\n`record_result`, `retry_safe` or `abort` action. It does not export the actor,\nnote or observed result. Output-rejection/validation spans retain repair history.\nSpan status and safe stage codes distinguish model, tool, output-contract,\nauthorization, context, storage, generation-budget and recovery outcomes.\n\n## Metrics, retrieval and billing\n\nMetrics describe the selected scope's saved journal: model decisions, native\nusage requests/tokens, tool attempts/errors, recovered models, output checks,\nomitted context messages, retrievals, empty recalls and skipped oversized chunks.\nOTLP exports up to eighteen **gauges**, not process-wide totals, deltas or a cross-run\nlatency ranking. Re-exporting snapshots can resend the same completed span IDs;\nthe receipt/revision key permits host-side tracking, but exporter delivery is not\nexactly once. No automatic retry hides an uncertain receiver outcome.\nGauges bind both `taskloom.trace_id` and `taskloom.selected_span_id`. A parent\nscope includes its children; a child scope contains only that run. Do not sum\noverlapping scopes or treat repeated snapshot observations as incremental work.\nCompleteness and usage-reporting flags accompany the observations. Missing child\nrecords suppress generation gauges; unreported provider usage suppresses token\nand request gauges. Missing data does not become a zero-valued measurement.\nLocal JSON retains recorded subtotals with those explicit validity flags.\n\nGeneration usage and spending come from saved run checkpoints. While a model\nrequest is live, its independently persisted spending-reservation journal can\nbe newer; these metrics are **not a live invoice** or a replacement for admission\naccounting. The existing budget controller still persists reservations before\npaid dispatch. Generation micro-units use the configured price-table currency.\nCommitted generation amounts already include uncertain-attempt ceilings; do not\nadd the uncertainty field again. In-flight reservations remain separate.\nEmbedding remains in its independent host ledger (`index-status` / `/retrieval`);\nper-run embedding allocation is unavailable here. Generic tools do not report\nservice billing. Those two attributed cost fields are `null`, never assumed zero.\nAn explicit zero-priced connector example does not make arbitrary tools free.\n\nSaved retrieval diagnostics expose revision, returned/skipped counts and scores.\nLocal inspection also shows exact document/chunk IDs, titles and byte ranges to\nidentify problematic recall without repeating a paid query. Body quotes, source\nURIs and tool arguments are not added to this view. The exporter **never** sends\nthese local hit records: its separate allowlist admits only static names,\npseudonymous IDs, validated statuses, booleans and numerical attributes. Tests\ncheck that prompts, model/tool names, arguments, answers and source contents do\nnot enter OTLP. An SDK caller adding an unrecognized span attribute gets an error.\n\n## Application configuration and operations\n\nNo `observability` setting is needed for local inspection. To explicitly enable\nexport operations, add this host-owned config fragment:\n\n```json\n{\n  \"observability\": {\n    \"namespace\": \"my-project-development\",\n    \"otlp\": {\n      \"endpoint\": \"http://127.0.0.1:4318\",\n      \"service_name\": \"taskloom\",\n      \"bearer_env\": null,\n      \"timeout_ms\": 10000,\n      \"max_in_flight\": 2,\n      \"max_payload_bytes\": 2097152\n    }\n  }\n}\n```\n\nConfiguring a destination constructs an inert HTTP client; **only an explicit\nexport operation sends data**. `bearer_env` names an optional host environment\ncontaining a bearer token, resolved when constructing the exporter. Never put\nthe token value in configuration or model input. The receiver URL cannot contain\ncredentials, query parameters or a fragment. HTTP is restricted to loopback;\nother destinations require HTTPS. No ambient proxy or redirect is followed.\nThe service name is an explicitly exported host label; choose a nonsecret name.\n\n```powershell\ntaskloom --config taskloom.json diagnostics workflow research-job\ntaskloom --config taskloom.json trace-export workflow research-job REVISION_KEY EXPORT_BINDING\n```\n\n`diagnostics` accepts `run`, `workflow` or `session` and executes before model,\nMCP and exporter initialization. It works with service credentials removed.\nUse the displayed source revision key and export binding for `trace-export`.\nThey bind the read journals and configured destination/options; changed inputs\nrequire inspecting again. These read-only commands never rewind live stores.\n\nAuthenticated API equivalents are `GET /api/diagnostics/{kind}/{id}` and\n`POST /api/diagnostics/{kind}/{id}/export` with exactly\n`{source_revision_key,export_binding}`. The request cannot supply a destination,\nheaders or a model/tool implementation. Changed revisions or export settings\nreturn 409 before sending. The UI shows parent IDs, clocks, outcomes, metrics,\nerror stages and retrieval details, and displays the configured destination\nbefore enabling its explicit export button. Ordinary viewing does not export.\nThis is the existing single-operator bearer host, not P2 multi-user authorization.\n\nThe separate comparison view reads two version-1 Taskloom `BenchmarkReport`\nfiles **locally**. It shows case outcomes, failures, recorded ledgers and declared\ncondition differences. Fixture/offline ledgers do not measure actual API/chat\nfees, and their wall time is integration time. Imported content is not attested;\nmatching labels do not establish equal prompts, prices, hardware or independent\nclaim support. The view remains descriptive and does not infer leadership or\nlatency rankings. Other campaign schemas, including the current standalone\nLangGraph adapter report, need an explicit adapter and are rejected visibly.\nEach selected file is bounded to 4 MiB and 256 cases; select a narrower campaign\nwhen a report exceeds those UI limits.\n\n## Bounds, shutdown and error behavior\n\nSDK snapshots accept at most 4,096 spans, 32,768 events per record and 256 child\nruns. Application inspection caps a record at 16 MiB and child records at 64 MiB\ncombined. Larger histories require selecting narrower runs. Export defaults to\ntwo in-flight calls and 2 MiB per signal payload. A full semaphore rejects the\noperation before allocating payload buffers; there is no unbounded queue.\nResponses are capped at 16 KiB, each HTTP attempt has a timeout, and both trace\nand metric outcomes appear separately in the receipt. HTTP errors, OTLP partial\nacceptance, invalid responses and acceptance-unknown timeouts are not successes.\nOversized payloads fail before either signal is sent. No automatic retry occurs.\n\n`OtlpHttpExporter::shutdown` refuses new work and waits up to its configured\ntimeout for admitted operations. On timeout it reports remaining work; callers\nstill own those futures, which retain their own request deadlines. There are no\nexporter-created background workers to leak. Application shutdown uses this\nmethod. A dropped/cancelled network future may have been accepted remotely;\nrepeat export is an explicit host decision, not an exactly-once guarantee.\n\n## Migration and reproducible acceptance\n\nMissing `unix_ms` deserializes to `None` and serializes without the new field,\npreserving old journal/report hashes and old closed-session bindings. No config,\napproval input or model transcript is migrated or changed. Old records remain\nlocally diagnosable but have no fabricated OTLP trace timing. Rust struct literals\nfor `RunEvent`/`WorkflowEvent` must add `unix_ms`; direct `AppConfig` literals need\nthe new optional `observability` field or a default update. `AgentTask` API,\nminimal default features and Rust 1.86 remain supported. There are no new crates.\n\nMissing `RunState.trace_binding` remains absent when serialized. Old unbound\nchildren resume without backfill and retain their original input/report hashes;\ntheir standalone view still has a standalone trace. Parent inspection continues\nto join them from its verified persisted references. No implicit scan, parent\ninference from model text or historical ID rewrite is performed. New direct\n`RunState` literals must supply `trace_binding: None` or an exact host binding.\nCustom `RunLease` backends must preserve the original binding, including legacy\n`None`, as the file store does. A strict resume with conflicting existing host\nbinding fails; administrative cancellation can still resolve the original run.\n\n```powershell\ncargo test --locked --all-features --test agent_observability\npython examples/observability/download_collector.py target/collector-pinned\ntarget/collector-pinned/otelcol.exe --config target/collector-loopback.yaml\npython examples/benchmarks/native_skills.py target/native-observability --config local-native-otlp.json --taskloom target/debug/taskloom.exe --research-package research-located\npython examples/observability/accept_native.py target/native-observability --taskloom target/debug/taskloom.exe --collector-log target/collector.log\npython examples/observability/accept_sessions.py target/native-session-traces --config local-native-otlp.json --taskloom target/debug/taskloom.exe --collector-log target/collector.log\n```\n\nSee `examples/observability/README.md` for loopback receiver setup and versions,\nand `acceptance/p1-observability-20261128.json` for raw native evidence, actual\nCollector output, browser observations, failures and check boundaries. The later\n`acceptance/p1-trace-binding-20261128.json` records fresh native workflow/session\nparent binding, cold CLI/API continuity, actual receiver acceptance and failed\ndiagnostic-ID probes before the fix. This\nincrement does not complete P0 research/collaboration quality or P2 service/UI.\n",
+      "metadata": {
+        "topic": "observability"
+      }
+    },
+    {
+      "id": "knowledge",
+      "title": "Knowledge retrieval and source citations",
+      "source": "repository:docs/knowledge.md",
+      "text": "# Knowledge retrieval and source citations\n\nRequires the preview's `runtime` feature. The complete offline pipeline is:\n\n```sh\ncargo run --locked --features runtime --example agent_research\n```\n\nIt imports two Markdown files, chunks and indexes them, exposes a permitted\nread-only search tool to a durable agent, writes a cited report, and verifies\nboth exact quotations against the archived tool evidence. The example model\nis deterministic and free. Replace it with the existing gateway model adapter\nfor provider execution; tool permissions and citation checks remain the same.\n\n## Extension contracts\n\n`runtime::rag` separates four host-controlled interfaces:\n\n| Interface | Built-in implementation | Replacement contract |\n|---|---|---|\n| `DocumentLoader` | `TextLoader`: bounded UTF-8 text/Markdown file | Return a validated document with stable ID, source, title and extracted text; host decides external access |\n| `Chunker` | `WindowChunker`: character windows with overlap | Preserve exact source text, UTF-8 byte offsets and provenance through `Chunk::from_range` |\n| `CorpusStore` | `FileCorpusStore`: atomic versioned local snapshots | Consistent snapshots and atomic replacement/removal; enforce revision CAS when requested |\n| `Retriever` | `LexicalRetriever`: deterministic BM25-style scores | Rank IDs in the exact supplied snapshot; obey top_k; finite nonnegative scores, no duplicate/unknown IDs |\n\nThe default lexical path requires no embeddings or external service and supports\nbasic Unicode words and individual CJK characters. Optional snapshot-bound vector\nindexes and reciprocal-rank hybrid retrieval are described in\n[research tools](research-tools.md). Embedding/index service credentials and\ncharges remain separate from generation budgets. Language-specific segmentation\nand reranking remain extension work; no benchmark parity is claimed.\n\n`Document` contains host-assigned `id`, `title`, display `source`, UTF-8 `text`\nand bounded metadata. The plain loader accepts at most 8 MiB, rejects invalid\nUTF-8, and does not execute Markdown/HTML or fetch URLs. The optional `research`\nfeature adds bounded HTML/web and trusted Poppler PDF extraction. Office formats\nstill require a host loader. Sources are data; their references are not\nautomatically followed. This library does not sandbox custom loaders.\n\n`ingest` validates document and plugin chunks before changing storage. Importing\nthe same document ID atomically replaces its prior chunks; it does not append\nstale versions. A chunk ID hashes its document ID, title, source, exact text and\nbyte range. Updated provenance/content produces a new identity. Remove uses the\nsame optional expected-revision contract; stale CAS operations fail without\nmutating the existing corpus.\n\nFile storage captures an absolute root, serializes writers with an OS lock,\nvalidates existing snapshots, and atomically replaces `corpus.json`. The default\nsnapshot limit is 64 MiB, 10,000 documents and 100,000 chunks. It is intended for\nsmall local collections. Large collections should replace the store/retriever\nwith indexed database snapshots. Corrupt or unsupported corpus versions fail\nclosed. Corpus format is `CORPUS_VERSION = 1`.\n\n## Tool integration and bounded search\n\n```rust,no_run\nuse std::sync::Arc;\nuse taskloom::runtime::{ToolRegistry, ToolPolicy};\nuse taskloom::runtime::rag::*;\n\nlet corpus = Arc::new(FileCorpusStore::new(\"state/knowledge\"));\nlet mut tools = ToolRegistry::new();\ntools.register(RagTool::new(\"knowledge_search\", corpus, Arc::new(LexicalRetriever)))?;\nlet policy = ToolPolicy::default()\n    .allow(\"knowledge_search\")\n    .grant(\"knowledge:read\");\n# Ok::<(), taskloom::runtime::RuntimeError>(())\n```\n\nThe tool takes `{ \"query\": \"...\", \"top_k\": 5 }`. Query bytes, hit count and\nthe complete serialized result have explicit limits. The default tool output\nlimit is 24 KiB. Search drops whole chunks that do not fit rather than modifying\nthe original text or inventing offsets. The result counts them in\n`skipped_oversize`, so a caller (and the model) knows higher-ranked evidence\nwas left out. An empty hit list is valid; it is not\nevidence for an answer. Every result includes corpus revision, exact chunk\ntext, title, source and original byte range. A denied tool is not exposed or\nexecuted. Its read-only effect permits ordinary durable recovery; importing or\ndeleting documents is a separate explicit host action.\n\nRetrieved text can contain malicious instructions. The supplied examples treat\nit as untrusted evidence in the system prompt, and tool policy independently\ncontrols capabilities. Prompt wording does not provide a security sandbox.\nExternal retriever service charges are outside the agent's model-spend budget.\n\n## Citation verification and its limits\n\nAsk the model for `CitedReport { text, citations: [{ chunk_id, quote }] }`.\nThe text uses `[[full_chunk_id]]` references. Validate it using the actual\n`SearchResult::verify` from the run's tool output, not a new search of a possibly\nupdated corpus. Verification rejects unknown/unretrieved sources, duplicate\ncitations, chunks whose text no longer matches their own ID, absent or invented\nquotes, quotes below the minimum size, absent/unclosed markers and references\nwithout corresponding citations.\n\nA quote must be an exact substring of the cited chunk and long enough to be\nmeaningful: by default at least 12 non-whitespace characters, or 3 words, or\n6 CJK (Han/kana/Hangul) characters, whichever is met first. Use\n`SearchResult::verify_with`/`verify_all_with` and `QuotePolicy` to change\nthese minimums; `verify`/`verify_all`, the app and benchmarks use the default.\n\nWhat this proves, precisely: each cited chunk appeared in the supplied tool\noutput, its ID equals the hash of its own content, and the quote occurs in it.\nThe chunk ID is a *self*-hash. It detects accidental corruption, not tampering:\nwhoever can edit archived tool output can edit a chunk and recompute its ID,\nand the edited chunk then verifies. It is not compared with the original\ndocument's hash or the current corpus, and the app accepts output of any tool\nstep named `knowledge_search`. Integrity therefore rests on the durable run\nstore. Binding evidence to a specific tool instance/corpus (for example signed\nor store-anchored results) is future work.\n\n`VerifiedReport` retains exact chunks and corpus revision, so a saved report\ncan still be audited after the corpus is updated or deleted. The durable run\nalso retains the full tool result. Store these artifacts for the required\nretention period; the standalone example uses a temporary directory.\n\nFor multiple searches, use `SearchResult::verify_all` with their actual archived\noutputs. Reports retain all `corpus_revisions`; `corpus_revision` is present only\nwhen they agree. This avoids hiding updates between retrievals. The application\nreport endpoint gathers the run's recorded `knowledge_search` outputs this way.\n\nVerification establishes provenance and exact quotation. It does not establish\nthat the source is correct, that a quotation supports a conclusion, or that all\nprose is supported. Evaluate those separately, optionally with the bounded\nreviewer workflow. Source/display paths may reveal local details; access\ncontrol, source redaction and private-corpus retention are host concerns.\n",
+      "metadata": {
+        "topic": "knowledge"
+      }
+    },
+    {
+      "id": "fictional-finance",
+      "title": "Fictional invoice review policy / 虚构发票复核规则",
+      "source": "authored:parity-v1/fictional-finance",
+      "text": "Fictional evaluation policy, not financial advice. Invoice INVABCD2026 must be reviewed by two finance reviewers before payment. A missing receipt pauses payment and does not authorize a refund. 虚构评测规则，不是财务建议。发票 INVABCD2026 付款前须经过两名财务审核人复核。缺少收据应暂停付款，不代表可以退款。",
+      "metadata": {
+        "domain": "fictional finance"
+      }
+    },
+    {
+      "id": "fictional-clinic",
+      "title": "Fictional clinic booking policy / 虚构诊所预约规则",
+      "source": "authored:parity-v1/fictional-clinic",
+      "text": "Fictional evaluation policy, not medical advice. Booking CLINIC2026 requires confirmation by the scheduling desk. A missed booking may be rescheduled after confirmation; the policy establishes no emergency medical procedure. 虚构评测规则，不是医疗建议。预约 CLINIC2026 需要预约台确认。错过预约可以在确认后重新排期；该规则未建立急救医疗流程。",
+      "metadata": {
+        "domain": "fictional scheduling"
+      }
+    }
+  ],
+  "source_pins": [
+    {
+      "path": "docs/durable-queue.md",
+      "document_id": "durable-queue",
+      "sha256_utf8_lf": "49b2bb4df79bb19f028f5ea364d59295bd9415df60ee3041e3dede832fd17b38"
+    },
+    {
+      "path": "docs/generation-quota.md",
+      "document_id": "generation-quota",
+      "sha256_utf8_lf": "e3176f2d4870f61cb9fc4dfd6072b6fd3fea4cd74786cebc433fa8810f13a4bf"
+    },
+    {
+      "path": "docs/long-term-memory.md",
+      "document_id": "long-term-memory",
+      "sha256_utf8_lf": "5e851189c0ed914e52d7807c70f5b192eab184d1ab67c2d8dcaae4da2a23fd5e"
+    },
+    {
+      "path": "docs/skill-packages.md",
+      "document_id": "skill-packages",
+      "sha256_utf8_lf": "489d312b4a11f26870f77d403f342d8e8ac0177c41f5bd721c5fe681294c25e8"
+    },
+    {
+      "path": "docs/observability.md",
+      "document_id": "observability",
+      "sha256_utf8_lf": "d76bfb283b494d9957a964223bb8d3a25f8626993ce6db595a9fcd660759b7e2"
+    },
+    {
+      "path": "docs/knowledge.md",
+      "document_id": "knowledge",
+      "sha256_utf8_lf": "6f73efcd404eb7aa215fca8697dd8ffa5c32bd7014a523857699bf8491c4529e"
+    }
+  ],
+  "queries": [
+    {
+      "id": "zh-queue",
+      "text": "任务队列的worker丢失租约后，是否仍能派发新的工作？",
+      "relevant": [
+        "durable-queue"
+      ],
+      "groups": [
+        "chinese"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "en-queue",
+      "text": "What stops a stale queue owner from starting new work?",
+      "relevant": [
+        "durable-queue"
+      ],
+      "groups": [
+        "english",
+        "paraphrase"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "mixed-quota",
+      "text": "zero-priced 请求在失去 response 后，还占用 quota slot 吗？",
+      "relevant": [
+        "generation-quota"
+      ],
+      "groups": [
+        "mixed"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "zh-memory",
+      "text": "记忆提取在生成后发生CAS冲突，应如何保留原请求重试？",
+      "relevant": [
+        "long-term-memory"
+      ],
+      "groups": [
+        "chinese"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "en-memory",
+      "text": "How can operators recover a completed extraction after memory capacity refusal?",
+      "relevant": [
+        "long-term-memory"
+      ],
+      "groups": [
+        "english",
+        "paraphrase"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "mixed-skill",
+      "text": "skill package 能不能 waive exact approval 或扩大 host grants？",
+      "relevant": [
+        "skill-packages"
+      ],
+      "groups": [
+        "mixed"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "zh-trace",
+      "text": "父子Trace身份如何绑定，缺失子运行的历史如何报告？",
+      "relevant": [
+        "observability"
+      ],
+      "groups": [
+        "chinese"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "en-trace",
+      "text": "Do independent trace reads establish a simultaneous parent-child snapshot?",
+      "relevant": [
+        "observability"
+      ],
+      "groups": [
+        "english",
+        "paraphrase"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "short-memory",
+      "text": "memory CAS",
+      "relevant": [
+        "long-term-memory"
+      ],
+      "groups": [
+        "short",
+        "english"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "short-quota",
+      "text": "zero-priced slots",
+      "relevant": [
+        "generation-quota"
+      ],
+      "groups": [
+        "short",
+        "english"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "short-trace",
+      "text": "父子trace",
+      "relevant": [
+        "observability"
+      ],
+      "groups": [
+        "short",
+        "mixed"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "short-invoice",
+      "text": "发票复核",
+      "relevant": [
+        "fictional-finance"
+      ],
+      "groups": [
+        "short",
+        "chinese",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "en-loader",
+      "text": "Which formats require a host document loader rather than the built-in UTF-8 path?",
+      "relevant": [
+        "knowledge"
+      ],
+      "groups": [
+        "english"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "zh-loader",
+      "text": "Office文档是不是内置TextLoader直接支持的格式？",
+      "relevant": [
+        "knowledge"
+      ],
+      "groups": [
+        "chinese",
+        "mixed"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "paraphrase-quota",
+      "text": "When the model reply disappears, is the reserved capacity quietly returned?",
+      "relevant": [
+        "generation-quota"
+      ],
+      "groups": [
+        "english",
+        "paraphrase"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "paraphrase-finance",
+      "text": "没有收据时，能否直接把付款改成退款？",
+      "relevant": [
+        "fictional-finance"
+      ],
+      "groups": [
+        "chinese",
+        "paraphrase",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "zh-clinic",
+      "text": "预约需要谁确认，错过之后能否重新安排？",
+      "relevant": [
+        "fictional-clinic"
+      ],
+      "groups": [
+        "chinese",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "en-finance",
+      "text": "How many finance reviewers must approve the invoice before payment?",
+      "relevant": [
+        "fictional-finance"
+      ],
+      "groups": [
+        "english",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "mixed-clinic",
+      "text": "booking 重新排期是否需要 scheduling desk confirmation？",
+      "relevant": [
+        "fictional-clinic"
+      ],
+      "groups": [
+        "mixed",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "identifier-finance",
+      "text": "What review is required for INVABCD2026 before payment?",
+      "relevant": [
+        "fictional-finance"
+      ],
+      "groups": [
+        "identifier",
+        "english",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "identifier-clinic",
+      "text": "CLINIC2026 预约台 confirmation",
+      "relevant": [
+        "fictional-clinic"
+      ],
+      "groups": [
+        "identifier",
+        "mixed",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "identifier-negative",
+      "text": "Does INVABCD9999 have an approved payment review? ",
+      "relevant": [],
+      "groups": [
+        "identifier",
+        "negative",
+        "english",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-weather",
+      "text": "What is the weather forecast for Shanghai tomorrow?",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "english"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-chinese",
+      "text": "请给出当前黄金期货的实时成交价。",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "chinese",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-booking",
+      "text": "How do I perform emergency surgery under this booking policy?",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "english",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-mixed",
+      "text": "quantum processor 的 qubit 校准参数是多少？",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "mixed",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-identifier",
+      "text": "CLINIC9999 confirmation desk",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "identifier",
+        "english",
+        "cross_domain"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    },
+    {
+      "id": "negative-short",
+      "text": "火山喷发",
+      "relevant": [],
+      "groups": [
+        "negative",
+        "short",
+        "chinese"
+      ],
+      "split": "development",
+      "label_author": "Taskloom maintainer Agent-authored development labels; external human review pending"
+    }
+  ],
+  "evaluation_policy": {
+    "retrieval": {
+      "top_k": 5,
+      "groups": "chinese/english/mixed/short/paraphrase/negative/identifier/cross_domain; overlapping membership",
+      "errors_and_missing": "retain in denominator",
+      "numerical_acceptance": "not predefined as product acceptance; publish raw group scores first, freeze any future campaign gates before dispatch"
+    },
+    "answer_dimensions": [
+      "exact_provenance",
+      "source_support",
+      "corpus_factuality",
+      "task_coverage"
+    ],
+    "human_annotations": "External independent human declarations and exact output hashes; no actual human labels supplied in this repository set."
+  }
+}

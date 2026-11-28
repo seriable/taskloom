@@ -4,6 +4,30 @@
 
 **[中文](README.md) | English**
 
+> Early open-source preview. The new P0–P2 implementation and bounded local
+> acceptance are recorded in a [public sanitized receipt](docs/acceptance/framework-parity-local-20261128.json):
+> Windows510/Linux512 tests passed, with31 ignored cases separately accounted.
+> See the [itemized implementation, validation and remaining gaps](docs/framework-parity-roadmap.md).
+> Native-provider fixtures, local deployment and offline examples do not establish
+> cloud interoperability, production SLOs or model-quality parity.
+
+New optional packages include [native generation](docs/native-providers.md) and
+[embeddings](docs/native-embeddings.md), [MCP stdio/resources](docs/mcp-extensions.md),
+[loaders/reranking](docs/retrieval-extensions.md), [private sessions](docs/private-sessions.md),
+[explicit semantic-memory SDK](docs/semantic-memory.md), [signed skills](docs/skill-registry.md),
+[OIDC/PKCE](docs/login-service.md), [deployment sources](docs/production-deployment.md)
+and [Python/TypeScript clients](docs/client-sdks.md). Real external IdPs, Kubernetes,
+multi-region recovery and held-out human evaluation remain separately unverified;
+two local multilingual retrieval campaigns did not pass every frozen quality gate.
+
+The opt-in [durable MCP SDK](docs/mcp-durable-recovery.md) retains SQL-owned
+original-session results and cursors without replaying tools POSTs; callbacks
+are explicitly unsupported in this mode. [Same-schema rolling/revert](docs/same-schema-rolling.md),
+[actual local monitoring](docs/operational-metrics.md), [source compatibility](docs/source-compatibility-matrix.md)
+and [offline source-signing preparation](docs/source-release-preparation.md) each
+state their precise local acceptance limits. They do not establish arbitrary
+cross-version upgrades, automatic cloud failover or production SLOs.
+
 Typed, replayable LLM task execution for Rust pipelines, with **token budgets
 and call accounting**. Requires Rust 1.86 or newer.
 

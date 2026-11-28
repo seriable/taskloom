@@ -47,6 +47,7 @@ impl OpenAiCompatible {
             base_url: base_url.into().trim().trim_end_matches('/').to_string(),
             api_key: api_key.into().trim().to_string(),
             client: reqwest::Client::builder()
+                .retry(reqwest::retry::never())
                 .timeout(Duration::from_secs(300))
                 .build()
                 .unwrap_or_default(),

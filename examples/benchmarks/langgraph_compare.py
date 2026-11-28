@@ -28,9 +28,28 @@ from langgraph.types import Command, interrupt
 from native_retrieval import host, save
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *unused):
+        return None
+
+
 def compact(value):
     # Match the sorted object serialization of Taskloom's serde_json::Value.
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def framework_source_identity():
+    """Hash the installed public distribution inputs, excluding generated caches."""
+    distribution = importlib.metadata.distribution('langgraph')
+    records = []
+    for relative in sorted(distribution.files or [], key=str):
+        if str(relative).endswith('.py') or str(relative).endswith('.dist-info/METADATA'):
+            path = Path(distribution.locate_file(relative))
+            records.append({'path': str(relative).replace('\\', '/'), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+    if not records:
+        raise ValueError('installed LangGraph public source files unavailable')
+    return {'distribution': 'langgraph', 'version': distribution.version,
+            'sha256': hashlib.sha256(compact(records).encode()).hexdigest(), 'files': len(records)}
 
 
 class State(TypedDict):
@@ -81,6 +100,8 @@ def run_case(case, reference, root, args):
     output = root / case["id"]
     output.mkdir()
     frozen = json.loads((args.reference / reference["trajectory_path"]).read_text(encoding="utf-8"))
+    if any(context.get('summary') is not None for context in frozen['report']['contexts']):
+        raise ValueError('this adapter does not implement the frozen context compressor; refuse before model dispatch')
     source = args.reference / "cases" / case["id"] / "knowledge"
     if source.exists():
         shutil.copytree(source, output / "state" / "knowledge")
@@ -95,6 +116,15 @@ def run_case(case, reference, root, args):
     advertised = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
                     "parameters": t["input_schema"]}} for t in tools]
     names = {t["name"] for t in tools}
+    # Save the contract actually used to build this graph and its tool preflight,
+    # independently of a later caller-supplied comparability manifest.
+    result['applied_contract'] = {key: frozen['config'][key] for key in
+        ['model', 'temperature', 'max_output_tokens', 'limits', 'policy', 'approvals', 'context', 'tools']}
+    result['applied_contract']['context_support'] = 'uncompressed recorded contexts only'
+    result['applied_contract']['transport'] = {'attempts_per_decision': 2, 'timeout_seconds': 120,
+        'ambient_proxy': False, 'redirect': False, 'paid_api_supported': False}
+    if args.configuration['model'] != frozen['config']['model'] or frozen['config']['temperature'] != 0:
+        raise ValueError('frozen model or temperature differs from implemented adapter contract')
     messages = [{"role": "system", "content": frozen["report"]["messages"][0]["content"]},
                 {"role": "user", "content": case["prompt"]}]
     snapshots = []
@@ -102,8 +132,10 @@ def run_case(case, reference, root, args):
     write_note = None
 
     with host(args.taskloom, config_file, output) as api:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         def agent(state):
-            if state["steps"] >= frozen["config"]["limits"]["max_steps"] or time.perf_counter() - started > 300:
+            duration = frozen['config']['limits']['max_duration']
+            if state["steps"] >= frozen["config"]["limits"]["max_steps"] or time.perf_counter() - started > duration['secs'] + duration['nanos']/1_000_000_000:
                 raise RuntimeError("model-step or duration ceiling reached")
             body = {"model": args.configuration["model"], "messages": state["messages"], "temperature": 0.0,
                     "max_tokens": args.configuration["output_tokens"], "tools": advertised}
@@ -118,8 +150,11 @@ def run_case(case, reference, root, args):
             for attempt in range(2):
                 result["usage"]["requests"] += 1
                 try:
-                    with urllib.request.urlopen(request, timeout=120) as response:
-                        raw = json.load(response)
+                    with opener.open(request, timeout=120) as response:
+                        data = response.read(frozen["config"]["limits"]["max_model_result_bytes"] + 1)
+                        if len(data) > frozen["config"]["limits"]["max_model_result_bytes"]:
+                            raise ValueError("native model response exceeds frozen byte bound")
+                        raw = json.loads(data)
                     record["http_attempts"].append({"attempt": attempt + 1, "status": 200})
                     break
                 except urllib.error.HTTPError as error:
@@ -142,9 +177,17 @@ def run_case(case, reference, root, args):
                     record["http_attempts"].append({"attempt": attempt + 1, "error": "invalid native JSON response: " + str(error)})
                     save(output / "model-api.json", snapshots)
                     raise
+                except (TimeoutError, ConnectionError, OSError):
+                    record["http_attempts"].append({"attempt": attempt + 1, "error": "transport outcome unknown; not replayed"})
+                    save(output / "model-api.json", snapshots)
+                    raise
             record["response"] = raw
             save(output / "model-api.json", snapshots)
             usage = raw.get("usage") or {}
+            if any(type(usage.get(key)) is not int or not 0 <= usage[key] <= 2**64-1 for key in ['prompt_tokens', 'completion_tokens']):
+                record['usage_unknown'] = True
+                save(output / 'model-api.json', snapshots)
+                raise ValueError('native token usage absent or invalid; retained as unknown')
             result["usage"]["input_tokens"] += usage.get("prompt_tokens", 0)
             result["usage"]["output_tokens"] += usage.get("completion_tokens", 0)
             result["models_served"].append(raw.get("model"))
@@ -288,6 +331,7 @@ def run_case(case, reference, root, args):
     result["wall_elapsed_ms"] = round((time.perf_counter() - started) * 1000)
     result["model_decisions"] = len(snapshots)
     result["http_attempts_without_usage"] = sum(a.get("status") != 200 for s in snapshots for a in s.get("http_attempts", []))
+    result['cost_unknown'] = result['http_attempts_without_usage'] > 0 or any(s.get('usage_unknown') for s in snapshots)
     result["status"] = "failed" if result["failures"] else "passed"
     save(output / "result.json", result)
     return result
@@ -324,6 +368,7 @@ def main():
     shutil.copy2(__file__, root / "harness.py")
     shutil.copy2(Path(__file__).with_name("native_retrieval.py"), root / "native_retrieval.py")
     save(root / "execution-provenance.json", {"framework_binary_sha256": hashlib.sha256(args.taskloom.read_bytes()).hexdigest(),
+        'native_framework_source': framework_source_identity(),
         "verifier_binary_sha256": hashlib.sha256(args.verifier.read_bytes()).hexdigest(),
         "harness_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()})
     report = {"version": 1, "framework": "LangGraph", "framework_version": importlib.metadata.version("langgraph"),
@@ -345,6 +390,10 @@ def main():
         report["not_run"] = report["requested"] - len(report["cases"])
         save(root / "report.json", report)
         print(f"{case['id']}: {result['status']}: {result['failures']}", flush=True)
+        if result['cost_unknown']:
+            report['stopped_reason'] = 'unknown attempt retained; remaining cases are not dispatched'
+            save(root / 'report.json', report)
+            break
     raise SystemExit(1 if report["failed"] or report["not_run"] else 0)
 
 

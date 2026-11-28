@@ -10,3 +10,7 @@ Cargo.lock.bak
 /taskloom.json
 __pycache__/
 *.pyc
+node_modules/
+sdks/python/build/
+sdks/python/dist/
+sdks/python/*.egg-info/

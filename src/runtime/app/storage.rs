@@ -261,6 +261,34 @@ impl AppSkillStore {
         }
     }
 }
+#[cfg(feature = "skill-registry")]
+impl RegistrySkillStore for AppSkillStore {
+    fn registry_catalog(&self) -> BoxFuture<'_, Result<SkillCatalog, RuntimeError>> {
+        Box::pin(self.catalog())
+    }
+    fn registry_install(
+        &self,
+        package: SkillPackage,
+        expected: u64,
+    ) -> BoxFuture<'_, Result<SkillCatalog, RuntimeError>> {
+        Box::pin(self.install(package, expected))
+    }
+    fn registry_inspect<'a>(
+        &'a self,
+        reference: &'a SkillRef,
+    ) -> BoxFuture<'a, Result<SkillPackage, RuntimeError>> {
+        Box::pin(self.inspect(reference))
+    }
+    fn registry_activate<'a>(
+        &'a self,
+        reference: &'a SkillRef,
+        grant: SkillGrant,
+        host: SkillHost,
+        mode: SkillActivationMode,
+    ) -> BoxFuture<'a, Result<ActivatedSkill, RuntimeError>> {
+        Box::pin(self.activate(reference, grant, host, mode))
+    }
+}
 impl RunStore for AppRunStore {
     fn acquire<'a>(
         &'a self,

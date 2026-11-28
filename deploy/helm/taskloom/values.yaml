@@ -1,0 +1,73 @@
+image:
+  repository: taskloom
+  tag: local
+  pullPolicy: IfNotPresent
+  # Set a registry digest in production. If set, digest takes precedence over tag.
+  digest: ""
+imagePullSecrets: []
+existingSecret: taskloom-secrets
+secretKeys:
+  databaseUrl: database-url
+  modelKey: model-key
+scope:
+  tenant: team
+  project: main
+provider:
+  type: openai
+  base_url: https://api.openai.com/v1
+  key_env: TASKLOOM_MODEL_KEY
+  namespace: deployment-openai
+model: gpt-4o-mini
+prices:
+  - prefix: gpt-4o-mini
+    input_per_million: 0.15
+    output_per_million: 0.6
+maxCostMicrosPerRun: 10000
+queue:
+  maxOpenJobs: 24
+  maxRunning: 4
+  expectedPolicyRevision: 0
+api:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+worker:
+  replicas: 2
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+service:
+  port: 8080
+shutdownGraceSeconds: 20
+terminationGracePeriodSeconds: 45
+# This chart never performs an automatic migration hook or rolling schema upgrade.
+maintenance:
+  enabled: false
+migration:
+  enabled: false
+  # A unique operator-selected name is required when creating a migration Job.
+  jobId: ""
+  configureQueue: false
+  operator: deployment-operator
+pdb:
+  enabled: true
+  maxUnavailable: 1
+autoscaling:
+  api:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 2
+    targetCPUUtilizationPercentage: 70
+  worker:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+# Enable only with your TLS reverse proxy/ingress. The backend itself is HTTP.
+networkPolicy:
+  enabled: true
+  ingressNamespaceLabel: taskloom-ingress
+  # Hostnames cannot be expressed in standard NetworkPolicy. Explicit CIDRs
+  # must cover your SQL endpoint and approved model/tools, in addition to DNS.
+  allowedEgressCIDRs: []

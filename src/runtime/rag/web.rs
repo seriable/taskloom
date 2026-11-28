@@ -208,6 +208,7 @@ impl WebClient {
                 ));
             }
             let client = reqwest::Client::builder()
+                .retry(reqwest::retry::never())
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none())
                 .timeout(Duration::from_millis(self.access.timeout_ms))

@@ -20,6 +20,8 @@ mod executor;
 pub mod mcp;
 pub mod memory;
 pub mod observability;
+#[cfg(feature = "ocr")]
+pub mod ocr;
 mod output;
 pub mod rag;
 #[cfg(feature = "sandbox")]

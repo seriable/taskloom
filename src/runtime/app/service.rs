@@ -25,7 +25,9 @@ impl From<RuntimeError> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = match &self.0 {
-            RuntimeError::Configuration(_) | RuntimeError::Protocol(_) => StatusCode::BAD_REQUEST,
+            RuntimeError::Configuration(_)
+            | RuntimeError::Protocol(_)
+            | RuntimeError::Budget(_) => StatusCode::BAD_REQUEST,
             RuntimeError::Permission(_) => StatusCode::FORBIDDEN,
             RuntimeError::Conflict(_) => StatusCode::CONFLICT,
             RuntimeError::StorageLimit(_) => StatusCode::INSUFFICIENT_STORAGE,
@@ -107,6 +109,7 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/research/search", post(web_search))
         .route("/research/capabilities", get(research_capabilities))
         .merge(queue_routes())
+        .merge(operation_routes())
         .route_layer(middleware::from_fn_with_state(
             Arc::new(token),
             authenticate,
@@ -163,6 +166,37 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .layer(middleware::from_fn(security_headers))
         .with_state(app))
 }
+fn operation_routes() -> Router<Arc<Application>> {
+    #[cfg(feature = "database")]
+    {
+        Router::new()
+            .route("/operations", get(operation_snapshot))
+            .route("/operations/metrics", get(operation_metrics))
+    }
+    #[cfg(not(feature = "database"))]
+    {
+        Router::new()
+    }
+}
+#[cfg(feature = "database")]
+async fn operation_snapshot(State(app): State<Arc<Application>>) -> ApiResult {
+    Ok(Json(
+        serde_json::to_value(super::operations::snapshot(&app).await?)
+            .map_err(crate::runtime::store::storage)?,
+    ))
+}
+#[cfg(feature = "database")]
+async fn operation_metrics(
+    State(app): State<Arc<Application>>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        super::operations::prometheus(&super::operations::snapshot(&app).await?),
+    ))
+}
 fn queue_routes() -> Router<Arc<Application>> {
     #[cfg(feature = "database")]
     {
@@ -210,7 +244,7 @@ async fn authenticate(
         next.run(request).await
     }
 }
-async fn security_headers(request: Request, next: Next) -> Response {
+pub(super) async fn security_headers(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -225,7 +259,7 @@ async fn security_headers(request: Request, next: Next) -> Response {
         "referrer-policy",
         header::HeaderValue::from_static("no-referrer"),
     );
-    headers.insert("content-security-policy",header::HeaderValue::from_static("default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"));
+    headers.entry("content-security-policy").or_insert(header::HeaderValue::from_static("default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"));
     response
 }
 #[derive(Deserialize)]

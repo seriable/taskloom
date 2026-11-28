@@ -24,6 +24,12 @@ pub enum AppProvider {
         key_env: String,
         namespace: String,
     },
+    Native {
+        protocol: crate::native_providers::NativeProtocol,
+        base_url: String,
+        key_env: String,
+        namespace: String,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +38,48 @@ pub struct AppMcpEndpoint {
     pub token_env: Option<String>,
     pub namespace: String,
     pub bindings: Vec<McpToolBinding>,
+}
+/// Explicit host-owned subprocess declaration. Values of inherited environment
+/// variables are resolved only at startup and never serialized.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppMcpStdio {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub cwd: PathBuf,
+    pub environment: std::collections::BTreeSet<String>,
+    pub namespace: String,
+    pub bindings: Vec<McpToolBinding>,
+}
+impl AppMcpStdio {
+    pub fn validate(&self) -> Result<(), RuntimeError> {
+        if !self.program.is_absolute()
+            || !self.cwd.is_absolute()
+            || self.namespace.trim().is_empty()
+            || self.namespace.len() > 256
+            || self.args.len() > 64
+            || self.args.iter().any(|a| a.len() > 8192 || a.contains('\0'))
+            || self.environment.len() > 64
+            || self.bindings.len() > 256
+            || self.environment.iter().any(|n| {
+                n.is_empty()
+                    || n.len() > 256
+                    || !n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            })
+        {
+            return Err(config_error(
+                "invalid explicit MCP subprocess paths, namespace, arguments or environment names",
+            ));
+        }
+        Ok(())
+    }
+    pub(super) fn process_config(&self) -> crate::runtime::mcp::McpStdioConfig {
+        let mut config = crate::runtime::mcp::McpStdioConfig::new(&self.program, &self.cwd);
+        config.args = self.args.clone();
+        config.environment = self.environment.clone();
+        config.namespace = self.namespace.clone();
+        config
+    }
 }
 /// Host-owned role contract. Requests can select registered roles but cannot
 /// supply tools, system instructions or grants for a role.
@@ -77,10 +125,16 @@ pub struct AppConfig {
     pub prices: Vec<ModelPrice>,
     pub knowledge: bool,
     pub mcp: Vec<AppMcpEndpoint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_stdio: Vec<AppMcpStdio>,
     pub max_active_runs: usize,
     pub roles: Vec<AppRole>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<super::AppSkill>,
+    /// Explicit host-owned signed publisher/rollback ledger; absent retains
+    /// legacy unsigned local package installation and activation behavior.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_registry: Option<PathBuf>,
     pub research: AppResearch,
     pub retrieval: super::retrieval::AppRetrieval,
     pub sandbox: Option<super::super::sandbox::DockerSandboxConfig>,
@@ -93,7 +147,7 @@ impl Default for AppConfig {
         Self {
         state_dir:".taskloom".into(),database:None,provider:AppProvider::Offline,model:"offline-demo".into(),
         system:format!("{}\nReturn a JSON CitedReport with text and citations [{{chunk_id,quote}}]. Use [[full_chunk_id]] references for source assertions and exact source quotes. If evidence is missing, say so within the scope of the supplied evidence.", include_str!("research-guidance.txt")),
-        output_tokens:4096,enable_thinking:None,limits:RunLimits::default(),context:ContextPolicy::default(),final_output:None,observability:None,memory:None,prices:Vec::new(),knowledge:true,mcp:Vec::new(),max_active_runs:4,roles:Vec::new(),skills:Vec::new(),research:AppResearch::default(),retrieval:super::retrieval::AppRetrieval::default(),sandbox:None,sandbox_top_level:false,
+        output_tokens:4096,enable_thinking:None,limits:RunLimits::default(),context:ContextPolicy::default(),final_output:None,observability:None,memory:None,prices:Vec::new(),knowledge:true,mcp:Vec::new(),mcp_stdio:Vec::new(),max_active_runs:4,roles:Vec::new(),skills:Vec::new(),skill_registry:None,research:AppResearch::default(),retrieval:super::retrieval::AppRetrieval::default(),sandbox:None,sandbox_top_level:false,
     }
     }
 }
@@ -112,6 +166,11 @@ impl AppConfig {
         if config.state_dir.is_relative() {
             config.state_dir = path.parent().unwrap().join(&config.state_dir);
         }
+        if let Some(root) = &mut config.skill_registry {
+            if root.is_relative() {
+                *root = path.parent().unwrap().join(&*root);
+            }
+        }
         if let Some(pdf) = &mut config.research.pdf {
             if pdf.executable.is_relative() {
                 pdf.executable = path.parent().unwrap().join(&pdf.executable);
@@ -126,6 +185,20 @@ impl AppConfig {
         Ok(config)
     }
     pub fn validate(&self) -> Result<(), RuntimeError> {
+        if let Some(root) = &self.skill_registry {
+            if !cfg!(feature = "skill-registry")
+                || !root.is_absolute()
+                || root.as_os_str().is_empty()
+            {
+                return Err(config_error("signed skill activation requires skill-registry feature and an explicit absolute ledger root"));
+            }
+        }
+        if self.mcp_stdio.len() > 16 {
+            return Err(config_error("at most sixteen MCP subprocesses"));
+        }
+        for process in &self.mcp_stdio {
+            process.validate()?;
+        }
         if self.enable_thinking.is_some() && !matches!(self.provider, AppProvider::Openai { .. }) {
             return Err(config_error(
                 "enable_thinking requires an explicitly configured OpenAI-compatible provider",
@@ -216,6 +289,24 @@ impl AppConfig {
     pub(super) fn validate_provider(&self) -> Result<(), RuntimeError> {
         match &self.provider {
             AppProvider::Offline => {}
+            AppProvider::Native {
+                protocol,
+                base_url,
+                key_env,
+                namespace,
+            } => {
+                crate::native_providers::NativeProvider::validate_model_endpoint(
+                    *protocol,
+                    base_url,
+                    &self.model,
+                )
+                .map_err(|e| config_error(e.detail()))?;
+                if key_env.is_empty() || namespace.trim().is_empty() {
+                    return Err(config_error(
+                        "native provider requires a credential environment name and namespace",
+                    ));
+                }
+            }
             AppProvider::Openai {
                 base_url,
                 key_env,
@@ -265,6 +356,23 @@ impl AppConfig {
         }));
         Ok(match &self.provider {
             AppProvider::Offline => Arc::new(super::OfflineModel),
+            AppProvider::Native {
+                protocol,
+                base_url,
+                key_env,
+                namespace,
+            } => Arc::new(
+                GatewayTransport::new(
+                    gateway,
+                    crate::native_providers::NativeProvider::new(
+                        *protocol,
+                        base_url,
+                        secret(key_env)?,
+                    )
+                    .map_err(|e| config_error(e.detail()))?,
+                )
+                .with_cache_namespace(namespace),
+            ),
             AppProvider::Openai {
                 base_url,
                 key_env,

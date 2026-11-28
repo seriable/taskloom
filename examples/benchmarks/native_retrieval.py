@@ -157,6 +157,7 @@ def main():
     parser.add_argument("--profile", type=Path, help="explicit retrieval JSON: lexical settings, semantic cutoff and fusion; services supplied separately")
     parser.add_argument("--protocol", type=Path, help="fixed dataset/profile hashes and split quality gates; failure remains visible")
     parser.add_argument("--database",type=Path,help="explicit AppDatabase JSON; migrate first and set only its named URL environment")
+    parser.add_argument('--rerank-service', type=Path, help='explicit AppHttpRerank JSON; this example accepts only zero-priced loopback HTTP')
     parser.add_argument('--include-default-lexical',action='store_true',help='also measure the unchanged default lexical settings before the explicit profile, without embedding calls')
     args = parser.parse_args()
     protocol = None
@@ -169,6 +170,17 @@ def main():
         raise ValueError("this zero-fee example permits only a loopback embedding service")
     if not os.environ.get(args.key_env):
         raise ValueError("configure the local service's key environment first")
+    rerank_service = None
+    if args.rerank_service:
+        rerank_service = json.loads(args.rerank_service.read_text(encoding='utf-8'))
+        provider = rerank_service['provider']
+        endpoint = urllib.parse.urlsplit(provider['endpoint'])
+        if (endpoint.scheme != 'http' or endpoint.hostname not in {'127.0.0.1', 'localhost', '::1'}
+                or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment
+                or provider['currency'] != 'USD' or any(provider[key] != 0 for key in
+                    ['input_micros_per_million_tokens', 'max_request_cost_micros', 'max_total_cost_micros'])
+                or not os.environ.get(provider['key_env'])):
+            raise ValueError('this example permits only an explicit zero-priced loopback reranker with a host credential')
     dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
     source_root=Path(__file__).resolve().parents[2]
     for pin in dataset.get('source_pins',[]):
@@ -190,12 +202,14 @@ def main():
         "max_request_cost_micros": 0, "max_total_cost_micros": 0, "max_input_bytes": 131072, "timeout_ms": 60000}}}
     if args.profile:
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
-        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers", "require_semantic_match", "query_prefix", "embedding_document_context", "semantic_min_lexical_terms"}
+        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers", "require_semantic_match", "query_prefix", "embedding_document_context", "semantic_min_lexical_terms", "rerank", "max_chunks_per_document"}
         if not isinstance(profile, dict) or set(profile) - allowed:
             raise ValueError("profile may only set lexical/fusion/relevance settings; no authority or service changes")
         config["retrieval"].update(profile)
     if args.database:
         config['database']=json.loads(args.database.read_text(encoding='utf-8'))
+    if rerank_service:
+        config['retrieval']['http_rerank'] = rerank_service
     config_path = root / "taskloom.json"
     save(config_path, config)
     save(root / "dataset.json", dataset)
@@ -206,6 +220,9 @@ def main():
         "limitations": ["small visible synthetic relevance set, not held out", "no semantic claim-support or factual-accuracy scoring",
                         "no competitor evaluation", "no query instruction/prefix", "API fee USD 0; hardware/electricity unmetered"]}
     report["dataset_sha256"] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
+    if args.rerank_service:
+        report['rerank_service_config_sha256'] = hashlib.sha256(args.rerank_service.read_bytes()).hexdigest()
+        report['limitations'].append('Explicit independent zero-priced loopback learned reranker; separate durable rerank ledger. Experimental scores are not independent truth.')
     if config['retrieval'].get('query_prefix'):
         report['limitations'][3]='Explicit host-configured query-only embedding prefix, retained in phase configurations; document vectors are unprefixed.'
     if dataset.get('source_pins'):

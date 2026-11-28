@@ -1,14 +1,47 @@
 //! Pluggable ingestion, chunking and retrieval with verifiable source excerpts.
 //! Retrieved text is untrusted data, never tool permission or system policy.
 mod corpus;
+mod diversity;
+#[cfg(feature = "research")]
+mod http_rerank;
 mod hybrid;
 mod identifiers;
+mod loaders;
 mod located;
 #[cfg(feature = "research")]
 mod pdf;
+#[cfg(feature = "qdrant")]
+mod qdrant;
+mod rerank;
+#[cfg(feature = "research")]
+pub use http_rerank::{
+    FileRerankLedger, HttpRerankConfig, HttpReranker, RerankAttempt, RerankLedgerSnapshot,
+    RerankReservation, RerankTotals,
+};
+#[cfg(feature = "qdrant")]
+pub use qdrant::{
+    FileQdrantPublishJournal, QdrantClient, QdrantConfig, QdrantPublishGuard, QdrantPublishReceipt,
+    QdrantPublishSnapshot, QdrantRetriever,
+};
+#[cfg(feature = "office")]
+mod docx;
+#[cfg(feature = "office")]
+pub use docx::{DocxLimits, DocxLoader};
+#[cfg(feature = "office")]
+mod office;
+#[cfg(feature = "office")]
+pub use office::{OfficeLimits, PptxLoader, XlsxLoader};
+#[cfg(feature = "research")]
+mod object_source;
 mod retrieval;
 mod selected;
+#[cfg(feature = "research")]
+pub use object_source::{ObjectSourceSnapshot, PresignedObjectConfig, PresignedObjectSource};
+#[cfg(feature = "database")]
+mod sql_source;
 pub(crate) use retrieval::terms as memory_terms;
+#[cfg(feature = "database")]
+pub use sql_source::{SqlDocumentSnapshot, SqlDocumentSource, SqlSourceConfig, SqlSourceLimits};
 #[cfg(feature = "research")]
 mod web;
 
@@ -21,16 +54,19 @@ use sha2::{Digest, Sha256};
 
 use super::RuntimeError;
 pub use corpus::{CorpusSnapshot, CorpusStore, FileCorpusStore, CORPUS_VERSION};
+pub use diversity::PerDocumentRetriever;
 pub use hybrid::{
-    EmbeddingBatch, EmbeddingIndex, EmbeddingModel, HybridRetriever, ProviderEmbeddingModel,
-    VectorRetriever,
+    EmbeddingBatch, EmbeddingIndex, EmbeddingIndexUpdate, EmbeddingIndexUpdateReceipt,
+    EmbeddingModel, HybridRetriever, ProviderEmbeddingModel, VectorRetriever,
 };
 pub use identifiers::IdentifierConstrainedRetriever;
+pub use loaders::{CsvLoader, EmlLoader, JsonlLoader, StructuredTextLimits};
 pub use located::{
     LocatedCitation, LocatedReport, ResolvedCitation, ResolvedLocatedReport, SourceLocator,
 };
 #[cfg(feature = "research")]
 pub use pdf::{PdfConfig, PdfLoader};
+pub use rerank::{LexicalReranker, Reranker, RerankingRetriever};
 pub use retrieval::{
     search, Citation, CitedReport, ConfiguredLexicalRetriever, Evidence, LexicalConfig,
     LexicalRetriever, QuotePolicy, RagTool, RetrievalQuery, Retriever, ScoredChunk, SearchResult,

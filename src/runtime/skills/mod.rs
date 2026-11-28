@@ -2,6 +2,8 @@
 //! package declaration nor its text is an authorization grant.
 mod activation;
 mod archive;
+#[cfg(feature = "skill-registry")]
+mod registry;
 mod store;
 
 use crate::runtime::{
@@ -15,6 +17,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use activation::{ActivatedSkill, SkillActivationMode, SkillBinding, SkillGrant, SkillHost};
 pub use archive::read_skill_archive;
+#[cfg(feature = "skill-registry")]
+pub use registry::{
+    FileSkillRegistry, RegistryInstallReceipt, RegistryInstallRequest, RegistryPublisher,
+    RegistrySkillStore, RegistryWatermark, SignedSkillRelease, SkillRegistryRelease,
+    SkillRegistrySnapshot, SkillRegistryTrust,
+};
 pub use store::{FileSkillStore, SkillCatalog, SkillCatalogEntry, SkillCatalogEvent};
 
 pub const SKILL_FORMAT: u32 = 1;

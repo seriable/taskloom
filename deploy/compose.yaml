@@ -1,0 +1,85 @@
+name: taskloom
+x-taskloom: &taskloom
+  image: ${TASKLOOM_IMAGE:-taskloom:local}
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  init: true
+  user: "10001:10001"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  stop_grace_period: 45s
+  tmpfs: ["/tmp:size=16m,mode=1777"]
+  volumes:
+    - ./config:/etc/taskloom:ro
+    - taskloom-state:/var/lib/taskloom
+  environment:
+    TASKLOOM_DATABASE_URL_FILE: /run/secrets/database-url
+    TASKLOOM_MODEL_KEY_FILE: /run/secrets/model-key
+  secrets: [database-url, model-key]
+  depends_on:
+    database:
+      condition: service_healthy
+services:
+  database:
+    image: postgres:16.15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: taskloom
+      POSTGRES_DB: taskloom
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets: [postgres-password]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U taskloom -d taskloom"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  migrate:
+    <<: *taskloom
+    profiles: [administration]
+    command: [taskloom, --config, /etc/taskloom/project.json, database-migrate]
+    restart: "no"
+  configure-queue:
+    <<: *taskloom
+    profiles: [administration]
+    command: [taskloom, --config, /etc/taskloom/project.json, queue-configure, /etc/taskloom/queue.json, "0", deployment-operator, "initial explicit queue admission"]
+    restart: "no"
+  admin:
+    <<: *taskloom
+    profiles: [administration]
+    command: [taskloom-admin, --help]
+    restart: "no"
+  api:
+    <<: *taskloom
+    restart: unless-stopped
+    ports: ["127.0.0.1:${TASKLOOM_API_PORT:-8080}:8080"]
+    command: [taskloom, service-serve, /etc/taskloom/host.json]
+    healthcheck:
+      test: [CMD, taskloom, health-check, "http://127.0.0.1:8080/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+  worker:
+    <<: *taskloom
+    restart: unless-stopped
+    # Each container gets its own hostname as the non-authoritative worker label.
+    command: [sh, -ec, 'exec taskloom --config /etc/taskloom/project.json worker "$$HOSTNAME"']
+    healthcheck:
+      test: [CMD, taskloom, service-check, /etc/taskloom/host.json]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+secrets:
+  postgres-password:
+    file: ${TASKLOOM_SECRETS_DIR:?set TASKLOOM_SECRETS_DIR}/postgres-password
+  database-url:
+    file: ${TASKLOOM_SECRETS_DIR:?set TASKLOOM_SECRETS_DIR}/database-url
+  model-key:
+    file: ${TASKLOOM_SECRETS_DIR:?set TASKLOOM_SECRETS_DIR}/model-key
+volumes:
+  postgres-data:
+  taskloom-state:

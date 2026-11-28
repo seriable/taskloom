@@ -274,6 +274,11 @@ impl SqlGenerationQuotaStore {
         &self,
         tx: &mut Transaction<'_, Any>,
     ) -> Result<GenerationQuotaUsage, RuntimeError> {
+        let retained_private: Option<i64> = sqlx::query_scalar("SELECT 1 FROM taskloom_records WHERE namespace=$1 AND family='quota_private_run' LIMIT 1")
+            .bind(&self.namespace.0).fetch_optional(&mut **tx).await.map_err(database_error)?;
+        if retained_private.is_some() {
+            return Err(storage("uninitialized project quota contains retained private accounting; refusing incomplete history import"));
+        }
         let query = format!("SELECT object_id,family,revision,{} AS payload FROM taskloom_records WHERE namespace=$1 AND family IN ($2,'budget') ORDER BY object_id,family LIMIT $3", self.db.0.backend.body());
         // Bounded stream; never use the UI's truncated 1000-record listing.
         let mut rows = sqlx::query(&query)
@@ -350,12 +355,63 @@ impl SqlGenerationQuotaStore {
         value: &BudgetSnapshot,
         admission: bool,
     ) -> Result<(), RuntimeError> {
+        self.reconcile_account(tx, "quota_run", run_id, value, admission)
+            .await
+    }
+    pub(super) async fn private_scope_admission(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        create: bool,
+    ) -> Result<(), RuntimeError> {
+        let control = self.lock(tx).await?;
+        if control.usage.is_none() || control.currency.is_none() {
+            return Err(config(
+                "private stores require explicitly initialized project generation quota",
+            ));
+        }
+        if create && control.policy.is_none() {
+            return Err(RuntimeError::Budget(
+                "new private stores require enabled project generation quota".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub(super) async fn reconcile_private(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        owner: &DatabaseNamespace,
+        run_id: &str,
+        value: &BudgetSnapshot,
+        admission: bool,
+    ) -> Result<(), RuntimeError> {
+        let id =
+            crate::runtime::state::fingerprint(&("private-project-account-v1", &owner.0, run_id))?;
+        self.reconcile_account(tx, "quota_private_run", &id, value, admission)
+            .await
+    }
+    async fn reconcile_account(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        family: &'static str,
+        account_id: &str,
+        value: &BudgetSnapshot,
+        admission: bool,
+    ) -> Result<(), RuntimeError> {
+        let private = family == "quota_private_run";
         validate_budget(value)?;
         let mut control = self.lock(tx).await?;
+        if private && control.usage.is_none() {
+            return Err(storage(
+                "private accounting cannot bypass uninitialized project quota",
+            ));
+        }
+        if private && admission && value.in_flight_attempts > 0 && control.policy.is_none() {
+            return Err(RuntimeError::Budget("private generation refused while project quota is disabled; existing uncertainty remains retained".into()));
+        }
         let Some(mut usage) = control.usage.clone() else {
             return Ok(());
         };
-        let key = RecordKey::new(self.namespace.clone(), "quota_run", run_id)?;
+        let key = RecordKey::new(self.namespace.clone(), family, account_id)?;
         let old = self
             .db
             .read_tx(tx, &key)

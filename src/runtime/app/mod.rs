@@ -2,11 +2,21 @@
 pub mod cli;
 mod config;
 mod diagnostics;
+#[cfg(feature = "database")]
+pub mod host;
+#[cfg(feature = "oidc")]
+pub mod login;
 mod memory;
 #[cfg(feature = "database")]
 pub mod multiuser;
+#[cfg(feature = "oidc")]
+pub mod oidc;
+#[cfg(feature = "database")]
+pub mod operations;
 mod orchestration;
 mod planning;
+#[cfg(feature = "database")]
+pub mod private_sessions;
 #[cfg(feature = "database")]
 pub mod queue;
 pub mod retrieval;
@@ -29,12 +39,12 @@ use super::rag::{
 };
 use super::*;
 use crate::CancelToken;
-pub use config::{AppConfig, AppMcpEndpoint, AppProvider, AppResearch, AppRole};
+pub use config::{AppConfig, AppMcpEndpoint, AppMcpStdio, AppProvider, AppResearch, AppRole};
 pub use diagnostics::{diagnostic_snapshot, AppObservability, DiagnosticTarget};
 pub use memory::{AppMemory, MemoryEdit, MemoryExtract, MemoryForget, MemoryReview};
 pub use orchestration::{AppWorkflowLaunch, AppWorkflowPreview, AppWorkflowRequest};
 pub use planning::{preview_configuration, AppConfigPreview, DeclaredToolGrant};
-pub use retrieval::{AppEmbedding, AppRetrieval, RetrievalMode};
+pub use retrieval::{AppEmbedding, AppHttpRerank, AppLexicalRerank, AppRetrieval, RetrievalMode};
 pub use service::{router, serve};
 pub use skills::{AppSkill, AppTemplateRequest};
 pub use storage::{
@@ -182,6 +192,17 @@ impl Application {
             policy = policy.allow("web_search").grant("web:search");
         }
         let mut clients = Vec::new();
+        for process in &config.mcp_stdio {
+            let client = McpClient::connect_stdio(process.process_config()).await?;
+            for binding in &process.bindings {
+                tools.register(client.bind(binding.clone())?)?;
+                policy = policy.allow(&binding.name);
+                for permission in &binding.permissions {
+                    policy = policy.grant(permission);
+                }
+            }
+            clients.push(client);
+        }
         for endpoint in &config.mcp {
             let mut mcp = McpHttpConfig::new(&endpoint.endpoint);
             mcp.namespace = endpoint.namespace.clone();

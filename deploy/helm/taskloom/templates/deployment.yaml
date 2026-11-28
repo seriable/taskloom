@@ -1,0 +1,105 @@
+{{- $root := . -}}
+{{- range $component := list "api" "worker" }}
+{{- $settings := index $root.Values $component }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "taskloom.fullname" $root }}-{{ $component }}
+  labels:
+    {{- include "taskloom.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $component }}
+spec:
+  {{- if or $root.Values.maintenance.enabled (not (index $root.Values.autoscaling $component).enabled) }}
+  replicas: {{ if $root.Values.maintenance.enabled }}0{{ else }}{{ $settings.replicas }}{{ end }}
+  {{- end }}
+  # A host/config/schema contract change is never advertised as rolling upgrade.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taskloom
+      app.kubernetes.io/instance: {{ $root.Release.Name }}
+      app.kubernetes.io/component: {{ $component }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taskloom
+        app.kubernetes.io/instance: {{ $root.Release.Name }}
+        app.kubernetes.io/component: {{ $component }}
+      annotations:
+        checksum/config: {{ include (print $root.Template.BasePath "/configmap.yaml") $root | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "taskloom.fullname" $root }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ $root.Values.terminationGracePeriodSeconds }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $component }}
+          image: {{ include "taskloom.image" $root | quote }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          args:
+            {{- if eq $component "api" }}
+            - taskloom
+            - service-serve
+            - /etc/taskloom/host.json
+            {{- else }}
+            - sh
+            - -ec
+            - 'exec taskloom --config /etc/taskloom/project.json worker "$HOSTNAME"'
+            {{- end }}
+          env:
+            - name: TASKLOOM_DATABASE_URL
+              valueFrom: {secretKeyRef: {name: {{ $root.Values.existingSecret | quote }}, key: {{ $root.Values.secretKeys.databaseUrl | quote }}}}
+            - name: TASKLOOM_MODEL_KEY
+              valueFrom: {secretKeyRef: {name: {{ $root.Values.existingSecret | quote }}, key: {{ $root.Values.secretKeys.modelKey | quote }}}}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          {{- if eq $component "api" }}
+          ports: [{name: http, containerPort: 8080}]
+          startupProbe:
+            httpGet: {path: /health/ready, port: http}
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: {path: /health/ready, port: http}
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health/live, port: http}
+            periodSeconds: 15
+            timeoutSeconds: 5
+          {{- else }}
+          # This is cold SQL/config readiness, not proof of provider responsiveness
+          # or worker progress. Do not restart healthy workers on a DB outage.
+          readinessProbe:
+            exec: {command: [taskloom, service-check, /etc/taskloom/host.json]}
+            periodSeconds: 30
+            timeoutSeconds: 10
+          {{- end }}
+          resources:
+            {{- toYaml $settings.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/taskloom, readOnly: true}
+            - {name: state, mountPath: /var/lib/taskloom}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: config
+          configMap: {name: {{ include "taskloom.fullname" $root }}-config}
+        # All required runtime/index/knowledge state is SQL-backed in this profile.
+        # This local directory is not a backup of external effects or host assets.
+        - name: state
+          emptyDir: {sizeLimit: 64Mi}
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
+{{- end }}

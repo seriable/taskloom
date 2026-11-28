@@ -1,0 +1,6 @@
+{
+  "listen": "0.0.0.0:8080",
+  "database_url_env": "TASKLOOM_DATABASE_URL",
+  "shutdown_grace_seconds": 20,
+  "projects": [{"tenant":"team","project":"main","config":"project.json"}]
+}

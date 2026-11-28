@@ -9,6 +9,9 @@ use super::{
 };
 use crate::runtime::{state::fingerprint, RuntimeError};
 
+mod incremental;
+pub use incremental::{EmbeddingIndexUpdate, EmbeddingIndexUpdateReceipt};
+
 /// Host-supplied embeddings. Identity must bind model/version, endpoint and
 /// tenant, without credentials. Charges belong to this service, not RunBudget.
 /// There is deliberately no automatic network service or synthetic embedding.

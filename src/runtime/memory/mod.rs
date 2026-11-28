@@ -1,6 +1,7 @@
 //! Scoped, reviewed long-term memory. Stored values are untrusted data, never
 //! tool grants. Conversation history and durable model spending stay separate.
 mod manager;
+mod semantic;
 mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -9,6 +10,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{state::fingerprint, RuntimeError};
 pub use manager::{MemoryExtraction, MemoryManager};
+pub use semantic::{
+    MemoryCurationGroup, MemoryCurationPlan, MemoryOntology, SemanticMemoryIndex,
+    SemanticMemoryPolicy, SemanticMemoryRecall,
+};
 pub use store::{FileMemoryStore, MemoryStore};
 
 pub const MEMORY_VERSION: u32 = 1;

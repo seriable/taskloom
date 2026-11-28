@@ -146,6 +146,7 @@ impl OtlpHttpExporter {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
         let client = reqwest::Client::builder()
+            .retry(reqwest::retry::never())
             .default_headers(headers)
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

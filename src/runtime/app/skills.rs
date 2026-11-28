@@ -64,6 +64,21 @@ pub(super) async fn load(
         .collect::<BTreeSet<_>>();
     let mut credentials = BTreeSet::new();
     provider_names(&config.provider, &mut credentials);
+    if let Some(rerank) = &config.retrieval.http_rerank {
+        credentials.insert(rerank.provider.key_env.clone());
+    }
+    #[cfg(feature = "qdrant")]
+    if let Some(name) = config
+        .retrieval
+        .qdrant
+        .as_ref()
+        .and_then(|target| target.api_key_env.as_ref())
+    {
+        credentials.insert(name.clone());
+    }
+    for process in &config.mcp_stdio {
+        credentials.extend(process.environment.iter().cloned());
+    }
     for endpoint in &config.mcp {
         if let Some(name) = &endpoint.token_env {
             credentials.insert(name.clone());
@@ -76,17 +91,35 @@ pub(super) async fn load(
         provider_names(&embedding.provider, &mut credentials);
     }
     for entry in &config.skills {
+        let host = SkillHost {
+            tools: tools.definitions(policy),
+            policy: policy.clone(),
+            credential_names: credentials.clone(),
+        };
+        #[cfg(feature = "skill-registry")]
+        let activated = if let Some(root) = &config.skill_registry {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| config_error("system clock cannot validate signed release expiry"))?
+                .as_secs();
+            FileSkillRegistry::new(root.clone())?
+                .activate(
+                    store,
+                    &entry.package,
+                    entry.grant.clone(),
+                    host,
+                    entry.mode,
+                    now,
+                )
+                .await?
+        } else {
+            store
+                .activate(&entry.package, entry.grant.clone(), host, entry.mode)
+                .await?
+        };
+        #[cfg(not(feature = "skill-registry"))]
         let activated = store
-            .activate(
-                &entry.package,
-                entry.grant.clone(),
-                SkillHost {
-                    tools: tools.definitions(policy),
-                    policy: policy.clone(),
-                    credential_names: credentials.clone(),
-                },
-                entry.mode,
-            )
+            .activate(&entry.package, entry.grant.clone(), host, entry.mode)
             .await?;
         for role in &activated.manifest().roles {
             let mounted = format!("{}-{}", entry.mount, role.name);
@@ -118,7 +151,9 @@ pub(super) async fn load(
 fn provider_names(provider: &AppProvider, names: &mut BTreeSet<String>) {
     match provider {
         AppProvider::Offline => {}
-        AppProvider::Openai { key_env, .. } | AppProvider::Anthropic { key_env, .. } => {
+        AppProvider::Openai { key_env, .. }
+        | AppProvider::Anthropic { key_env, .. }
+        | AppProvider::Native { key_env, .. } => {
             names.insert(key_env.clone());
         }
     }

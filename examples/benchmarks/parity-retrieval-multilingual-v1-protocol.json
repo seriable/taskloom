@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "scope": "Explicit multilingual transfer profile removes same-language lexical admission only; dataset/labels/cosine/gates unchanged. Actual first v6 profile failure retained. No external human labels or heldout claim.",
+  "dataset_sha256": "530d044698d04242cdec0972eac3e278dd9d583e622fbf823d01f7d2fe4e81d2",
+  "profile_sha256": "283cac251d33363fcb98e084be564a85db587edacd64ec4d31a1218670dffbc9",
+  "gates": {
+    "split": "development",
+    "positive_queries": 21,
+    "negative_queries": 7,
+    "min_recall_at_5": 0.9,
+    "min_mrr_at_5": 0.85,
+    "required_negative_accuracy": 1.0,
+    "max_errors": 0
+  },
+  "additional_gates": []
+}

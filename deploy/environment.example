@@ -1,0 +1,3 @@
+# Absolute directory containing private files postgres-password/database-url/model-key.
+# Never put this directory in the checkout or a container image.
+TASKLOOM_SECRETS_DIR=/absolute/private/taskloom-secrets

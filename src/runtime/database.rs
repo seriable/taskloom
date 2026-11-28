@@ -5,6 +5,7 @@
 mod identity;
 mod knowledge;
 mod objects;
+mod private;
 mod queue;
 mod quota;
 mod skills;
@@ -14,6 +15,7 @@ pub use identity::{
 };
 pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
 pub use objects::{SqlObjectLease, SqlObjectStore};
+pub use private::SqlPrivateStores;
 pub use queue::{
     QueueControl, QueueEvent, QueueJob, QueueLimits, QueuePolicy, QueueRuntimeBinding, QueueState,
     SqlQueueLease, SqlQueueStore,
@@ -322,6 +324,7 @@ impl SqlDatabase {
             db: self.clone(),
             namespace,
             queue: None,
+            private: None,
         }
     }
     pub fn workflows(&self, namespace: DatabaseNamespace) -> SqlWorkflowStore {
@@ -787,8 +790,15 @@ pub struct SqlRunStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
     queue: Option<SqlQueueLease>,
+    private: Option<private::PrivateRunScope>,
 }
 impl SqlRunStore {
+    async fn verify_private(&self) -> Result<(), RuntimeError> {
+        if let Some(scope) = &self.private {
+            scope.verify(&self.db, None).await?;
+        }
+        Ok(())
+    }
     pub fn with_queue_lease(mut self, lease: &SqlQueueLease) -> Result<Self, RuntimeError> {
         lease.matches(&self.db, &self.namespace)?;
         self.queue = Some(lease.clone());
@@ -796,6 +806,7 @@ impl SqlRunStore {
     }
     /// At most 1000 validated records / 64MiB, ordered by ID.
     pub async fn list(&self) -> Result<Vec<RunState>, RuntimeError> {
+        self.verify_private().await?;
         self.db
             .list(&self.namespace, "run", |row| {
                 let id = row.key.id.clone();
@@ -806,6 +817,7 @@ impl SqlRunStore {
     /// Read the scoped reservation journal without taking ownership. A newer
     /// full checkpoint may contain a later settled budget generation.
     pub async fn inspect_budget(&self, id: &str) -> Result<Option<BudgetSnapshot>, RuntimeError> {
+        self.verify_private().await?;
         self.db
             .read(&RecordKey::new(self.namespace.clone(), "budget", id)?)
             .await?
@@ -824,11 +836,19 @@ impl RunStore for SqlRunStore {
                 .acquire(RecordKey::new(self.namespace.clone(), "run", id)?)
                 .await?;
             bind_queue_owner(&lease, self.queue.as_ref()).await?;
-            Ok(Arc::new(RunDatabaseLease(lease, self.queue.clone())) as Arc<dyn RunLease>)
+            if let Some(scope) = &self.private {
+                scope.verify(&self.db, None).await?;
+            }
+            Ok(Arc::new(RunDatabaseLease(
+                lease,
+                self.queue.clone(),
+                self.private.clone(),
+            )) as Arc<dyn RunLease>)
         })
     }
     fn inspect<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Option<RunState>, RuntimeError>> {
         Box::pin(async move {
+            self.verify_private().await?;
             let key = RecordKey::new(self.namespace.clone(), "run", id)?;
             self.db
                 .read(&key)
@@ -838,13 +858,49 @@ impl RunStore for SqlRunStore {
         })
     }
 }
-struct RunDatabaseLease(Arc<Lease>, Option<SqlQueueLease>);
+struct RunDatabaseLease(
+    Arc<Lease>,
+    Option<SqlQueueLease>,
+    Option<private::PrivateRunScope>,
+);
+impl RunDatabaseLease {
+    async fn reconcile(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        value: &BudgetSnapshot,
+        admission: bool,
+    ) -> Result<(), RuntimeError> {
+        if let Some(scope) = &self.2 {
+            scope.verify(&self.0.db, Some(tx)).await?;
+            self.0
+                .db
+                .generation_quota(scope.project.clone())
+                .reconcile_private(tx, &self.0.key.namespace, &self.0.key.id, value, admission)
+                .await
+        } else {
+            self.0
+                .db
+                .generation_quota(self.0.key.namespace.clone())
+                .reconcile(tx, &self.0.key.id, value, admission)
+                .await
+        }
+    }
+    async fn verify_private(&self) -> Result<(), RuntimeError> {
+        if let Some(scope) = &self.2 {
+            scope.verify(&self.0.db, None).await?;
+        }
+        Ok(())
+    }
+}
 impl RunLease for RunDatabaseLease {
     fn requires_cost_ceiling(&self) -> bool {
         true
     }
     fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
-        Box::pin(async { queue::dispatch_guard(&self.0, self.1.as_ref()).await })
+        Box::pin(async {
+            self.verify_private().await?;
+            queue::dispatch_guard(&self.0, self.1.as_ref()).await
+        })
     }
     fn max_bytes(&self) -> Option<u64> {
         Some(self.0.db.0.options.max_record_bytes)
@@ -852,6 +908,7 @@ impl RunLease for RunDatabaseLease {
     fn load(&self) -> BoxFuture<'_, Result<Option<RunState>, RuntimeError>> {
         Box::pin(async move {
             self.0.check().await?;
+            self.verify_private().await?;
             self.0
                 .db
                 .read(&self.0.key)
@@ -872,11 +929,7 @@ impl RunLease for RunDatabaseLease {
             if let Some(queue) = &self.1 {
                 queue.lock_runtime(&mut tx, &self.0.key).await?;
             }
-            self.0
-                .db
-                .generation_quota(self.0.key.namespace.clone())
-                .reconcile(&mut tx, &self.0.key.id, &state.report.budget, false)
-                .await?;
+            self.reconcile(&mut tx, &state.report.budget, false).await?;
             if let Some(old) = self.0.db.read_tx(&mut tx, &self.0.key).await? {
                 let previous = parse_run(old, &self.0.key.id)?;
                 if previous.trace_binding != state.trace_binding {
@@ -909,6 +962,7 @@ impl RunLease for RunDatabaseLease {
     fn load_budget(&self) -> BoxFuture<'_, Result<Option<BudgetSnapshot>, RuntimeError>> {
         Box::pin(async move {
             self.0.check().await?;
+            self.verify_private().await?;
             self.0
                 .db
                 .read(&self.0.key.family("budget"))
@@ -931,11 +985,7 @@ impl RunLease for RunDatabaseLease {
             } else {
                 queue::refuse_unowned_admission(&mut tx, &self.0.key).await?;
             }
-            self.0
-                .db
-                .generation_quota(self.0.key.namespace.clone())
-                .reconcile(&mut tx, &self.0.key.id, value, true)
-                .await?;
+            self.reconcile(&mut tx, value, true).await?;
             if let Some(old) = self.0.db.read_tx(&mut tx, &key).await? {
                 let old = parse_budget(old)?;
                 if old.generation > value.generation {

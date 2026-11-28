@@ -1,0 +1,27 @@
+# Explicit sample rules; review thresholds with the measured deployment SLO.
+# Prometheus scrape must supply the project-scoped Reader bearer securely and
+# target /tenants/T/projects/P/api/operations/metrics. Do not put tokens here.
+groups:
+  - name: taskloom-queue
+    rules:
+      - alert: TaskloomQueueDisabled
+        expr: taskloom_queue_enabled == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Taskloom queue admission disabled"
+          description: "Inspect host policy and drain/maintenance state; never reset uncertainty or enable grants automatically."
+      - alert: TaskloomFailedJobs
+        expr: taskloom_queue_jobs{state="failed"} > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Taskloom has retained failed queue jobs"
+          description: "Inspect saved run and effects; explicit reconciliation/resume is required."
+      - alert: TaskloomWaitingJobs
+        expr: taskloom_queue_jobs{state="waiting"} > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Taskloom jobs need operator attention"
+          description: "Review exact approvals or uncertainty. This alert never authorizes work or retries."

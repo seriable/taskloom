@@ -1,0 +1,346 @@
+{
+  "version": 1,
+  "date_utc": "2026-11-28T15:11:33.061740+00:00",
+  "scope": "Implementation and bounded local acceptance for the new framework-parity P0-P2 roadmap; no general framework ranking, independent truth or production certification.",
+  "base_commit": "0ae4bca0b5e85ca052f419a8fe0de0560c23fac3",
+  "status": "local_supported_contracts_passed_external_acceptance_open",
+  "source_binding": {
+    "cargo_and_src_raw_sha256": "1eddbb95b48fe483535c8a7d3292566231b19bf621eb9b3b6bc7b13990951bfa",
+    "cargo_and_src_lf_sha256": "d69888164c26b4c660185a059ca421f80f14e2725512c936ecfb079b55e98e2b",
+    "cargo_lock_sha256": "908f0dc4623ebfa668ee0dc94cae9cbedd09fc6a74255167afd90e6a82fb58ac",
+    "normalization": "Windows tested working files retain their recorded CRLF/LF bytes; source release uses exact raw Git blobs in an autocrlf=false clean checkout. LF fingerprint binds the corresponding textual source; no hermetic byte-identical binary promise.",
+    "later_non_rust_changes": "DR Python, documentation and acceptance metadata have separate final receipts; no subsequent Cargo/src change."
+  },
+  "rust": {
+    "windows": {
+      "binaries": 91,
+      "passed": 510,
+      "failed": 0,
+      "ignored": 31,
+      "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28)",
+      "profile_debug": 0,
+      "incremental": false,
+      "test_threads": 2
+    },
+    "windows_minimal": {
+      "binaries": 72,
+      "passed": 84,
+      "failed": 0,
+      "ignored": 0
+    },
+    "linux": {
+      "toolchain": "1.95.0",
+      "passed": 512,
+      "failed": 0,
+      "ignored": 31,
+      "minimal_passed": 84,
+      "strict_clippy": true,
+      "test_threads": 2
+    },
+    "rust_1_86": {
+      "windows_all_features_all_targets_check": true,
+      "linux_all_opt_in_release_source_build": true
+    },
+    "strict_windows_clippy": true,
+    "windows_rustdoc_warnings_as_errors": true,
+    "ignored_tests_are_not_passes": true,
+    "retained_failed_attempts": [
+      "Windows initial E0463 cache failure; stopped source-drifting retry, followed by complete clean low-debug target run.",
+      "Linux first 2-second stream deadline failed under concurrent load; isolated and threads2 full run passed without changing the deadline.",
+      "Direct crates.io image build timed out; no successful network build claim."
+    ],
+    "msrv_feature_boundaries": {
+      "compiler": "1.86.0",
+      "no_default_features": true,
+      "features": [
+        "runtime",
+        "office",
+        "qdrant",
+        "skill-registry",
+        "ocr",
+        "mcp-persistence",
+        "app,oidc"
+      ],
+      "all_passed": true
+    },
+    "cargo_fmt_check": true
+  },
+  "binaries": {
+    "linux_debug_taskloom_sha256": "8e996d20152f57f6c134f7ffc463555c2bdb12b1fb00c2d728231786f532dcf2",
+    "linux_fault_test_sha256": "b0641a98922f8c673d10b3185358305d558154f602d4139519fb14b3af244226",
+    "old_rolling_commit": "0ae4bca0b5e85ca052f419a8fe0de0560c23fac3",
+    "old_rolling_elf_sha256": "e7570eacc3eb2ba27a697d5051a2f12acf3aedb1fb19cfa79ee0ba88b55acd1e",
+    "windows_final_taskloom_sha256": "5b79b293b97cf32711f4d3f9a66054444b70ea41a0f46a993cc087dd6e9924be",
+    "docker_image_id": "sha256:a107111040aac52f40075521119cee7bf30e685e88223526671ccaae7ad122e5",
+    "docker_taskloom_sha256": "b193c356af7ef9955888ceb6ca4371c498897cf7d76811782b9a0aa6ed54a6d0",
+    "docker_admin_sha256": "b497243cd91ed001b0565f9c540cf0f49ab34b89dd6bcd526b75baef98d52196",
+    "docker_build": "Rust1.86 offline release; 331 public registry archives verified against Cargo.lock, network none; reviewed c40c0eb runtime dependencies reused; no credentials/home/model weights copied."
+  },
+  "local_controls": {
+    "rolling": {
+      "global": 3,
+      "sqlite": 13,
+      "postgres": 13,
+      "healthy_jobs_per_backend": 13,
+      "http_requests_per_backend": 13
+    },
+    "network_capacity": {
+      "checks": 7,
+      "healthy_jobs": 16,
+      "healthy_http_requests": 16,
+      "unknown_fault_requests": 1,
+      "post_restore_extra_requests": 0,
+      "owner_epoch": [
+        1,
+        2
+      ],
+      "scaling": "manual 1->2->1",
+      "recovery_sample_denominator": 1,
+      "recovery_means": "retained-unknown safe stop, not successful task completion or production SLO"
+    },
+    "managed_dr": {
+      "live_checks": 23,
+      "offline_controls": 8,
+      "skipped": 0,
+      "promotions": "A->B->new A with independent PostgreSQL witness, permanent role fencing, all-asset static backups and computed Application queue bindings",
+      "unreachable_source": "refuse promotion",
+      "lost_active_ack": "Unknown; no automatic startup",
+      "cleanup": {
+        "all_this_deployment_worker_probe_containers_absent": true,
+        "exact_owned_internal_network_absent": true,
+        "three_owned_postgres_containers_absent": true
+      }
+    },
+    "compose": {
+      "checks": 7,
+      "submitted_model_tasks": 0,
+      "owned_project_removed": true
+    },
+    "monitoring": {
+      "actual_prometheus": "3.16.0",
+      "live_checks": 13,
+      "receiver": "local authenticated Alertmanager protocol fixture; not actual routing/dedup/persistence",
+      "source_rule_tests": 3,
+      "bounded_hold_seconds": 2,
+      "original_hold_seconds": 300,
+      "provider_requests": 0,
+      "owned_container_removed": true
+    },
+    "sdks": {
+      "python_tests": 5,
+      "node_tests": 5,
+      "strict_tsc": true,
+      "actual_wheel": true,
+      "actual_npm_tgz": true,
+      "actual_package_semantic_http_checks": 2,
+      "published_to_registries": false
+    },
+    "source_signing_preparation": {
+      "ephemeral_temporary_repo_controls": 9,
+      "real_maintainer_signature_created": false
+    },
+    "evaluators": {
+      "parity": 9,
+      "observed_contracts": 4,
+      "local_model_artifact_identity": 2
+    },
+    "mcp_durable": "See mcp-durable-20261128.json; protected SQL HTTP SDK only, callbacks statically refused, original POST never replayed.",
+    "ocr": "See ocr-20261128.json; actual English/Chinese bounded PNG/Tesseract containers, not broad OCR accuracy."
+  },
+  "learned_retrieval": {
+    "kind": "visible development calibration, reused labels, not held out",
+    "positive_queries": 21,
+    "recall_at_5": 1.0,
+    "negative_queries": 7,
+    "negative_correct": 7,
+    "mrr_at_5": 0.9285714285714286,
+    "errors": 0,
+    "embedding_requests": 29,
+    "rerank_requests": 51,
+    "pairs": 755,
+    "api_fees": "USD-zero local only; hardware/electricity excluded",
+    "controls_passed": 5,
+    "original_labels_and_quality_gates_unchanged": true,
+    "old_embedding_and_initial_rerank_failures_retained": true,
+    "calibration": "Prior visible scores select min_score=0.0001 plus max_chunks_per_document=1.",
+    "scope_limit": "This is an experimental instruct-model logit baseline, not a dedicated publisher reranker, calibrated probability or independent factual judge."
+  },
+  "framework_comparison": {
+    "frameworks": [
+      "Taskloom",
+      "native LangGraph StateGraph1.2.24"
+    ],
+    "cases": 5,
+    "taskloom": {
+      "passed": 2,
+      "failed": 3,
+      "not_run": 0
+    },
+    "langgraph": {
+      "passed": 2,
+      "failed": 3,
+      "not_run": 0
+    },
+    "actual_wire_and_attempts_match": true,
+    "applied_model_tool_grants_limits_approvals_context_match": true,
+    "strictly_comparable_scope": "selected zero-fee arithmetic adapter, uncompressed history only",
+    "other_products": "DeerFlow/agentUniverse native adapters retain their separate qualified differences; no general ranking."
+  },
+  "release_boundary": {
+    "source_only": true,
+    "credentials_databases_raw_logs_weights_or_images_published": false,
+    "maintainer_signing_identity_pending": true,
+    "external_acceptance_open": [
+      "Independent human labels/arbitration and genuinely unseen industry material.",
+      "Real cloud provider/IdP accounts, TLS and subscription/region interoperability.",
+      "Target Kubernetes/multihost/geographical topology and sustained SLO/RPO/RTO.",
+      "Actual maintainer signing identity and package/public-registry release, if chosen."
+    ],
+    "unsupported_extensions_are_not_environment_failures": [
+      "MCP persistent callbacks/OAuth-helper composition and stdio reconnection.",
+      "Private write-tool scheduling, shared browser sessions and automatic JWKS refresh.",
+      "All provider streaming/SigV4, all MIME/Office/OCR formats and automatic source/index sync.",
+      "Automatic cloud failover/routing or inaccessible-source promotion without verified fencing."
+    ]
+  },
+  "private_evidence_digests": [
+    {
+      "path": "target/parity-final-windows-full-20261128-3.log",
+      "bytes": 76602,
+      "sha256": "b8fef91a89dd1c89a3c1b7e3417346d9f901feb7862c83916f3b2ceaee7bc74e",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-windows-minimal-20261128.log",
+      "bytes": 23766,
+      "sha256": "1e80b92b7135fe2648459f621d7163fc338a62e77ee1003f488012097679e6d1",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-windows-clippy-20261128.log",
+      "bytes": 7177,
+      "sha256": "09b87e860e3fbc301e9bbbcf4a6a57283ba40fa94b18c8123a46c2e2f68245be",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-rustdoc-20261128.log",
+      "bytes": 680,
+      "sha256": "e57c8258e0afa86b125db93d952110ef64352e8cfe3d1f1f86ab87d7a22c7c04",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-msrv-20261128.log",
+      "bytes": 135,
+      "sha256": "173196582c4b687dd095679860cd7ed09363360104557d83e60044bbb3af4095",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/linux-final-bundle-v4-20261128/summary.json",
+      "bytes": 2898,
+      "sha256": "8f8321365499313175f53830c676041d8d13de14372f72ab708dadac61456b78",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/rolling-network-final-increment-20261128.json",
+      "bytes": 10400,
+      "sha256": "2bcf86faba98aa7187ad56cbd84c8437721aaa2af0ef36f83c08a3473ece0d7c",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-docker-build-20261128-3.log",
+      "bytes": 14336,
+      "sha256": "76354ad8b2d6317b8871b9e395c8f40486637c18d383ef16bcc238ce83de1ad6",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-compose-20261128-1/report.json",
+      "bytes": 915,
+      "sha256": "1f7fbc22fe36e75b694a6d039a5dfa5d6b5a08c1096f9df45f593409f9267e16",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/managed-dr-final-controls-20261128.json",
+      "bytes": 3813,
+      "sha256": "a7b5d8b1cf2af7fbabcb3f0566af57f3b80e5adecb104a3779beeef949c0d9bd",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/monitoring-live-20261128-4/report.json",
+      "bytes": 3705,
+      "sha256": "adbaee87ec90d0c9ed5953fbaf02e2bf4ab407e3e140b4d38e6b1db8942d0695",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/promtool-container-20261128-1/report.json",
+      "bytes": 1108,
+      "sha256": "c3ed949108ba6e9725df1f73a9f06729375949ea199a5ebef67f0f213a62a880",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/sdk-final-audit-v2-20261128/receipt.json",
+      "bytes": 5335,
+      "sha256": "6dc77f06be57a0b3c3e307ecbb908bc7184f5bf7343c50b8f0a7bc788dde8dd4",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/source-release-preparation-controls-20261128.json",
+      "bytes": 948,
+      "sha256": "20d68c482459f827c2c57e67a92c4c1b57eba3e9f21aa0083154cc0e990ed246",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-source-audit-20261128.json",
+      "bytes": 324,
+      "sha256": "906342ff619deda17849770c59c2500c31a3599ff1ca08854c14fdc608aa0637",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/current-native-parity-20261128-4/campaign.json",
+      "bytes": 1228,
+      "sha256": "4456de5d7fe69e7dc8493455ddff81a47407c0f3bd8fe1d5f7e82189d2de03b9",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/current-native-parity-20261128-4/observed-wire-parity.json",
+      "bytes": 9362,
+      "sha256": "ab413f663d255223244def5f557ba63cdae97fc4d204e3e4a433529586ae163c",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/multilingual-learned-rerank-20261128-3/report.json",
+      "bytes": 2621,
+      "sha256": "30e3ca0b41ad9457ac95b1a360efafd00f9ce37f9264f322451ffa1aec54aa69",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-console-reviewed-browser-20261128.json",
+      "bytes": 1799,
+      "sha256": "5fadfa2f25cee8db268915fc7539c050b0f200751208634eb3f394ee51b99f0c",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/helm-local-20261128/report.json",
+      "bytes": 833,
+      "sha256": "b528f1539d47d63bac1a3db8ada3665239ed33993623dc57554687b6891f9c4c",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/operational-fault-package-20261128.json",
+      "bytes": 2262,
+      "sha256": "6a608e0abe216e3e7b6c1211e6492efc3002533f7548ebb075e491cbf877d1ba",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-feature-boundaries-20261128.log",
+      "bytes": 2530,
+      "sha256": "a1b50c31b72ad1f6b993549711875c2b9f21fa8a39a8e97d98e21b7971cb4741",
+      "raw_material_published": false
+    },
+    {
+      "path": "target/parity-final-fmt-20261128.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "raw_material_published": false
+    }
+  ]
+}

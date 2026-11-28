@@ -1,4 +1,4 @@
-//! Explicitly configured MCP Streamable HTTP tool access (feature `mcp`).
+//! Explicitly configured MCP HTTP/stdio tools and read-only resource access.
 //! Pins protocol negotiation to 2025-06-18 / 2025-03-26, supports JSON and
 //! finite response SSE, and never retries a tools/call or trusts effect hints.
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +13,33 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use super::{RuntimeError, Tool, ToolContext, ToolDefinition, ToolEffect, ToolError};
+
+mod stdio;
+pub use stdio::McpStdioConfig;
+mod interactions;
+pub use interactions::{
+    McpInteractionApproval, McpInteractionEvent, McpInteractionHandler, McpInteractionPolicy,
+    McpInteractionRequest, McpInteractions,
+};
+mod oauth;
+pub use oauth::{McpOAuthAuthorization, McpOAuthClient, McpOAuthConfig, McpOAuthCredential};
+mod resume;
+pub use resume::{McpSsePolicy, McpSseResume};
+#[cfg(feature = "mcp-persistence")]
+mod persistent;
+#[cfg(feature = "mcp-persistence")]
+pub use persistent::{
+    McpPersistentConfig, McpPersistentPolicy, PersistentMcpCall, PersistentMcpClient,
+    PersistentMcpObserved, PersistentMcpSummary, SqlMcpSessionStore,
+};
+
+/// Additive HTTP opt-ins. Tokens/callbacks are host objects, not wire config.
+#[derive(Default)]
+pub struct McpHttpExtensions {
+    pub interactions: Option<McpInteractions>,
+    pub oauth: Option<McpOAuthCredential>,
+    pub resumption: Option<McpSsePolicy>,
+}
 
 const PROTOCOLS: [&str; 2] = ["2025-06-18", "2025-03-26"];
 /// Remote descriptions shown to the model are framed as untrusted and capped.
@@ -71,8 +98,9 @@ pub struct McpClient {
     connection: Arc<Connection>,
     tools: Arc<BTreeMap<String, McpToolInfo>>,
     namespace: String,
+    resources: bool,
 }
-struct Connection {
+struct HttpConnection {
     client: reqwest::Client,
     endpoint: reqwest::Url,
     session: Option<String>,
@@ -80,11 +108,69 @@ struct Connection {
     max_bytes: usize,
     next_id: AtomicU64,
     closed: AtomicBool,
+    timeout: Duration,
+    identity: String,
+    interaction_scope: String,
+    interactions: Option<McpInteractions>,
+    auth_expires: Option<std::time::Instant>,
+    resume: Option<resume::Registry>,
 }
 impl McpClient {
     /// Initializes a session and discovers a bounded tool catalog. This does
     /// not execute advertised tools or register any of them in the runtime.
     pub async fn connect(config: McpHttpConfig) -> Result<Self, RuntimeError> {
+        Self::connect_http(config, McpHttpExtensions::default()).await
+    }
+    /// Explicit host callback opt-in. Wire requests cannot enable this path.
+    pub async fn connect_with_interactions(
+        config: McpHttpConfig,
+        interactions: McpInteractions,
+    ) -> Result<Self, RuntimeError> {
+        Self::connect_http(
+            config,
+            McpHttpExtensions {
+                interactions: Some(interactions),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    /// Explicit OAuth credential handoff, restricted to its pinned resource.
+    pub async fn connect_with_oauth(
+        config: McpHttpConfig,
+        credential: McpOAuthCredential,
+    ) -> Result<Self, RuntimeError> {
+        Self::connect_http(
+            config,
+            McpHttpExtensions {
+                oauth: Some(credential),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    pub async fn connect_with_extensions(
+        config: McpHttpConfig,
+        extensions: McpHttpExtensions,
+    ) -> Result<Self, RuntimeError> {
+        Self::connect_http(config, extensions).await
+    }
+    async fn connect_http(
+        mut config: McpHttpConfig,
+        extensions: McpHttpExtensions,
+    ) -> Result<Self, RuntimeError> {
+        let McpHttpExtensions {
+            interactions,
+            oauth,
+            resumption,
+        } = extensions;
+        let interactions = interactions.map(|host| host.session());
+        if let Some(policy) = &resumption {
+            policy.validate()?;
+        }
+        let auth = oauth
+            .map(|credential| credential.apply(&mut config))
+            .transpose()?;
         let endpoint =
             reqwest::Url::parse(&config.endpoint).map_err(|_| error("invalid endpoint URL"))?;
         if !matches!(endpoint.scheme(), "http" | "https")
@@ -118,6 +204,7 @@ impl McpClient {
             headers.insert(AUTHORIZATION, value);
         }
         let client = reqwest::Client::builder()
+            .retry(reqwest::retry::never())
             .default_headers(headers)
             .timeout(config.timeout)
             .redirect(reqwest::redirect::Policy::none())
@@ -125,7 +212,34 @@ impl McpClient {
             .no_proxy()
             .build()
             .map_err(http_error)?;
-        let mut connection = Connection {
+        let capabilities = interactions
+            .as_ref()
+            .map_or_else(|| json!({}), McpInteractions::capabilities);
+        let mut identity = match &interactions {
+            None => endpoint.as_str().to_owned(),
+            Some(host) => format!(
+                "http-host-interactions-v1:{}",
+                crate::runtime::state::fingerprint(&(endpoint.as_str(), host.identity()))?
+            ),
+        };
+        if let Some((auth_identity, _)) = &auth {
+            identity = format!(
+                "http-oauth-v1:{}",
+                crate::runtime::state::fingerprint(&(&identity, auth_identity))?
+            );
+        }
+        if let Some(policy) = &resumption {
+            identity = format!(
+                "http-explicit-sse-resume-v1:{}",
+                crate::runtime::state::fingerprint(&(&identity, policy))?
+            );
+        }
+        let interaction_scope = crate::runtime::state::fingerprint(&(
+            &identity,
+            &config.namespace,
+            uuid::Uuid::new_v4().simple().to_string(),
+        ))?;
+        let mut connection = HttpConnection {
             client,
             endpoint,
             session: None,
@@ -133,8 +247,18 @@ impl McpClient {
             max_bytes: config.max_response_bytes,
             next_id: AtomicU64::new(1),
             closed: AtomicBool::new(false),
+            timeout: config.timeout,
+            identity,
+            interaction_scope,
+            interactions,
+            auth_expires: auth.map(|(_, expires)| expires),
+            resume: resumption.map(resume::Registry::new).transpose()?,
         };
-        let (initialize,session)=connection.request("initialize",json!({"protocolVersion":PROTOCOLS[0],"capabilities":{},"clientInfo":{"name":"taskloom","version":env!("CARGO_PKG_VERSION")}})).await?;
+        let (initialize,session)=connection.request("initialize",json!({"protocolVersion":PROTOCOLS[0],"capabilities":capabilities,"clientInfo":{"name":"taskloom","version":env!("CARGO_PKG_VERSION")}})).await?;
+        let resources = initialize
+            .get("capabilities")
+            .and_then(|v| v.get("resources"))
+            .is_some_and(Value::is_object);
         let version = initialize
             .get("protocolVersion")
             .and_then(Value::as_str)
@@ -200,16 +324,17 @@ impl McpClient {
             return Err(error("tool catalog pagination limit exceeded"));
         }
         Ok(Self {
-            connection: Arc::new(connection),
+            connection: Arc::new(Connection::Http(Box::new(connection))),
             tools: Arc::new(tools),
             namespace: config.namespace,
+            resources,
         })
     }
     pub fn tools(&self) -> impl Iterator<Item = &McpToolInfo> {
         self.tools.values()
     }
     pub fn protocol_version(&self) -> &str {
-        self.connection.protocol.as_deref().unwrap()
+        self.connection.protocol_version()
     }
     pub fn bind(&self, binding: McpToolBinding) -> Result<McpTool, RuntimeError> {
         let remote = self
@@ -217,7 +342,7 @@ impl McpClient {
             .get(&binding.remote_name)
             .ok_or_else(|| error("remote tool was not discovered"))?;
         let identity = serde_json::to_vec(&(
-            self.connection.endpoint.as_str(),
+            self.connection.identity(),
             &self.namespace,
             &binding.remote_name,
             self.protocol_version(),
@@ -249,31 +374,202 @@ impl McpClient {
     /// Optional explicit session teardown. It never reinitializes or replays
     /// an expired session automatically; rebuild a catalog/binding explicitly.
     pub async fn close(&self) -> Result<(), RuntimeError> {
-        if self.connection.closed.swap(true, Ordering::SeqCst) {
-            return Ok(());
+        self.connection.close().await
+    }
+}
+
+/// Bounded server-authored resource descriptor. URI is data, never a URL grant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct McpResourceInfo {
+    pub uri: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "mimeType", default)]
+    pub mime_type: Option<String>,
+}
+impl McpClient {
+    /// Starts one explicitly configured host subprocess. No shell or inherited environment.
+    pub async fn connect_stdio(config: McpStdioConfig) -> Result<Self, RuntimeError> {
+        let namespace = config.namespace.clone();
+        let (connection, tools, resources) = stdio::connect(config, None).await?;
+        Ok(Self {
+            connection: Arc::new(Connection::Stdio(connection)),
+            tools: Arc::new(tools),
+            namespace,
+            resources,
+        })
+    }
+    pub async fn connect_stdio_with_interactions(
+        config: McpStdioConfig,
+        interactions: McpInteractions,
+    ) -> Result<Self, RuntimeError> {
+        let namespace = config.namespace.clone();
+        let (connection, tools, resources) =
+            stdio::connect(config, Some(interactions.session())).await?;
+        Ok(Self {
+            connection: Arc::new(Connection::Stdio(connection)),
+            tools: Arc::new(tools),
+            namespace,
+            resources,
+        })
+    }
+    /// Bounded, prompt-free local callback audit for this explicit connection.
+    pub fn interaction_audit(&self) -> Result<Vec<McpInteractionEvent>, RuntimeError> {
+        let host = match self.connection.as_ref() {
+            Connection::Http(c) => c.interactions.as_ref(),
+            Connection::Stdio(c) => c.interactions(),
+        };
+        host.map_or_else(|| Ok(Vec::new()), McpInteractions::audit)
+    }
+    /// Returns inactive original calls, including unknown calls without a cursor.
+    /// Only explicit GET resumption is supported; this does not reconcile a
+    /// durable runtime NeedsRecovery record or authorize new tool execution.
+    pub fn pending_resumptions(&self) -> Result<Vec<McpSseResume>, RuntimeError> {
+        match self.connection.as_ref() {
+            Connection::Http(c) => c
+                .resume
+                .as_ref()
+                .map_or_else(|| Ok(Vec::new()), resume::Registry::list),
+            Connection::Stdio(_) => Ok(Vec::new()),
         }
-        if self.connection.session.is_none() {
-            return Ok(());
+    }
+    pub async fn resume_tool_call(&self, handle: &McpSseResume) -> Result<Value, RuntimeError> {
+        match self.connection.as_ref() {
+            Connection::Http(c) => c.resume_call(handle).await,
+            Connection::Stdio(_) => Err(error("stdio does not support SSE resumption")),
         }
-        let response = self
-            .connection
-            .headers(
-                self.connection
-                    .client
-                    .delete(self.connection.endpoint.clone()),
-            )
-            .send()
-            .await
-            .map_err(http_error)?;
-        if response.status().is_success()
-            || response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    }
+    /// Forget local recovery metadata only; never cancels/replays remote work.
+    pub fn discard_resumption(&self, handle: &McpSseResume) -> Result<(), RuntimeError> {
+        match self.connection.as_ref() {
+            Connection::Http(c) => c
+                .resume
+                .as_ref()
+                .ok_or_else(|| error("SSE resumption not enabled"))?
+                .discard(handle),
+            Connection::Stdio(_) => Err(error("stdio does not support SSE resumption")),
+        }
+    }
+    /// Lists at most `maximum` resources, with a maximum of sixteen pages.
+    /// This explicit host read does not grant any model tool or fetch a resource URI.
+    pub async fn list_resources(
+        &self,
+        maximum: usize,
+    ) -> Result<Vec<McpResourceInfo>, RuntimeError> {
+        if !self.resources || !(1..=1024).contains(&maximum) {
+            return Err(error(
+                "resources capability unavailable or invalid catalog limit",
+            ));
+        }
+        let mut resources = Vec::new();
+        let mut identities = BTreeSet::new();
+        let mut cursors = BTreeSet::new();
+        let mut cursor = None;
+        for _ in 0..16 {
+            let params = cursor
+                .as_ref()
+                .map_or_else(|| json!({}), |c| json!({"cursor":c}));
+            let (result, _) = self.connection.request("resources/list", params).await?;
+            let values = result
+                .get("resources")
+                .and_then(Value::as_array)
+                .ok_or_else(|| error("malformed resources/list result"))?;
+            if resources.len().saturating_add(values.len()) > maximum {
+                return Err(error("resource catalog exceeds limit"));
+            }
+            for value in values {
+                let info: McpResourceInfo = serde_json::from_value(value.clone())
+                    .map_err(|_| error("malformed resource descriptor"))?;
+                if info.uri.is_empty()
+                    || info.uri.len() > 4096
+                    || info.name.is_empty()
+                    || info.name.len() > 256
+                    || info.description.len() > 16384
+                    || info.mime_type.as_ref().is_some_and(|m| m.len() > 256)
+                    || !identities.insert(info.uri.clone())
+                {
+                    return Err(error("invalid or duplicate resource descriptor"));
+                }
+                resources.push(info);
+            }
+            cursor = match result.get("nextCursor") {
+                None | Some(Value::Null) => None,
+                Some(Value::String(c)) if !c.is_empty() && c.len() <= 4096 => Some(c.clone()),
+                _ => return Err(error("invalid resource catalog cursor")),
+            };
+            match &cursor {
+                None => return Ok(resources),
+                Some(c) if !cursors.insert(c.clone()) => {
+                    return Err(error("repeated resource catalog cursor"))
+                }
+                _ => {}
+            }
+        }
+        Err(error("resource catalog pagination limit exceeded"))
+    }
+    /// Explicitly reads a URI through this MCP server only. Returned contents
+    /// remain untrusted data; no nested URI is followed or permission inferred.
+    pub async fn read_resource(&self, uri: &str) -> Result<Value, RuntimeError> {
+        if !self.resources
+            || uri.is_empty()
+            || uri.len() > 4096
+            || uri.chars().any(char::is_control)
         {
-            Ok(())
-        } else {
-            Err(error(&format!(
-                "session close returned HTTP {}",
-                response.status().as_u16()
-            )))
+            return Err(error(
+                "resources capability unavailable or invalid resource URI",
+            ));
+        }
+        let (result, _) = self
+            .connection
+            .request("resources/read", json!({"uri":uri}))
+            .await?;
+        let contents = result
+            .get("contents")
+            .and_then(Value::as_array)
+            .ok_or_else(|| error("malformed resources/read result"))?;
+        for item in contents {
+            if item.get("uri").and_then(Value::as_str) != Some(uri)
+                || (item.get("text").and_then(Value::as_str).is_some()
+                    == item.get("blob").and_then(Value::as_str).is_some())
+            {
+                return Err(error("resource content URI or text/blob mismatch"));
+            }
+        }
+        Ok(result)
+    }
+}
+enum Connection {
+    Http(Box<HttpConnection>),
+    Stdio(stdio::StdioConnection),
+}
+impl Connection {
+    fn protocol_version(&self) -> &str {
+        match self {
+            Self::Http(c) => c.protocol.as_deref().unwrap(),
+            Self::Stdio(c) => &c.protocol,
+        }
+    }
+    fn identity(&self) -> &str {
+        match self {
+            Self::Http(c) => &c.identity,
+            Self::Stdio(c) => &c.identity,
+        }
+    }
+    async fn request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<(Value, Option<String>), RuntimeError> {
+        match self {
+            Self::Http(c) => c.request(method, params).await,
+            Self::Stdio(c) => c.request(method, params).await.map(|v| (v, None)),
+        }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        match self {
+            Self::Http(c) => c.close().await,
+            Self::Stdio(c) => c.close().await,
         }
     }
 }
@@ -322,7 +618,87 @@ impl Tool for McpTool {
         })
     }
 }
-impl Connection {
+impl HttpConnection {
+    fn check_auth(&self) -> Result<(), RuntimeError> {
+        if self
+            .auth_expires
+            .is_some_and(|expiry| std::time::Instant::now() >= expiry)
+        {
+            return Err(error(
+                "OAuth access token expired; explicit fresh authorization required",
+            ));
+        }
+        Ok(())
+    }
+    async fn server_request(
+        &self,
+        scope: &str,
+        allowed: bool,
+        message: &Value,
+    ) -> Result<(), RuntimeError> {
+        if !allowed || self.closed.load(Ordering::SeqCst) {
+            return Err(error(
+                "server host interaction outside explicit live tool call",
+            ));
+        }
+        let host = self
+            .interactions
+            .as_ref()
+            .ok_or_else(|| error("server requested host interaction without explicit opt-in"))?;
+        let reply = host
+            .handle(
+                scope,
+                self.protocol
+                    .as_deref()
+                    .ok_or_else(|| error("host interaction before protocol negotiation"))?,
+                message,
+            )
+            .await?;
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(error("session closed before host interaction reply"));
+        }
+        self.check_auth()?;
+        let response = self
+            .headers(self.client.post(self.endpoint.clone()))
+            .json(&reply)
+            .send()
+            .await
+            .map_err(http_error)?;
+        if response.status() != reqwest::StatusCode::ACCEPTED {
+            return Err(error(
+                "host interaction reply was not accepted with HTTP202; no automatic retry",
+            ));
+        }
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return Ok(());
+        }
+        if let Some(registry) = &self.resume {
+            registry.close()?;
+        }
+        if self.session.is_none() {
+            return Ok(());
+        }
+        self.check_auth()?;
+        let response = self
+            .headers(self.client.delete(self.endpoint.clone()))
+            .send()
+            .await
+            .map_err(http_error)?;
+        if response.status().is_success()
+            || response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        {
+            Ok(())
+        } else {
+            Err(error(&format!(
+                "session close returned HTTP {}",
+                response.status().as_u16()
+            )))
+        }
+    }
+
     fn headers(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         let builder = if let Some(session) = &self.session {
             builder.header("Mcp-Session-Id", session)
@@ -340,9 +716,21 @@ impl Connection {
         method: &str,
         params: Value,
     ) -> Result<(Value, Option<String>), RuntimeError> {
+        tokio::time::timeout(self.timeout, self.request_inner(method, params))
+            .await
+            .map_err(|_| {
+                error("HTTP request/host interaction deadline exceeded; no automatic retry")
+            })?
+    }
+    async fn request_inner(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> Result<(Value, Option<String>), RuntimeError> {
         if self.closed.load(Ordering::SeqCst) {
             return Err(error("session is closed"));
         }
+        self.check_auth()?;
         let mut id = self.next_id.load(Ordering::Relaxed);
         loop {
             let next = id
@@ -356,6 +744,22 @@ impl Connection {
                 Err(current) => id = current,
             }
         }
+        let scope = crate::runtime::state::fingerprint(&(
+            &self.interaction_scope,
+            &self.session,
+            &self.protocol,
+            id,
+            method,
+            &params,
+        ))?;
+        let lease = if method == "tools/call" && self.session.is_some() {
+            self.resume
+                .as_ref()
+                .map(|registry| registry.start(id, scope.clone()))
+                .transpose()?
+        } else {
+            None
+        };
         let response = self
             .headers(self.client.post(self.endpoint.clone()))
             .json(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
@@ -405,13 +809,23 @@ impl Connection {
             "application/json" => false,
             _ => return Err(error("unsupported MCP response content type")),
         };
-        let value = read_response(response, sse, self.max_bytes, id).await?;
+        let context = ResponseContext {
+            connection: self,
+            scope,
+            allowed: method == "tools/call",
+            lease: lease.as_ref(),
+        };
+        let value = read_response(response, sse, self.max_bytes, id, &context).await?;
+        validate_response(&value, id, method == "tools/call")?;
         if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
             || value.get("id").and_then(Value::as_u64) != Some(id)
         {
             return Err(error("JSON-RPC response identity mismatch"));
         }
         if value.get("error").is_some() {
+            if let Some(lease) = &lease {
+                lease.complete()?;
+            }
             return Err(error(
                 "server returned a JSON-RPC error; no automatic retry",
             ));
@@ -421,9 +835,114 @@ impl Connection {
             .filter(|v| v.is_object())
             .cloned()
             .ok_or_else(|| error("JSON-RPC response has no object result"))?;
+        if let Some(lease) = lease {
+            lease.complete()?;
+        }
         Ok((result, session))
     }
+    async fn resume_call(&self, handle: &McpSseResume) -> Result<Value, RuntimeError> {
+        if self.closed.load(Ordering::SeqCst) || self.session.is_none() || self.protocol.is_none() {
+            return Err(error(
+                "SSE original live session unavailable; original outcome remains unknown",
+            ));
+        }
+        self.check_auth()?;
+        let lease = self
+            .resume
+            .as_ref()
+            .ok_or_else(|| error("SSE resumption not host enabled"))?
+            .claim(handle)?;
+        tokio::time::timeout(self.timeout, self.resume_inner(handle, &lease))
+            .await
+            .map_err(|_| {
+                error("explicit SSE GET deadline exceeded; no POST retry; outcome remains unknown")
+            })?
+    }
+    async fn resume_inner(
+        &self,
+        handle: &McpSseResume,
+        lease: &resume::Lease,
+    ) -> Result<Value, RuntimeError> {
+        let response = self
+            .headers(self.client.get(self.endpoint.clone()))
+            .header(
+                "Last-Event-ID",
+                handle
+                    .last_event_id()
+                    .ok_or_else(|| error("SSE cursor missing"))?,
+            )
+            .send()
+            .await
+            .map_err(http_error)?;
+        if response.status() != reqwest::StatusCode::OK {
+            return Err(error(
+                "explicit SSE GET refused; original result still unknown; no POST retry",
+            ));
+        }
+        if response
+            .headers()
+            .get("Mcp-Session-Id")
+            .is_some_and(|value| value.to_str().ok() != self.session.as_deref())
+        {
+            return Err(error("SSE GET changed original session identity"));
+        }
+        if response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(';').next())
+            .map(str::trim)
+            != Some("text/event-stream")
+        {
+            return Err(error("explicit SSE GET did not return an event stream"));
+        }
+        let context = ResponseContext {
+            connection: self,
+            scope: handle.request_binding().to_owned(),
+            allowed: true,
+            lease: Some(lease),
+        };
+        let value = read_response(
+            response,
+            true,
+            self.max_bytes,
+            handle.request_id(),
+            &context,
+        )
+        .await?;
+        if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+            || value.get("id").and_then(Value::as_u64) != Some(handle.request_id())
+        {
+            return Err(error(
+                "SSE recovered response identity invalid; original result remains unknown",
+            ));
+        }
+        if value.get("error").is_some() {
+            lease.complete()?;
+            return Err(error(
+                "SSE recovered original JSON-RPC error; no new tools/call POST",
+            ));
+        }
+        let result = value
+            .get("result")
+            .filter(|v| v.is_object())
+            .cloned()
+            .ok_or_else(|| error("SSE recovered response result malformed"))?;
+        if !result.get("content").is_some_and(Value::is_array)
+            || result.get("isError").is_some_and(|v| !v.is_boolean())
+        {
+            return Err(error("SSE recovered tool content/isError malformed"));
+        }
+        lease.complete()?;
+        if result.get("isError").and_then(Value::as_bool) == Some(true) {
+            return Err(error(
+                "SSE recovered tool reported failure; no new tools/call POST",
+            ));
+        }
+        Ok(result)
+    }
     async fn notify(&self, method: &str) -> Result<(), RuntimeError> {
+        self.check_auth()?;
         let response = self
             .headers(self.client.post(self.endpoint.clone()))
             .json(&json!({"jsonrpc":"2.0","method":method}))
@@ -438,11 +957,18 @@ impl Connection {
         Ok(())
     }
 }
+struct ResponseContext<'a> {
+    connection: &'a HttpConnection,
+    scope: String,
+    allowed: bool,
+    lease: Option<&'a resume::Lease>,
+}
 async fn read_response(
     response: reqwest::Response,
     sse: bool,
     max: usize,
     id: u64,
+    context: &ResponseContext<'_>,
 ) -> Result<Value, RuntimeError> {
     if response
         .content_length()
@@ -488,6 +1014,21 @@ async fn read_response(
                 };
                 let event = std::str::from_utf8(&bytes[start..end])
                     .map_err(|_| error("non-UTF-8 SSE response"))?;
+                let event_id = if context.lease.is_some() {
+                    let ids = event
+                        .split(['\n', '\r'])
+                        .filter_map(|line| {
+                            line.strip_prefix("id:")
+                                .map(|id| id.strip_prefix(' ').unwrap_or(id))
+                        })
+                        .collect::<Vec<_>>();
+                    if ids.len() > 1 {
+                        return Err(error("multiple SSE event IDs refused"));
+                    }
+                    ids.first().copied()
+                } else {
+                    None
+                };
                 let data = event
                     .split(['\n', '\r'])
                     .filter_map(|line| {
@@ -497,11 +1038,30 @@ async fn read_response(
                     .collect::<Vec<_>>()
                     .join("\n");
                 if !data.is_empty() {
+                    if let Some(lease) = context.lease {
+                        lease.precheck(event_id)?;
+                    }
                     let value: Value = serde_json::from_str(&data)
                         .map_err(|_| error("malformed SSE JSON-RPC data"))?;
                     if value.get("id").is_some() {
+                        if value.get("method").is_some() {
+                            context
+                                .connection
+                                .server_request(&context.scope, context.allowed, &value)
+                                .await?;
+                            if let Some(lease) = context.lease {
+                                lease.event(event_id)?;
+                            }
+                            start = end + delimiter;
+                            scanned = start;
+                            continue;
+                        }
                         if value.get("id").and_then(Value::as_u64) != Some(id) {
                             return Err(error("SSE JSON-RPC response ID mismatch"));
+                        }
+                        validate_response(&value, id, context.allowed)?;
+                        if let Some(lease) = context.lease {
+                            lease.event(event_id)?;
                         }
                         return Ok(value);
                     }
@@ -510,6 +1070,9 @@ async fn read_response(
                         || !value.get("method").is_some_and(Value::is_string)
                     {
                         return Err(error("invalid SSE notification"));
+                    }
+                    if let Some(lease) = context.lease {
+                        lease.event(event_id)?;
                     }
                 }
                 start = end + delimiter;
@@ -523,6 +1086,37 @@ async fn read_response(
         return Err(error("SSE ended without a complete matching response"));
     }
     serde_json::from_slice(&bytes).map_err(|_| error("malformed JSON-RPC response"))
+}
+/// A cursor only acknowledges a complete valid wire result. In particular an
+/// invalid final tool envelope must retain its previous recoverable event ID.
+fn validate_response(value: &Value, id: u64, tool: bool) -> Result<(), RuntimeError> {
+    if value.get("jsonrpc").and_then(Value::as_str) != Some("2.0")
+        || value.get("id").and_then(Value::as_u64) != Some(id)
+        || value.get("method").is_some()
+    {
+        return Err(error("JSON-RPC response identity/version invalid"));
+    }
+    if let Some(rpc_error) = value.get("error") {
+        if value.get("result").is_some()
+            || !rpc_error.is_object()
+            || rpc_error.get("code").and_then(Value::as_i64).is_none()
+            || !rpc_error.get("message").is_some_and(Value::is_string)
+        {
+            return Err(error("malformed JSON-RPC error/result response"));
+        }
+        return Ok(());
+    }
+    let result = value
+        .get("result")
+        .filter(|v| v.is_object())
+        .ok_or_else(|| error("JSON-RPC response has no object result"))?;
+    if tool
+        && (!result.get("content").is_some_and(Value::is_array)
+            || result.get("isError").is_some_and(|v| !v.is_boolean()))
+    {
+        return Err(error("MCP tool response has malformed content/isError"));
+    }
+    Ok(())
 }
 /// Finds the first SSE event boundary (a blank line) at or after `from`.
 /// Lines may end in CRLF, LF or bare CR. `Ok((end, delimiter))` gives the

@@ -95,7 +95,7 @@ fn parse_turn(value: &Value) -> Result<AssistantTurn, ModelError> {
             .collect::<Result<Vec<_>, ModelError>>()?,
         _ => return Err(ModelError::schema_mismatch("tool_calls must be an array")),
     };
-    if (reason == Some("tool_calls")) != !calls.is_empty() {
+    if (reason == Some("tool_calls")) == calls.is_empty() {
         return Err(ModelError::schema_mismatch(
             "tool calls do not match the finish reason",
         ));

@@ -108,7 +108,7 @@ fn parse_turn(value: &Value) -> Result<AssistantTurn, ModelError> {
             }
         }
     }
-    if (reason == Some("tool_use")) != !turn.tool_calls.is_empty() {
+    if (reason == Some("tool_use")) == turn.tool_calls.is_empty() {
         return Err(ModelError::schema_mismatch(
             "tool calls do not match the stop reason",
         ));

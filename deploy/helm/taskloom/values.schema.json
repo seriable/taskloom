@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "existingSecret",
+    "scope",
+    "model",
+    "queue",
+    "api",
+    "worker"
+  ],
+  "properties": {
+    "existingSecret": {
+      "type": "string",
+      "minLength": 1
+    },
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "queue": {
+      "type": "object",
+      "properties": {
+        "maxOpenJobs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100000
+        },
+        "maxRunning": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256
+        },
+        "expectedPolicyRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "shutdownGraceSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 300
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 5
+    }
+  }
+}

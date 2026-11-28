@@ -1,0 +1,5 @@
+{
+  "max_cost_micros": 1000000,
+  "max_outstanding_attempts": 4,
+  "currency": "USD"
+}

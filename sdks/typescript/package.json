@@ -1,0 +1,12 @@
+{
+  "name": "@taskloom/client",
+  "version": "0.1.0-alpha.1",
+  "private": true,
+  "files": ["index.js", "index.d.ts", "README.md", "LICENSE-MIT", "LICENSE-APACHE"],
+  "type": "module",
+  "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test.mjs", "check": "tsc --noEmit --strict --lib es2022,dom typecheck.ts" },
+  "devDependencies": { "typescript": "5.8.3" },
+  "license": "MIT OR Apache-2.0"
+}

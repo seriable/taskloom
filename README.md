@@ -6,7 +6,7 @@
 
 一个面向 Rust 的类型化 LLM 任务与 Agent 运行时。Taskloom 将模型调用、预算、重试、审批、工具权限、持久化恢复和来源引用放进可审计的执行契约中。
 
-> 当前版本是早期开源预览版。核心运行时和 P0–P2 的约定范围已经实现并完成有限真实环境验收；模型效果、跨领域检索、生产吞吐和生态广度仍有明确边界。请先阅读[当前完成度与限制](docs/readiness.md)和[综合验收记录](docs/acceptance/p0-p2-final-20261128.json)。
+> 当前版本是早期开源预览版。本轮 P0–P2 的代码与本地验收已有[公开摘要](docs/acceptance/framework-parity-local-20261128.json)：Windows 510/Linux 512 项通过，实际容器/数据库/滚动回退/受管灾备分别验收。真实云端、独立人工与未见资料、生产长期 SLO 仍待对应环境；完整范围以[逐项进度与边界](docs/framework-parity-roadmap.md)为准，不能据此宣称全面领先。
 
 ## 快速开始
 
@@ -29,7 +29,8 @@ async fn main() -> Result<(), taskloom::TaskError> {
         std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY is required"),
     );
     let transport = GatewayTransport::new(gateway, provider);
-    let agent = Agent::new(&transport, &Environment::new());
+    let environment = Environment::new();
+    let agent = Agent::new(&transport, &environment);
     let task = PromptTask::new(
         "summary",
         TaskSpec::new("gpt-4o-mini", Protocol::ResilientJson, 0.2, 400),
@@ -72,24 +73,28 @@ taskloom init taskloom.json
 - [检索与研究](docs/knowledge.md) · [长期记忆](docs/long-term-memory.md) · [技能包](docs/skill-packages.md)
 - [MCP 集成](docs/mcp.md) · [应用/API/UI](docs/application.md) · [SQL 存储](docs/sql-storage.md)
 - [P0–P2 开发清单](docs/p0-p2-roadmap.md) · [框架对照](docs/reviews/framework-comparison-20261128.md)
+- 本轮扩展：[原生 Provider](docs/native-providers.md) · [检索与 Rerank](docs/retrieval-extensions.md) · [私有会话](docs/private-sessions.md) · [OIDC 登录](docs/login-service.md) · [部署](docs/production-deployment.md) · [Python/TypeScript SDK](docs/client-sdks.md)
 
 ## 对照结论和边界
 
-Taskloom 在精确审批、宿主权限、预算预留、未知副作用处理、SQL 队列和恢复契约上有明确优势。LangGraph、DeerFlow、agentUniverse、CrewAI 和 LlamaIndex 在模型/数据连接器、MCP 覆盖、模板、Python 生态、托管部署、可视化调试和社区规模上更成熟。
+Taskloom 的重点是精确审批、宿主权限、预算预留、未知副作用处理、SQL 队列和恢复契约。LangGraph、DeerFlow、agentUniverse、CrewAI 和 LlamaIndex 在模型/数据连接器、模板、Python 生态、托管部署、可视化调试和社区规模上更成熟。
 
 现有同模型对照是有限实验：Taskloom 1/3、LangGraph 2/3、agentUniverse PEER 0/1、DeerFlow 0/1。提示、适配器、检索和重试条件不同，不能据此宣称全面领先，也不能把引用匹配当作事实正确性。
 
 当前明确限制包括：
 
-- 语言分词、reranker、Office 文档加载和大规模数据连接器需要扩展；
-- MCP 的 stdio、OAuth discovery、elicitation、sampling、resource fetch、resumable SSE 和分布式会话恢复尚未实现；
-- 多人服务有认证/RBAC，但 UI 仍是单操作员，私有记忆 API 尚未提供；
-- 没有多机故障分区、滚动升级、自动扩缩容和生产 SLO 的完整验收；
+- 已有显式reranker、DOCX/XLSX/PPTX、CSV/JSONL/UTF-8邮件、SQL/对象快照、Qdrant和受限英中OCR；格式子集、费用和来源边界见[检索扩展](docs/retrieval-extensions.md)，不能推导广泛语料效果；
+- MCP 已有stdio/resources、宿主审核回调、固定OAuth/PKCE和显式SSE GET；独立[SQL持久恢复SDK](docs/mcp-durable-recovery.md)只恢复原session，拒绝该模式的callbacks，不自动重POST或核销未知工具效果；
+- 已提供可选多用户工作台、私有记忆/会话和 OIDC/PKCE 本地验证；真实外部 IdP、多副本私有调度仍待验收；
+- 指定旧新二进制的[同schema滚动回退](docs/same-schema-rolling.md)、本地故障与[实际监控](docs/operational-metrics.md)分别有受限演练；真实多机分区、跨schema热升级、自动扩缩容和生产长期SLO仍不能由此推出；
 - 当前是 Rust 核心和本地预览，不等同于成熟的托管控制面、插件注册表或 Python 多包生态。
+
+源码发行的[兼容矩阵](docs/source-compatibility-matrix.md)和[checksum/签名验证准备](docs/source-release-preparation.md)
+单独记录发行边界；离线测试密钥不会作为维护者身份发布。
 
 ## 验证与贡献
 
-当前源码已在 GitHub `main` 发布。Windows 和独立 Linux 全功能回归各为 **371 通过、0 失败、17 忽略**；Rust 1.86、严格 Clippy、rustdoc、数据库/队列/容器和浏览器验收均有单独记录。托管 GitHub Actions 不是源码发布前提。
+本轮完整回归为 Windows **510通过/0失败/31忽略**、Linux **512通过/0失败/31忽略**；两平台最小 feature 各84通过。31个ignored不计通过，真实PostgreSQL/OCR等按独立回执验收。Rust1.86编译、严格Clippy、rustdoc、数据库/队列/容器和浏览器分别验证；[公开摘要](docs/acceptance/framework-parity-local-20261128.json)记录原始证据摘要与边界。托管GitHub Actions不是源码发布前提。
 
 运行测试：
 

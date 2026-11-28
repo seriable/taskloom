@@ -61,6 +61,7 @@ impl Anthropic {
             version: DEFAULT_API_VERSION.to_string(),
             betas: Vec::new(),
             client: reqwest::Client::builder()
+                .retry(reqwest::retry::never())
                 .timeout(Duration::from_secs(600))
                 .build()
                 .unwrap_or_default(),
@@ -184,13 +185,14 @@ impl Anthropic {
                         .pointer("/message/usage/input_tokens")
                         .and_then(Value::as_u64);
                 }
-                "content_block_delta" => {
-                    if data.pointer("/delta/type").and_then(Value::as_str) == Some("text_delta") {
-                        if let Some(text) = data.pointer("/delta/text").and_then(Value::as_str) {
-                            answer.content.push_str(text);
-                            if let Some(on_delta) = streaming.on_delta {
-                                on_delta(text);
-                            }
+                "content_block_delta"
+                    if data.pointer("/delta/type").and_then(Value::as_str)
+                        == Some("text_delta") =>
+                {
+                    if let Some(text) = data.pointer("/delta/text").and_then(Value::as_str) {
+                        answer.content.push_str(text);
+                        if let Some(on_delta) = streaming.on_delta {
+                            on_delta(text);
                         }
                     }
                 }

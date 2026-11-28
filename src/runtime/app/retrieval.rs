@@ -38,6 +38,10 @@ pub struct AppRetrieval {
     pub mode: RetrievalMode,
     pub lexical: LexicalConfig,
     pub embedding: Option<AppEmbedding>,
+    /// Host-fixed external vector target. None preserves legacy identity.
+    #[cfg(feature = "qdrant")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qdrant: Option<rag::QdrantConfig>,
     pub lexical_weight: f64,
     pub semantic_weight: f64,
     /// Explicitly calibrated cosine cutoff; zero preserves positive-only behavior.
@@ -62,6 +66,29 @@ pub struct AppRetrieval {
     pub semantic_min_lexical_terms: usize,
     pub rank_constant: f64,
     pub candidate_k: usize,
+    /// Zero preserves legacy ranking/identity. Otherwise explicitly widen to
+    /// candidate_k and cap final chunks from one document after reranking.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub max_chunks_per_document: usize,
+    /// Explicit local reranking baseline, without paid or hidden HTTP calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rerank: Option<AppLexicalRerank>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_rerank: Option<AppHttpRerank>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppHttpRerank {
+    pub candidates: usize,
+    pub max_candidate_bytes: usize,
+    pub provider: rag::HttpRerankConfig,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppLexicalRerank {
+    pub candidates: usize,
+    pub max_candidate_bytes: usize,
+    pub lexical: LexicalConfig,
 }
 impl Default for AppRetrieval {
     fn default() -> Self {
@@ -69,6 +96,8 @@ impl Default for AppRetrieval {
             mode: RetrievalMode::Lexical,
             lexical: LexicalConfig::default(),
             embedding: None,
+            #[cfg(feature = "qdrant")]
+            qdrant: None,
             lexical_weight: 1.0,
             semantic_weight: 1.0,
             semantic_min_score: 0.0,
@@ -79,6 +108,9 @@ impl Default for AppRetrieval {
             semantic_min_lexical_terms: 0,
             rank_constant: 60.0,
             candidate_k: 20,
+            max_chunks_per_document: 0,
+            rerank: None,
+            http_rerank: None,
         }
     }
 }
@@ -106,7 +138,47 @@ pub struct AppEmbedding {
 }
 impl AppRetrieval {
     pub fn validate(&self) -> Result<(), RuntimeError> {
+        if self.max_chunks_per_document != 0 {
+            rag::PerDocumentRetriever::new(
+                Arc::new(rag::LexicalRetriever),
+                self.max_chunks_per_document,
+                self.candidate_k,
+            )?;
+            if self
+                .rerank
+                .as_ref()
+                .is_some_and(|r| r.candidates < self.candidate_k)
+                || self
+                    .http_rerank
+                    .as_ref()
+                    .is_some_and(|r| r.candidates < self.candidate_k)
+            {
+                return Err(config_error("source diversity candidate_k exceeds explicitly authorized rerank candidate count"));
+            }
+        }
         self.lexical.validate()?;
+        if self.rerank.is_some() && self.http_rerank.is_some() {
+            return Err(config_error(
+                "select one explicit reranker, not multiple implicit passes",
+            ));
+        }
+        if let Some(rerank) = &self.http_rerank {
+            rerank.provider.validate()?;
+            rag::RerankingRetriever::new(
+                Arc::new(rag::LexicalRetriever),
+                Arc::new(rag::LexicalReranker::default()),
+                rerank.candidates,
+                rerank.max_candidate_bytes,
+            )?;
+        }
+        if let Some(rerank) = &self.rerank {
+            rag::RerankingRetriever::new(
+                Arc::new(rag::LexicalRetriever),
+                Arc::new(rag::LexicalReranker::new(rerank.lexical.clone())?),
+                rerank.candidates,
+                rerank.max_candidate_bytes,
+            )?;
+        }
         if self.semantic_min_lexical_terms > 256 {
             return Err(config_error("semantic_min_lexical_terms exceeds256"));
         }
@@ -139,19 +211,42 @@ impl AppRetrieval {
         if let Some(embedding) = &self.embedding {
             embedding.validate()?;
         }
+        #[cfg(feature = "qdrant")]
+        if let Some(target) = &self.qdrant {
+            target.validate()?;
+            if self.embedding.is_none() {
+                return Err(config_error(
+                    "Qdrant requires explicit metered embedding configuration",
+                ));
+            }
+            if self.mode == RetrievalMode::Hybrid
+                && (!self.query_prefix.is_empty() || self.semantic_min_lexical_terms != 0)
+            {
+                return Err(config_error("Qdrant hybrid does not support query_prefix or semantic_min_lexical_terms; these controls cannot be silently ignored"));
+            }
+        }
         Ok(())
     }
 }
 impl AppEmbedding {
     fn validate(&self) -> Result<(), RuntimeError> {
-        if !matches!(self.provider, AppProvider::Openai { .. }) {
+        if !matches!(
+            self.provider,
+            AppProvider::Openai { .. }
+                | AppProvider::Native {
+                    protocol: crate::native_providers::NativeProtocol::Gemini
+                        | crate::native_providers::NativeProtocol::Vertex,
+                    ..
+                }
+        ) {
             return Err(config_error(
-                "embeddings require an explicit OpenAI-compatible provider",
+                "embeddings require an explicit OpenAI-compatible, Gemini or Vertex provider",
             ));
         }
         // Reuse endpoint/key-name validation without initializing any service.
         let cfg = AppConfig {
             provider: self.provider.clone(),
+            model: self.model.clone(),
             ..Default::default()
         };
         cfg.validate_provider()?;
@@ -159,6 +254,12 @@ impl AppEmbedding {
             base_url,
             key_env,
             namespace,
+        }
+        | AppProvider::Native {
+            base_url,
+            key_env,
+            namespace,
+            ..
         } = &self.provider
         {
             if reqwest::Url::parse(base_url)
@@ -405,20 +506,31 @@ impl MeteredEmbedding {
     ) -> Result<Self, RuntimeError> {
         let _ = guard;
         config.validate()?;
-        let AppProvider::Openai {
-            base_url, key_env, ..
-        } = &config.provider
-        else {
-            unreachable!()
-        };
         let client = reqwest::Client::builder()
+            .retry(reqwest::retry::never())
             .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
             .timeout(Duration::from_millis(config.timeout_ms))
             .build()
             .map_err(storage)?;
-        let provider = Arc::new(
-            crate::openai::OpenAiCompatible::new(base_url, secret(key_env)?).with_client(client),
-        );
+        let provider: Arc<dyn crate::Provider> = match &config.provider {
+            AppProvider::Openai {
+                base_url, key_env, ..
+            } => Arc::new(
+                crate::openai::OpenAiCompatible::new(base_url, secret(key_env)?)
+                    .with_client(client),
+            ),
+            AppProvider::Native {
+                protocol,
+                base_url,
+                key_env,
+                ..
+            } => Arc::new(
+                crate::native_providers::NativeProvider::new(*protocol, base_url, secret(key_env)?)
+                    .map_err(|error| config_error(error.detail()))?,
+            ),
+            _ => return Err(config_error("unsupported embedding provider")),
+        };
         Ok(Self {
             config,
             resources,
@@ -430,6 +542,24 @@ impl MeteredEmbedding {
             provider,
         })
     }
+}
+/// Explicit private-memory entry point. Reuses the project's independent,
+/// durable embedding ledger; constructing it resolves credentials, so static
+/// configuration previews and ordinary lexical memory reads must not call it.
+#[cfg(feature = "database")]
+pub(super) fn semantic_embedding(
+    config: &AppConfig,
+    stores: &AppStores,
+) -> Result<Arc<dyn EmbeddingModel>, RuntimeError> {
+    let embedding =
+        config.retrieval.embedding.clone().ok_or_else(|| {
+            config_error("semantic memory requires explicit embedding configuration")
+        })?;
+    Ok(Arc::new(MeteredEmbedding::new(
+        embedding,
+        Resources::new(config, stores)?,
+        None,
+    )?))
 }
 impl EmbeddingModel for MeteredEmbedding {
     fn identity(&self) -> String {
@@ -533,6 +663,188 @@ impl EmbeddingModel for MeteredEmbedding {
 fn root(config: &AppConfig) -> Result<PathBuf, RuntimeError> {
     std::path::absolute(config.state_dir.join("retrieval")).map_err(storage)
 }
+#[cfg(feature = "qdrant")]
+fn qdrant_target(
+    config: &AppConfig,
+    stores: &AppStores,
+) -> Result<rag::QdrantConfig, RuntimeError> {
+    let mut target = config
+        .retrieval
+        .qdrant
+        .clone()
+        .ok_or_else(|| config_error("Qdrant is not configured by the host"))?;
+    target.validate()?;
+    target.namespace = format!(
+        "app-qdrant-v1:{}",
+        fingerprint(&(&target.namespace, stores.identity()))?
+    );
+    Ok(target)
+}
+#[cfg(feature = "qdrant")]
+fn qdrant_journal(
+    config: &AppConfig,
+    target: &rag::QdrantConfig,
+    index: &EmbeddingIndex,
+) -> Result<rag::FileQdrantPublishJournal, RuntimeError> {
+    // No caller-selected journal name. Unknown publication for the same frozen
+    // target/index cannot be bypassed by silently choosing a new directory.
+    rag::FileQdrantPublishJournal::new(
+        root(config)?
+            .join("qdrant")
+            .join(fingerprint(&(target, index))?),
+    )
+}
+#[cfg(feature = "qdrant")]
+struct AppPublicationGuard<'a> {
+    stores: &'a AppStores,
+    resources: Resources,
+    guard: &'a BuildGuard,
+    corpus: String,
+    index: String,
+}
+#[cfg(feature = "qdrant")]
+impl rag::QdrantPublishGuard for AppPublicationGuard<'_> {
+    fn verify(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
+        Box::pin(async move {
+            let latest =
+                self.resources.index().await?.ok_or_else(|| {
+                    config_error("local index disappeared during Qdrant publication")
+                })?;
+            if fingerprint(&latest)? != self.index
+                || fingerprint(&self.stores.corpus.snapshot().await?)? != self.corpus
+            {
+                return Err(RuntimeError::Conflict("corpus/index changed during explicit Qdrant publication; retain original journal".into()));
+            }
+            #[cfg(feature = "database")]
+            if let BuildGuard::Sql(lease) = self.guard {
+                lease.verify_ownership().await?;
+            }
+            #[cfg(not(feature = "database"))]
+            let _ = self.guard;
+            Ok(())
+        })
+    }
+}
+/// Explicit trusted-host publication only. The HTTP Application router exposes
+/// no counterpart, and query/startup never calls this operation.
+#[cfg(feature = "qdrant")]
+pub async fn publish_qdrant_index(
+    config: &AppConfig,
+    expected_revision: u64,
+    expected_retrieval_binding: &str,
+    expected_index_binding: &str,
+) -> Result<Value, RuntimeError> {
+    let stores = AppStores::open(config).await?;
+    let result = publish_qdrant_index_with_stores(
+        config,
+        &stores,
+        expected_revision,
+        expected_retrieval_binding,
+        expected_index_binding,
+    )
+    .await;
+    stores.close().await;
+    result
+}
+#[cfg(feature = "qdrant")]
+pub(super) async fn publish_qdrant_index_with_stores(
+    config: &AppConfig,
+    stores: &AppStores,
+    expected_revision: u64,
+    expected_retrieval_binding: &str,
+    expected_index_binding: &str,
+) -> Result<Value, RuntimeError> {
+    config.validate()?;
+    if fingerprint(&config.retrieval)? != expected_retrieval_binding {
+        return Err(RuntimeError::Conflict(
+            "retrieval configuration changed before Qdrant publication".into(),
+        ));
+    }
+    let target = qdrant_target(config, stores)?;
+    let resources = Resources::new(config, stores)?;
+    let guard = resources.acquire().await?;
+    let index = resources
+        .index()
+        .await?
+        .ok_or_else(|| config_error("build the local metered index before Qdrant publication"))?;
+    let snapshot = stores.corpus.snapshot().await?;
+    if snapshot.revision != expected_revision || fingerprint(&index)? != expected_index_binding {
+        return Err(RuntimeError::Conflict(
+            "corpus revision or exact index binding changed before Qdrant publication".into(),
+        ));
+    }
+    let embedding = config
+        .retrieval
+        .embedding
+        .as_ref()
+        .ok_or_else(|| config_error("explicit embedding configuration required"))?;
+    index.validate(&snapshot, &resources.model_identity(embedding)?)?;
+    if index.document_context != config.retrieval.embedding_document_context {
+        return Err(config_error(
+            "embedding document context changed; rebuild explicitly",
+        ));
+    }
+    let journal = qdrant_journal(config, &target, &index)?;
+    if journal.snapshot().await?.is_some() {
+        return Err(RuntimeError::Conflict("Qdrant publication journal already exists for this exact binding; inspect complete/pending/unknown state, no automatic replay".into()));
+    }
+    let admission = AppPublicationGuard {
+        stores,
+        resources: resources.clone(),
+        guard: &guard,
+        corpus: fingerprint(&snapshot)?,
+        index: fingerprint(&index)?,
+    };
+    let client = rag::QdrantClient::new(target.clone())?;
+    client
+        .publish_guarded(&snapshot, &index, &journal, &admission)
+        .await?;
+    Ok(
+        json!({"corpus_revision":expected_revision,"index_binding":expected_index_binding,"target_binding":target.binding()?,"published_points":index.vectors.len(),"complete":true,"restart_required":true,"billing_boundary":"existing metered embeddings reused; Qdrant service/infrastructure costs are separate from generation and embedding"}),
+    )
+}
+#[cfg(feature = "qdrant")]
+async fn qdrant_status(
+    config: &AppConfig,
+    stores: &AppStores,
+    snapshot: &rag::CorpusSnapshot,
+    index: Option<&EmbeddingIndex>,
+) -> Result<Value, RuntimeError> {
+    let target = qdrant_target(config, stores)?;
+    let Some(index) = index else {
+        return Ok(
+            json!({"ready":false,"state":"local_index_missing","target_binding":target.binding()?}),
+        );
+    };
+    let journal = qdrant_journal(config, &target, index)?;
+    let retained = journal.snapshot().await?;
+    let validation = retained
+        .as_ref()
+        .map(|state| {
+            let embedding = config
+                .retrieval
+                .embedding
+                .as_ref()
+                .ok_or_else(|| config_error("embedding configuration missing"))?;
+            index.validate(
+                snapshot,
+                &Resources::new(config, stores)?.model_identity(embedding)?,
+            )?;
+            if index.document_context != config.retrieval.embedding_document_context {
+                return Err(config_error("embedding document context changed"));
+            }
+            target.validate_publish_snapshot(snapshot, index, state)
+        })
+        .transpose();
+    let (ready, error) = match validation {
+        Ok(Some(_)) => (true, None),
+        Ok(None) => (false, None),
+        Err(error) => (false, Some(error.to_string())),
+    };
+    Ok(
+        json!({"ready":ready,"state":if ready {"complete"} else if retained.is_some() {"incomplete_or_mismatch"} else {"not_published"},"target_binding":target.binding()?,"journal":retained,"error":error,"authority":"cold local exact-plan validation; no credentials, remote request or query admission"}),
+    )
+}
 pub(super) async fn configured(config: &AppConfig) -> Result<Arc<dyn Retriever>, RuntimeError> {
     let stores = AppStores::open(config).await?;
     configured_with_stores(config, &stores).await
@@ -562,17 +874,38 @@ pub(super) async fn configured_with_stores(
         .embedding
         .clone()
         .expect("validated hybrid configuration");
-    let model = Arc::new(MeteredEmbedding::new(cfg, resources, None)?);
     let snapshot = stores.corpus.snapshot().await?;
-    let vector = Arc::new(
-        VectorRetriever::new(index, model, &snapshot)?
-            .with_min_score(config.retrieval.semantic_min_score)?
-            .with_query_prefix(config.retrieval.query_prefix.clone())?
-            .with_lexical_support(
-                config.retrieval.lexical.clone(),
-                config.retrieval.semantic_min_lexical_terms,
-            )?,
-    );
+    index.validate(&snapshot, &resources.model_identity(&cfg)?)?;
+    #[cfg(feature = "qdrant")]
+    let ready_qdrant = if config.retrieval.qdrant.is_some() {
+        let target = qdrant_target(config, stores)?;
+        let journal = qdrant_journal(config, &target, &index)?;
+        let state = journal.snapshot().await?.ok_or_else(|| {
+            config_error(
+                "Qdrant index has not been explicitly published; run host index-publish-qdrant",
+            )
+        })?;
+        let receipt = target.validate_publish_snapshot(&snapshot, &index, &state)?;
+        Some((target, receipt))
+    } else {
+        None
+    };
+    let model = Arc::new(MeteredEmbedding::new(cfg, resources, None)?);
+    #[cfg(feature = "qdrant")]
+    let vector: Arc<dyn Retriever> = if let Some((target, receipt)) = ready_qdrant {
+        Arc::new(rag::QdrantRetriever::new(
+            Arc::new(rag::QdrantClient::new(target)?),
+            &snapshot,
+            Arc::new(index),
+            receipt,
+            model,
+            config.retrieval.semantic_min_score,
+        )?)
+    } else {
+        local_vector(config, index, model, &snapshot)?
+    };
+    #[cfg(not(feature = "qdrant"))]
+    let vector = local_vector(config, index, model, &snapshot)?;
     constrain_identifiers(
         config,
         Arc::new(
@@ -587,14 +920,56 @@ pub(super) async fn configured_with_stores(
         ),
     )
 }
+fn local_vector(
+    config: &AppConfig,
+    index: EmbeddingIndex,
+    model: Arc<dyn EmbeddingModel>,
+    snapshot: &rag::CorpusSnapshot,
+) -> Result<Arc<dyn Retriever>, RuntimeError> {
+    Ok(Arc::new(
+        VectorRetriever::new(index, model, snapshot)?
+            .with_min_score(config.retrieval.semantic_min_score)?
+            .with_query_prefix(config.retrieval.query_prefix.clone())?
+            .with_lexical_support(
+                config.retrieval.lexical.clone(),
+                config.retrieval.semantic_min_lexical_terms,
+            )?,
+    ))
+}
 fn constrain_identifiers(
     config: &AppConfig,
     inner: Arc<dyn Retriever>,
 ) -> Result<Arc<dyn Retriever>, RuntimeError> {
-    if config.retrieval.exact_identifiers {
-        Ok(Arc::new(IdentifierConstrainedRetriever::new(
+    let inner: Arc<dyn Retriever> = if config.retrieval.exact_identifiers {
+        Arc::new(IdentifierConstrainedRetriever::new(
             inner,
             config.retrieval.lexical.metadata_keys.clone(),
+        )?)
+    } else {
+        inner
+    };
+    let inner: Arc<dyn Retriever> = if let Some(rerank) = &config.retrieval.rerank {
+        Arc::new(rag::RerankingRetriever::new(
+            inner,
+            Arc::new(rag::LexicalReranker::new(rerank.lexical.clone())?),
+            rerank.candidates,
+            rerank.max_candidate_bytes,
+        )?)
+    } else if let Some(rerank) = &config.retrieval.http_rerank {
+        Arc::new(rag::RerankingRetriever::new(
+            inner,
+            Arc::new(rag::HttpReranker::new(rerank.provider.clone())?),
+            rerank.candidates,
+            rerank.max_candidate_bytes,
+        )?)
+    } else {
+        inner
+    };
+    if config.retrieval.max_chunks_per_document != 0 {
+        Ok(Arc::new(rag::PerDocumentRetriever::new(
+            inner,
+            config.retrieval.max_chunks_per_document,
+            config.retrieval.candidate_k,
         )?))
     } else {
         Ok(inner)
@@ -705,10 +1080,27 @@ pub(super) async fn index_status_with_stores(
     } else {
         None
     };
-    Ok(
-        json!({"configuration":config.retrieval,"configuration_binding":fingerprint(&config.retrieval)?,
+    // Reading spending must not resolve a credential or instantiate transport.
+    let rerank_spend = if let Some(cfg) = &config.retrieval.http_rerank {
+        let snapshot = rag::FileRerankLedger::new(&cfg.provider.ledger_dir)?
+            .snapshot(&cfg.provider)
+            .await?;
+        Some(json!({"totals":snapshot.totals(),"ledger":snapshot,
+            "authority":"separate host-configured filesystem ledger; not project generation quota"}))
+    } else {
+        None
+    };
+    let output = json!({"configuration":config.retrieval,"configuration_binding":fingerprint(&config.retrieval)?,
         "corpus_revision":snapshot.revision,"index_present":index.is_some(),"index_valid":validity.is_ok(),
         "index_error":validity.err().map(|e| e.to_string()),"index_binding":index.as_ref().map(fingerprint).transpose()?,
-        "embedding_spend":ledger,"billing_boundary":"embedding only; generation and tool-service costs excluded"}),
-    )
+        "embedding_spend":ledger,"rerank_spend":rerank_spend,"billing_boundary":"embedding and reranking have separate ledgers; generation and tool-service costs excluded"});
+    #[cfg(feature = "qdrant")]
+    let output = if config.retrieval.qdrant.is_some() {
+        let mut output = output;
+        output["qdrant"] = qdrant_status(config, stores, &snapshot, index.as_ref()).await?;
+        output
+    } else {
+        output
+    };
+    Ok(output)
 }

@@ -21,6 +21,9 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   queue-control ID REV pause|cancel|abandon ACTOR NOTE   persist a scoped control request\n\
   worker-once NAME | worker NAME     execute one attempt / poll the SQL queue\n\
   serve [127.0.0.1:8080]             API/UI; TASKLOOM_API_TOKEN required\n\
+  service-serve HOST.json            SQL project API behind an explicit TLS proxy\n\
+  service-check HOST.json            cold schema/queue readiness; no model dispatch\n\
+  health-check URL                   loopback /health/live or /health/ready probe\n\
   run ID PROMPT                     create and execute a durable run\n\
   resume ID                         resume a persisted run\n\
   inspect ID | events ID | list      read persisted state without dispatch\n\
@@ -32,6 +35,7 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   diagnostics KIND ID               inspect run/workflow/session trace, no network\n\
   trace-export KIND ID REV_KEY BIND  explicitly export reviewed revisions/destination\n\
   import ID TITLE FILE               import UTF-8 text/Markdown\n\
+  ingest-office PATH ID TITLE FORMAT  bounded local docx/xlsx/pptx import (office feature)\n\
   import-pdf ID TITLE FILE           import PDF using configured pdftotext\n\
   import-web ID TITLE URL            ingest a host-granted webpage\n\
   web-search QUERY                   query configured Brave-compatible search\n\
@@ -45,8 +49,12 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   skill-install FILE.tar REV         install inert bounded USTAR package (no hooks/services)\n\
   skill-inspect PIN.json             inspect an exact content-addressed package\n\
   skill-retire PIN.json REV          retire package; retain content for explicit recovery\n\
+  skill-registry                    inspect explicit signed registry ledger\n\
+  skill-registry-trust TRUST.json REV   advance host trust with exact registry revision\n\
+  skill-registry-install DIR META ARCH REG_REV CAT_REV   signed inert install via configured store\n\
   index-status                      inspect index/config/embedding spending\n\
   index-build REV BINDING            explicit full build/update; may incur embedding charges\n\
+  index-publish-qdrant REV RETRIEVAL_BIND INDEX_BIND  explicit host-only vector publication (qdrant feature)\n\
   benchmark SUITE OUT MAX_MICROS    execute a fresh task-evaluation campaign\n\
 Use API/UI to pause or cancel work owned by the running server.\n";
 pub async fn run(
@@ -71,6 +79,10 @@ pub async fn run(
     } else {
         PathBuf::from("taskloom.json")
     };
+    #[cfg(feature = "database")]
+    if Box::pin(super::host::command(&args)).await? {
+        return Ok(());
+    }
     if args[0] == "init" {
         if args.len() != 2 {
             return Err(HELP.into());
@@ -91,6 +103,9 @@ pub async fn run(
         let proposed = AppConfig::load(&PathBuf::from(&args[1])).await?;
         output(&super::preview_configuration(proposed)?)?;
         return Ok(());
+    }
+    if args[0] == "ingest-office" && !cfg!(feature = "office") {
+        return Err("Office ingestion requires the office feature".into());
     }
     let config = AppConfig::load(&config_path).await?;
     if args[0] == "database-migrate" {
@@ -164,6 +179,90 @@ pub async fn run(
     }
     // Inspection/import do not initialize a model or contact MCP services.
     let stores = super::AppStores::open(&config).await?;
+    if args[0].starts_with("skill-registry") {
+        #[cfg(feature = "skill-registry")]
+        let result = async {
+            use crate::runtime::skills::*;
+            let root = config
+                .skill_registry
+                .as_ref()
+                .ok_or("signed registry ledger is not configured")?;
+            let registry = FileSkillRegistry::new(root.clone())?;
+            match args[0].as_str() {
+                "skill-registry" if args.len() == 1 => output(&registry.snapshot().await?)?,
+                "skill-registry-trust" if args.len() == 3 => {
+                    let trust: SkillRegistryTrust = decision_file(&args[1]).await?;
+                    output(&registry.set_trust(trust, args[2].parse()?).await?)?;
+                }
+                "skill-registry-install" if args.len() == 6 => {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?
+                        .as_secs();
+                    let directory = PathBuf::from(&args[1]);
+                    let directory = if directory.is_absolute() {
+                        directory
+                    } else {
+                        std::env::current_dir()?.join(directory)
+                    };
+                    output(
+                        &registry
+                            .install_from_directory(
+                                &stores.skills,
+                                RegistryInstallRequest {
+                                    directory,
+                                    metadata_file: args[2].clone(),
+                                    archive_file: args[3].clone(),
+                                    expected_registry_revision: args[4].parse()?,
+                                    expected_catalog_revision: args[5].parse()?,
+                                    now_unix: now,
+                                },
+                            )
+                            .await?,
+                    )?;
+                }
+                _ => return Err(HELP.into()),
+            }
+            Ok::<_, Box<dyn std::error::Error>>(())
+        }
+        .await;
+        #[cfg(not(feature = "skill-registry"))]
+        let result: Result<(), Box<dyn std::error::Error>> =
+            Err("signed skill registry commands require skill-registry feature".into());
+        stores.close().await;
+        return result;
+    }
+    #[cfg(feature = "office")]
+    if args[0] == "ingest-office" {
+        let result = async {
+            if args.len() != 5 {
+                return Err(HELP.into());
+            }
+            let loader: Box<dyn DocumentLoader> = match args[4].as_str() {
+                "docx" => Box::new(rag::DocxLoader::default()),
+                "xlsx" => Box::new(rag::XlsxLoader::default()),
+                "pptx" => Box::new(rag::PptxLoader::default()),
+                _ => return Err("Office FORMAT must be docx, xlsx or pptx".into()),
+            };
+            // Freeze the import's original corpus revision before parsing.
+            // Concurrent imports must be inspected/retried explicitly.
+            let revision = stores.corpus.snapshot().await?.revision;
+            let document = loader
+                .load(std::path::Path::new(&args[1]), &args[2], &args[3])
+                .await?;
+            let snapshot = rag::ingest(
+                &stores.corpus,
+                document,
+                &WindowChunker::default(),
+                Some(revision),
+            )
+            .await?;
+            output(&serde_json::json!({"revision":snapshot.revision,"documents":snapshot.documents.len(),"chunks":snapshot.chunks.len(),"format":args[4]}))?;
+            Ok::<_, Box<dyn std::error::Error>>(())
+        }
+        .await;
+        stores.close().await;
+        return result;
+    }
     #[cfg(feature = "database")]
     if matches!(
         args[0].as_str(),
@@ -203,6 +302,9 @@ pub async fn run(
         match args[0].as_str() {
             "skills" if args.len() == 1 => output(&store.catalog().await?)?,
             "skill-install" if args.len() == 3 => {
+                if config.skill_registry.is_some() {
+                    return Err("unsigned installation is disabled by host registry policy; use skill-registry-install".into());
+                }
                 let path = PathBuf::from(&args[1]);
                 let bytes = super::super::store::blocking(move || {
                     use std::io::Read;
@@ -421,6 +523,23 @@ pub async fn run(
             output(&super::retrieval::build_index(&config, args[1].parse()?, &args[2]).await?)?;
             return Ok(());
         }
+        "index-publish-qdrant" if args.len() == 4 => {
+            #[cfg(feature = "qdrant")]
+            {
+                output(
+                    &super::retrieval::publish_qdrant_index(
+                        &config,
+                        args[1].parse()?,
+                        &args[2],
+                        &args[3],
+                    )
+                    .await?,
+                )?;
+                return Ok(());
+            }
+            #[cfg(not(feature = "qdrant"))]
+            return Err("Qdrant publication requires the qdrant feature".into());
+        }
         "import-pdf" if args.len() == 4 => {
             let pdf = rag::PdfLoader::new(
                 config
@@ -469,7 +588,7 @@ pub async fn run(
         }
         _ => {}
     }
-    let app = Application::open(config).await?;
+    let app = Box::pin(Application::open(config)).await?;
     let outcome:Result<(),Box<dyn std::error::Error>>=async {match args[0].as_str() {
         "serve" if args.len() <= 2 => {
             let address = args
@@ -492,7 +611,7 @@ pub async fn run(
             // signalled, so no new job can start during the shutdown grace.
             let (stopped, accepting_stopped) = tokio::sync::oneshot::channel::<()>();
             let server = axum::serve(listener, router).with_graceful_shutdown(async move {
-                let _ = tokio::signal::ctrl_c().await;
+                shutdown_signal().await;
                 let _ = stopped.send(());
             });
             let workers = async {
@@ -518,7 +637,7 @@ pub async fn run(
         #[cfg(feature="database")]
         "worker-once"|"worker" if args.len()==2=>{
             let stop=crate::CancelToken::new();let signal=stop.clone();
-            let handler=tokio::spawn(async move{let _=tokio::signal::ctrl_c().await;signal.cancel();});
+            let handler=tokio::spawn(async move{shutdown_signal().await;signal.cancel();});
             let result=async {
                 loop {
                     let job=app.work_queue_once(&args[1],&stop).await?;
@@ -623,4 +742,19 @@ async fn wait(app: &Application, id: &str) -> Result<(), Box<dyn std::error::Err
         );
     }
     Ok(())
+}
+
+/// Containers send SIGTERM; interactive users normally send Ctrl+C. Both use
+/// the same durable cancellation/drain path rather than an abrupt exit.
+pub(super) async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        if let Ok(mut terminate) =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        {
+            tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = terminate.recv() => {} }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }

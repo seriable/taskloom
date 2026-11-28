@@ -323,6 +323,14 @@ impl<P: Provider> GatewayTransport<P> {
                             detail: format!("{label}: the model refused to answer"),
                         });
                     }
+                    if matches!(
+                        response.finish_reason.as_deref(),
+                        Some("native_invalid" | "native_incomplete")
+                    ) {
+                        return Err(ModelError::schema_mismatch(
+                            "native provider response is unsupported, malformed or incomplete",
+                        ));
+                    }
                     let answer = if json {
                         Answer::Json(decode_json(label, &response)?)
                     } else {
@@ -383,6 +391,17 @@ impl<P: Provider> GatewayTransport<P> {
                             "expected {expected} embeddings, got {}",
                             response.vectors.len()
                         )));
+                    }
+                    let dimensions = response.vectors.first().map_or(0, Vec::len);
+                    if dimensions == 0
+                        || response.vectors.iter().any(|vector| {
+                            vector.len() != dimensions
+                                || vector.iter().any(|value| !value.is_finite())
+                        })
+                    {
+                        return Err(ModelError::schema_mismatch(
+                            "embeddings must be nonempty, finite and dimensionally uniform",
+                        ));
                     }
                     Ok(Embedded {
                         vectors: response.vectors,

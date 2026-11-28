@@ -12,6 +12,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_BUILD_JOBS: 2
+  RUST_TEST_THREADS: 2
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
 

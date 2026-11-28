@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "date": "2026-11-28",
+  "kind": "owned-local-ocr-source-and-provenance-evidence",
+  "base_image": "docker.m.daocloud.io/library/debian@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e",
+  "worker_image": "sha256:b44b47c7c9019f9ddcd0dfbc9a21cfa640ed9953b88fc7b20d1dd659819e7b34",
+  "platform": "linux/amd64",
+  "source_sha256": {
+    "src/runtime/ocr.rs": "a0fc1e02cda7bdbb8269b2976bd8fd282d811027566eb27c9b1ac9bae30a04f4",
+    "sandbox/ocr/Dockerfile": "90fe174eec207437bd3918cf8319d73357761e449f2c89786923edb7ce0e2eea",
+    "sandbox/ocr/supervisor.py": "785e9a8f9c97c7c2b03b6c334e1666d25249df286c411ada411bed2855fc3e96",
+    "tests/agent_ocr.rs": "f724f484dee01bb7e834655d42575745d30e7286393db3d9f54a09fac6655c34",
+    "examples/agent_ocr.rs": "8d5417a4649951f99fbd9a29d108e2d184d73d3d76c507e6591046b5147e9b6d",
+    "examples/ocr/create_fixtures.py": "44ce6e4b1e28adfefc16cdef9db808edb911a96e9225d89a8b8c56d2b5fb0925",
+    "docs/isolated-ocr.md": "d48cc25b5f07764c79a8263e4318ac0cd01ede39d4431dece5da4489c5c42a5a"
+  },
+  "observations": {
+    "english": {
+      "version": 1,
+      "source_image_sha256": "35da9432d803ec6ff20d9edffb4bf6a06d992a6c1181984c87f6cfc858e66d32",
+      "source_image_bytes": 13937,
+      "width": 1200,
+      "height": 240,
+      "worker_image": "sha256:b44b47c7c9019f9ddcd0dfbc9a21cfa640ed9953b88fc7b20d1dd659819e7b34",
+      "platform": "linux/amd64",
+      "language": "simplified_chinese_english",
+      "manifest_sha256": "4198d94618710a8eb0fce3783709c74bd099b05d169deb67a6f6b2647900656d",
+      "tesseract_package": "5.3.0-2",
+      "traineddata_sha256": {
+        "chi_sim": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730",
+        "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+      },
+      "text_sha256": "0f05262c0c84657a4f97742ab782accf0845623d503f5915714cc255b2a21d7d"
+    },
+    "chinese": {
+      "version": 1,
+      "source_image_sha256": "f2e077f80416a74679f7f91a3790b9cd8afe4f82167830b703e0add21236dd65",
+      "source_image_bytes": 14311,
+      "width": 1200,
+      "height": 240,
+      "worker_image": "sha256:b44b47c7c9019f9ddcd0dfbc9a21cfa640ed9953b88fc7b20d1dd659819e7b34",
+      "platform": "linux/amd64",
+      "language": "simplified_chinese_english",
+      "manifest_sha256": "4198d94618710a8eb0fce3783709c74bd099b05d169deb67a6f6b2647900656d",
+      "tesseract_package": "5.3.0-2",
+      "traineddata_sha256": {
+        "chi_sim": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730",
+        "eng": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+      },
+      "text_sha256": "b73afb740e555c6aadfb93f79515eec6984f5a0a7598dd151e3dc2f27a70480b"
+    }
+  },
+  "recognized_fixture_text": {
+    "english": "TASKLOOM OCR 123",
+    "chinese": "任务测试 成功"
+  },
+  "validation": {
+    "owned_integration_tests_passed": 2,
+    "control_and_legacy_sandbox_tests_passed": 4,
+    "strict_clippy": "passed for ocr library/test/host CLI example",
+    "rust_1_86": "passed for ocr library and host CLI example",
+    "owned_container_count_after_tests": 0,
+    "host_cli_document_generated": true,
+    "controls": [
+      "fixed argv and model language",
+      "PNG structural and CRC checks",
+      "SDK pixel-bomb/oversize/truncation rejection",
+      "native damaged-IDAT rejection inside container",
+      "bounded text output",
+      "1ms execution timeout",
+      "open stdin deadline without bytes",
+      "open stdin deadline with partial header",
+      "truncated EOF refusal",
+      "CRC-valid pixel bomb refused inside supervisor",
+      "actual caller cancellation and exact named-container removal"
+    ],
+    "local_logs": [
+      "target/ocr-owned-tests-final-20261128.log",
+      "target/ocr-clippy-final-20261128.log",
+      "target/ocr-msrv-20261128.log",
+      "target/ocr-cli-receipt-20261128.json"
+    ]
+  },
+  "limits": "Synthetic fixtures establish local OCR/protocol/resource controls, not general OCR accuracy, pixel-level citations, VM isolation, or cloud multimodal quality. Generated PNGs/fonts/traineddata/images and full local config remain outside tracked source."
+}

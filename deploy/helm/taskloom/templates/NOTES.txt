@@ -1,0 +1,11 @@
+This chart uses an existing SQL database and existing Kubernetes Secret.
+No cloud/database/model credential or bearer token is created by Helm.
+API: {{ include "taskloom.fullname" . }}:{{ .Values.service.port }} (ClusterIP HTTP).
+Terminate TLS before accepting remote bearer credentials. Health routes expose
+only booleans; tenant APIs retain SQL authentication and role checks.
+
+Before normal admission: stop every old API/worker for this database, back up,
+explicitly migrate, configure generation quota and queue policy, then restart.
+Never use an automatic Helm pre-upgrade migration hook or assume rolling schema
+compatibility. See docs/production-deployment.md. This local template is not a
+production SLO, failover or autoscaling-throughput acceptance report.

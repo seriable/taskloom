@@ -142,6 +142,92 @@ async fn build(config: &AppConfig) -> Result<Value, RuntimeError> {
     )
     .await
 }
+
+#[tokio::test]
+async fn native_embedding_index_reserves_before_dispatch_and_retains_unknown_usage() {
+    use taskloom::native_providers::NativeProtocol;
+    for protocol in [NativeProtocol::Gemini, NativeProtocol::Vertex] {
+        let (_dir, mut cfg, old_calls, old_server) = setup(None, false).await;
+        old_server.abort();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let state_root = cfg.state_dir.clone();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let server = tokio::spawn(async move {
+            let endpoint = move |Json(body): Json<Value>| {
+                let root = state_root.clone();
+                let observed = observed.clone();
+                async move {
+                    let ledger: Value = serde_json::from_slice(
+                        &std::fs::read(root.join("retrieval/spend.json")).unwrap(),
+                    )
+                    .unwrap();
+                    assert_eq!(ledger["requests"], 1);
+                    assert_eq!(ledger["reserved_or_unknown_micros"], 10);
+                    observed.fetch_add(1, Ordering::SeqCst);
+                    if protocol == NativeProtocol::Gemini {
+                        assert_eq!(body["requests"][0]["model"], "models/fixture-embedding");
+                        // Gemini may return no usage. The durable ceiling stays held.
+                        Json(json!({"embeddings":[{"values":[1.0,0.5]}]}))
+                    } else {
+                        assert_eq!(body["parameters"]["autoTruncate"], false);
+                        Json(
+                            json!({"predictions":[{"embeddings":{"values":[1.0,0.5],"statistics":{"token_count":3,"truncated":false}}}]}),
+                        )
+                    }
+                }
+            };
+            let action = if protocol == NativeProtocol::Gemini {
+                "batchEmbedContents"
+            } else {
+                "predict"
+            };
+            axum::serve(
+                listener,
+                Router::new().route(
+                    &format!("/v1/models/fixture-embedding:{action}"),
+                    post(endpoint),
+                ),
+            )
+            .await
+            .unwrap();
+        });
+        let embedding = cfg.retrieval.embedding.as_mut().unwrap();
+        let AppProvider::Openai {
+            key_env, namespace, ..
+        } = embedding.provider.clone()
+        else {
+            unreachable!()
+        };
+        embedding.provider = AppProvider::Native {
+            protocol,
+            base_url,
+            key_env: key_env.clone(),
+            namespace,
+        };
+        cfg.retrieval.validate().unwrap();
+        let before = retrieval::index_status(&cfg).await.unwrap();
+        assert_eq!(before["embedding_spend"]["requests"], 0);
+        build(&cfg).await.unwrap();
+        std::env::remove_var(&key_env);
+        let status = retrieval::index_status(&cfg).await.unwrap();
+        assert_eq!(status["index_valid"], true);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(old_calls.load(Ordering::SeqCst), 0);
+        let expected = if protocol == NativeProtocol::Gemini {
+            (0, 10)
+        } else {
+            (3, 0)
+        };
+        assert_eq!(status["embedding_spend"]["settled_micros"], expected.0);
+        assert_eq!(
+            status["embedding_spend"]["reserved_or_unknown_micros"],
+            expected.1
+        );
+        server.abort();
+    }
+}
 async fn host(config: AppConfig) -> (Arc<Application>, String, tokio::task::JoinHandle<()>) {
     let app = Application::open(config).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
