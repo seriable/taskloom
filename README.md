@@ -49,8 +49,10 @@ knowledge and reviewed-memory state in SQLite/PostgreSQL. The separate
 roles and live token revocation; its project Applications still use file
 journals by default or explicitly configured [SQL Application stores](docs/sql-application.md).
 SQL-backed [project generation quotas](docs/generation-quota.md) reserve cost
-and outstanding attempts transactionally across processes. Durable queues/workers and broader quality acceptance
-remain tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
+and outstanding attempts transactionally across processes. Explicit
+[durable queues and workers](docs/durable-queue.md) retain approval/recovery
+occupancy and fence abandoned processes. Broader quality acceptance remains
+tracked in the current [P0–P2 checklist](docs/p0-p2-roadmap.md).
 The follow-up [preview delivery checklist](docs/preview-delivery-roadmap.md)
 tracks actual task evaluation, release delivery and the next application/tool
 increments. [Task benchmarks](docs/task-benchmarks.md) provide versioned outcome

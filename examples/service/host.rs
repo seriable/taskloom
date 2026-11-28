@@ -1,6 +1,6 @@
 //! Explicit local identity administration / project-scoped JSON service.
-//! Supports explicit SQL Applications and trusted quota administration; durable
-//! queue/worker scheduling remains a separate increment.
+//! Supports explicit SQL Applications, queue admission and trusted quota
+//! administration; execute queued work through separate taskloom worker processes.
 use serde::Deserialize;
 use std::{
     path::{Path, PathBuf},

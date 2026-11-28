@@ -14,6 +14,12 @@ const HELP: &str = "taskloom [--config FILE] COMMAND\n\
   init FILE                         write offline configuration (create only)\n\
   config-check FILE                 review proposed configuration without services/secrets\n\
   database-migrate                  explicitly migrate configured SQL schema/dataset identity\n\
+  queue | queue-inspect ID           cold SQL queue policy/list or job inspection\n\
+  queue-configure LIMITS_OR_NULL.json REV ACTOR NOTE   explicit local queue administration\n\
+  queue-submit TASK.json ACTOR       persist a task for a separate worker\n\
+  queue-resume ID REV ACTOR NOTE     explicitly resume an inactive queue job\n\
+  queue-control ID REV pause|cancel|abandon ACTOR NOTE   persist a scoped control request\n\
+  worker-once NAME | worker NAME     execute one attempt / poll the SQL queue\n\
   serve [127.0.0.1:8080]             API/UI; TASKLOOM_API_TOKEN required\n\
   run ID PROMPT                     create and execute a durable run\n\
   resume ID                         resume a persisted run\n\
@@ -158,6 +164,37 @@ pub async fn run(
     }
     // Inspection/import do not initialize a model or contact MCP services.
     let stores = super::AppStores::open(&config).await?;
+    #[cfg(feature = "database")]
+    if matches!(
+        args[0].as_str(),
+        "queue" | "queue-inspect" | "queue-resume" | "queue-control"
+    ) {
+        use crate::runtime::database::QueueControl;
+        let (db, ns) = stores
+            .sql
+            .as_ref()
+            .ok_or("queue requires explicit SQL storage")?;
+        let queue = db.queue(ns.clone());
+        let result=async {
+            match args[0].as_str() {
+                "queue" if args.len()==1=>output(&serde_json::json!({"policy":queue.policy().await?,"jobs":queue.list().await?,"limit":1000}))?,
+                "queue-inspect" if args.len()==2=>output(&serde_json::json!({"job":queue.inspect(&args[1]).await?,"runtime_bindings":queue.bindings(&args[1]).await?}))?,
+                "queue-resume" if args.len()==5=>{
+                    let saved=queue.inspect(&args[1]).await?.ok_or("queue job does not exist")?;
+                    output(&queue.resume(&args[1],args[2].parse()?,&saved.host_binding,&args[3],&args[4]).await?)?;
+                }
+                "queue-control" if args.len()==6=>{
+                    if args[3]=="abandon"{output(&queue.abandon(&args[1],args[2].parse()?,&args[4],&args[5]).await?)?;return Ok(());}
+                    let control=match args[3].as_str(){"pause"=>QueueControl::Pause{actor:args[4].clone(),note:args[5].clone()},"cancel"=>QueueControl::Cancel{actor:args[4].clone(),note:args[5].clone()},_=>return Err(HELP.into())};
+                    output(&queue.control(&args[1],args[2].parse()?,control).await?)?;
+                }
+                _=>return Err(HELP.into()),
+            }
+            Ok::<_,Box<dyn std::error::Error>>(())
+        }.await;
+        stores.close().await;
+        return result;
+    }
     let runs = stores.runs.clone();
     let corpus = stores.corpus.clone();
     if args[0] == "skills" || args[0].starts_with("skill-") {
@@ -467,6 +504,31 @@ pub async fn run(
             let (served, stopped) = tokio::join!(server, workers);
             served?;
             stopped?;
+        }
+        #[cfg(feature="database")]
+        "queue-configure" if args.len()==5=>{
+            let limits:Option<crate::runtime::database::QueueLimits>=decision_file(&args[1]).await?;
+            output(&app.configure_queue(limits,args[2].parse()?,&args[3],&args[4]).await?)?;
+        }
+        #[cfg(feature="database")]
+        "queue-submit" if args.len()==3=>{
+            let task:super::queue::QueuedTask=decision_file(&args[1]).await?;
+            output(&app.enqueue_task(task,&args[2]).await?)?;
+        }
+        #[cfg(feature="database")]
+        "worker-once"|"worker" if args.len()==2=>{
+            let stop=crate::CancelToken::new();let signal=stop.clone();
+            let handler=tokio::spawn(async move{let _=tokio::signal::ctrl_c().await;signal.cancel();});
+            let result=async {
+                loop {
+                    let job=app.work_queue_once(&args[1],&stop).await?;
+                    if job.is_some()||args[0]=="worker-once"{output(&job).map_err(super::super::store::storage)?;}
+                    if args[0]=="worker-once"||stop.is_cancelled(){break;}
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Ok::<_,RuntimeError>(())
+            }.await;
+            handler.abort();result?;
         }
         "run" if args.len() == 3 => {
             app.start(&args[1], &args[2]).await?;

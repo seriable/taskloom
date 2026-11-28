@@ -6,8 +6,10 @@ empty and the supported Rust version remains 1.86. The later
 [SQL Application integration](sql-application.md) explicitly selects these stores
 for the API/CLI/UI, skills and embedding state. [SQL identities](multi-user-service.md)
 protect a separate project-scoped service. [Generation quotas](generation-quota.md)
-now use transactional project admission. A durable queue and
-distributed workers remain unfinished, so the full P2.2 package remains open.
+now use transactional project admission. Explicit
+[durable queues and workers](durable-queue.md) add fenced cross-process
+execution/control, migration and bounded load evidence. P0 quality gates remain
+separate from these persistence/service controls.
 
 ## Explicit setup
 
@@ -45,15 +47,15 @@ out of the source repository.
 
 ## Transactions, ownership and limits
 
-Schema version 2 contains `taskloom_meta`, `taskloom_records` and
-`taskloom_leases`. Versioned JSON TEXT envelopes bind the namespace, record
+Schema version 3 contains `taskloom_meta`, `taskloom_records`,
+`taskloom_leases`, `taskloom_jobs` and `taskloom_job_bindings`. Versioned JSON TEXT envelopes bind the namespace, record
 family and object ID. Checkpoints and budget generations advance monotonically;
 equal revisions require identical content. Trace parent bindings are immutable.
 Session updates use append-only compare-and-swap. Large integers and decimal
 values retain the runtime's existing JSON semantics.
 
-V1→v2 migration is explicit and requires stopping old hosts with no live leases.
-The version barrier fences binaries that do not participate in quota admission;
+V1/v2→v3 migration is explicit and requires stopping old hosts with no live leases.
+The version barrier fences binaries without quota/queue admission;
 dataset identity and version-1 JSON envelopes/checkpoints are preserved. See
 [quota migration](generation-quota.md#schema-v2-migration). All SQL models now
 require known priced ceilings even when no individual run cap is configured.
@@ -186,4 +188,5 @@ authenticated multi-user isolation. See
 `acceptance/p2-sql-knowledge-20261128.json`. At that increment all P2.2 boxes
 remained open. The later `sql-application.md` accepts the bounded persistence
 integration, and `generation-quota.md` accepts bounded project generation
-admission. Queue/workers and operational/load gates stay open.
+admission. `durable-queue.md` adds independently verified queue/worker,
+cross-process control, migration/backup and finite local load behavior.

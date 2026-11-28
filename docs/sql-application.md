@@ -117,12 +117,12 @@ so refused dependencies/CAS do not leave orphan package objects.
 
 ## Migration and SDK changes
 
-`database-migrate` explicitly creates/validates schema v2 and its persistent
-dataset UUID. Schema-v1 databases must stop all old hosts and have no live
+`database-migrate` explicitly creates/validates schema v3 and its persistent
+dataset UUID. Schema-v1/v2 databases must stop all old hosts and have no live
 leases before explicit upgrade. Existing dataset UUIDs and journals are not
 rewritten; old SDK-only databases without an identity gain one. The version
 barrier also fences binaries without [project quota](generation-quota.md)
-admission. All SQL model adapters require known prices and conservative ceilings,
+or [queue ownership](durable-queue.md). All SQL model adapters require known prices and conservative ceilings,
 including runs without a private cost cap. Unknown
 schema versions or invalid existing identity records are refused. Merely opening
 an Application never applies DDL or generates a missing identity.
@@ -207,8 +207,9 @@ excluded, and generation/embedding evidence remains separate from HTTP fixtures.
 
 This accepts SQL application persistence within its stated bounded scope. It
 does not finish P2. The later [generation quota](generation-quota.md) increment
-adds transactionally shared spending/outstanding caps. Queue/worker
-dispatch, cross-process control/recovery and service load/deployment acceptance
-remain open. The multi-user router still shares project histories and disables
+adds transactionally shared spending/outstanding caps. The subsequent
+[queue/worker increment](durable-queue.md) adds explicit distributed activity,
+cross-process control/recovery and bounded service load/migration/backup evidence.
+The multi-user router still shares project histories and disables
 private memory endpoints; it does not become a private conversation service.
 Current `max_active_runs` is local process capacity, not a global service quota.

@@ -7,6 +7,8 @@ mod memory;
 pub mod multiuser;
 mod orchestration;
 mod planning;
+#[cfg(feature = "database")]
+pub mod queue;
 pub mod retrieval;
 mod service;
 mod skills;

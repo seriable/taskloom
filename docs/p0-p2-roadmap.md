@@ -409,14 +409,46 @@ See `generation-quota.md` and
 
 - [x] SQLite and PostgreSQL transactional backends for required persistent state
   with versioning, migration, CAS, budget journals and ownership semantics.
-- [ ] Authenticated users/roles, tenant/project isolation and scoped quotas.
-- [ ] Durable task queue, cross-process workers, lease renewal/fencing and
+- [x] Authenticated users/roles, tenant/project isolation and scoped quotas.
+- [x] Durable task queue, cross-process workers, lease renewal/fencing and
   recovery after worker death. Lost ownership stops new dispatch; external
   effects do not acquire an invented exactly-once guarantee.
-- [ ] Concurrent-worker, stale-owner, isolation, approval, cancellation,
+- [x] Concurrent-worker, stale-owner, isolation, approval, cancellation,
   uncertain-effect and restart tests, including real PostgreSQL acceptance.
-- [ ] A reproducible bounded-load report, operational backup/restore and
+- [x] A reproducible bounded-load report, operational backup/restore and
   deployment/migration documentation.
+
+Later 2026-11-28 durable-queue increment: schema v3 adds immutable project task
+inputs, transactional admission/claims, renewable cross-process leases and
+queue-bound runtime fencing. Both databases passed seventeen actual native
+Qwen3-4B lifecycle controls: eight API requests per backend, seven reported
+usages and one unknown cancelled response, exact approval, actual process
+death during an fsynced MCP append, no replay and labelled observed operator
+reconciliation. Separate workers also completed two session turns and
+overlapped role lifecycles. This does not establish simultaneous GPU inference,
+long-task quality or production throughput.
+
+A separate four-worker/four-producer finite offline load passed fourteen
+controls per backend, completing 48 healthy jobs and one explicitly resumed
+post-service-restart job. One additional job was never dispatched and its
+scheduling was explicitly abandoned without model/MCP credentials. Persisted
+event intervals respected four running and 24 open jobs; polling peaks are
+reported separately. All 49 fixture generation attempts settled, with no
+unknown usage or external API charges. These are fixture service measurements,
+not native model latency or an unlimited scalability claim.
+
+Cold SQLite/PostgreSQL queue backup/restore passed three controls, retaining
+runtime associations, all seven native runs and the unknown cancelled attempt.
+Actual retained v1 migration passed four controls; retained v2 migration passed
+ten, including real old-binary schema rejection and an actual old-process lease
+blocking upgrade until expiry. This is a quiescent upgrade, not rolling-upgrade
+or old-binary native dispatch acceptance. The later cold abandonment and
+inspection/error-handling additions have SQL/fixture/CLI evidence separately
+from the earlier native campaign. Failed MCP teardown, contended short-TTL and
+archived-build-cache probes remain visible. See `durable-queue.md` and
+`acceptance/p2-durable-queue-20261128.json` for final checks and limitations.
+These close the documented bounded P2 service scope; P0 complex/long/PEER,
+semantic/factual and retrieval-quality requirements still keep the Goal open.
 
 ## Delivery gates and order
 

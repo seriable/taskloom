@@ -1,4 +1,4 @@
-"""Upgrade copies of retained real schema-v1 native databases to v2.
+"""Upgrade copies of retained real schema-v1/v2 native databases to v3.
 
 Source files remain untouched. Requires an explicitly owned local PostgreSQL
 fixture and a previous native v1 dump; no model credentials or API calls.
@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import sqlite3
 import subprocess
+import time
 from urllib.parse import quote, urlsplit, urlunsplit
 import uuid
 
@@ -43,6 +44,9 @@ def main():
     p.add_argument('--postgres-fixture', type=Path, required=True)
     p.add_argument('--native-campaign', type=Path, required=True, help='matching passing SQL native campaign with per-backend app.json scope')
     p.add_argument('--admin', type=Path, required=True)
+    p.add_argument('--source-version',type=int,choices=[1,2],default=1)
+    p.add_argument('--old-probe',type=Path,help='optional retained v2 inspector; source-version 2 only')
+    p.add_argument('--old-owner',type=Path,help='optional v2 SDK lease-only process; source-version 2 only')
     a = p.parse_args()
     campaign = json.loads((a.native_campaign / 'report.json').read_text(encoding='utf-8'))
     if not campaign['completed'] or campaign['status'] != 'passed':
@@ -58,7 +62,7 @@ def main():
         raise ValueError('owned database identity changed')
     url = json.loads((a.postgres_fixture / 'credentials.json').read_text())['TASKLOOM_TEST_POSTGRES_URL']
     report = {'version': 1, 'completed': False, 'checks': {}, 'failures': [], 'cases': [],
-              'scope': 'actual retained native schema-v1 SQLite/PostgreSQL copies, v2 migration and first quota import',
+              'scope': f'actual retained native schema-v{a.source_version} SQLite/PostgreSQL copies, v3 migration and quota import/preservation',
               'model_api_calls': False, 'admin_binary': digest(a.admin),
               'v1_inputs': {'sqlite': digest(a.sqlite_v1), 'postgres_dump': digest(a.postgres_v1_dump)},
               'limits': ['Copies only; original acceptance databases/dumps remain untouched.',
@@ -69,8 +73,8 @@ def main():
         destination = root / 'migrated.sqlite'
         destination.open('xb').close()
         with sqlite3.connect(source.as_uri() + '?mode=ro', uri=True) as old, sqlite3.connect(destination) as new:
-            if old.execute('SELECT version FROM taskloom_meta').fetchone()[0] != 1:
-                raise ValueError('retained SQLite input must be schema v1')
+            if old.execute('SELECT version FROM taskloom_meta').fetchone()[0] != a.source_version:
+                raise ValueError('retained SQLite input schema differs from requested source version')
             if old.execute("SELECT count(*) FROM taskloom_leases WHERE expires_ms>CAST((julianday('now')-2440587.5)*86400000 AS BIGINT)").fetchone()[0]:
                 raise ValueError('retained SQLite has live owners')
             old.backup(new)
@@ -96,14 +100,41 @@ def main():
             env = dict(os.environ, TASKLOOM_DATABASE_URL=database)
             before = snapshot(backend)
             save(root / (backend + '-before.json'), before)
-            if before['version'] != 1:
-                raise ValueError('retained PostgreSQL input must be schema v1')
+            if before['version'] != a.source_version:
+                raise ValueError('retained input schema differs from requested source version')
+            probe=None;lease_owner=None;owner_log=None
+            if a.old_probe:
+                if a.source_version!=2:raise ValueError('old v2 binary controls require actual schema-v2 input')
+                probe=[str(a.old_probe.resolve()),'inspect','legacy-cold-probe','unseen']
+                if subprocess.run(probe,env=env,capture_output=True,timeout=30).returncode:raise RuntimeError('old v2 binary could not inspect the actual retained v2 copy')
+                report['checks'][backend+'_old_v2_binary_read_before_upgrade']=True
+                report['old_probe_binary']=digest(a.old_probe)
+            if a.old_owner:
+                if a.source_version!=2:raise ValueError('old v2 owner requires actual schema-v2 input')
+                owner_log=(root/(backend+'-old-owner.log')).open('wb')
+                lease_owner=subprocess.Popen([str(a.old_owner.resolve())],env=env,stdout=owner_log,stderr=owner_log,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                try:
+                    for _ in range(100):
+                        if b'old-v2-owner-ready' in (root/(backend+'-old-owner.log')).read_bytes():break
+                        if lease_owner.poll() is not None:raise RuntimeError('old v2 SDK lease process exited')
+                        time.sleep(0.05)
+                    else:raise RuntimeError('old v2 owner readiness deadline')
+                    refusal=subprocess.run([str(a.admin.resolve()),'migrate'],env=env,capture_output=True,timeout=30)
+                    report['checks'][backend+'_actual_old_v2_live_owner_blocks_upgrade']=refusal.returncode!=0 and b'quiescent' in refusal.stderr
+                finally:
+                    if lease_owner.poll() is None:lease_owner.kill();lease_owner.wait(timeout=10)
+                    owner_log.close()
+                report['old_owner_binary']=digest(a.old_owner)
+                time.sleep(10.2)
             result = subprocess.run([str(a.admin.resolve()), 'migrate'], env=env, capture_output=True, timeout=30)
             if result.returncode:
                 raise RuntimeError('copied native v1 migration failed')
             after = snapshot(backend)
             save(root / (backend + '-after.json'), after)
-            report['checks'][backend + '_v2_barrier_preserves_every_existing_record'] = after['version'] == 2 and before['records'] == after['records']
+            report['checks'][backend + '_v3_barrier_preserves_every_existing_record'] = after['version'] == 3 and before['records'] == after['records']
+            if probe:
+                refused=subprocess.run(probe,env=env,capture_output=True,timeout=30)
+                report['checks'][backend+'_old_v2_binary_refuses_upgraded_schema']=refused.returncode!=0 and b'database schema' in refused.stderr
             config = json.loads((a.native_campaign / backend / 'app.json').read_text(encoding='utf-8'))
             if not config.get('prices') or any(price['input_per_million'] or price['output_per_million'] for price in config['prices']):
                 raise ValueError('retained native scope requires explicit zero-priced model configuration')
@@ -111,7 +142,8 @@ def main():
             policy = root / (backend + '-policy.json')
             save(policy, {'currency': 'USD', 'max_cost_micros': expected['committed_micros'] + expected['in_flight_micros'],
                           'max_outstanding_attempts': expected['in_flight_attempts'] + expected['uncertain_attempts']})
-            result = subprocess.run([str(a.admin.resolve()), 'quota-set', *scope, str(policy), '0', 'migration-operator', 'import retained actual native zero-priced USD accounting without raising capacity'], env=env, capture_output=True, timeout=30)
+            command=[str(a.admin.resolve()),'quota-get',*scope] if a.source_version==2 else [str(a.admin.resolve()), 'quota-set', *scope, str(policy), '0', 'migration-operator', 'import retained actual native zero-priced USD accounting without raising capacity']
+            result = subprocess.run(command, env=env, capture_output=True, timeout=30)
             if result.returncode:
                 raise RuntimeError('first quota import from retained native v1 failed')
             imported = json.loads(result.stdout)

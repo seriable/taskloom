@@ -1,10 +1,11 @@
 //! Opt-in SQLite/PostgreSQL runtime journals with namespace-bound keys and
-//! renewable, database-clock leases. This SDK module does not authenticate an
-//! HTTP caller or install a task queue. The optional app selects these stores
-//! only through explicit database configuration and migration.
+//! renewable, database-clock leases and explicit project queues. This SDK does
+//! not authenticate an HTTP caller. The optional app selects these stores and
+//! separate workers through explicit host configuration and migration.
 mod identity;
 mod knowledge;
 mod objects;
+mod queue;
 mod quota;
 mod skills;
 pub use identity::{
@@ -13,6 +14,10 @@ pub use identity::{
 };
 pub use knowledge::{SqlCorpusStore, SqlMemoryStore};
 pub use objects::{SqlObjectLease, SqlObjectStore};
+pub use queue::{
+    QueueControl, QueueEvent, QueueJob, QueueLimits, QueuePolicy, QueueRuntimeBinding, QueueState,
+    SqlQueueLease, SqlQueueStore,
+};
 pub use quota::{
     GenerationQuota, GenerationQuotaEvent, GenerationQuotaSnapshot, GenerationQuotaUsage,
     SqlGenerationQuotaStore,
@@ -38,8 +43,8 @@ use super::{
     BudgetSnapshot, RunLease, RunState, RunStore, RuntimeError, Session, SessionStore,
 };
 
-/// V2 fences binaries that do not participate in project quota admission.
-pub const DATABASE_SCHEMA_VERSION: i64 = 2;
+/// V3 adds durable queue indexes and fences binaries without queue ownership.
+pub const DATABASE_SCHEMA_VERSION: i64 = 3;
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -252,12 +257,12 @@ impl SqlDatabase {
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(database_error)?;
-        if version != 1 && version != DATABASE_SCHEMA_VERSION {
+        if !(1..=DATABASE_SCHEMA_VERSION).contains(&version) {
             return Err(config("unsupported database schema; migration refused"));
         }
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_records (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,revision BIGINT NOT NULL CHECK(revision>=0),body TEXT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
         sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_leases (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,owner TEXT NOT NULL,epoch BIGINT NOT NULL CHECK(epoch>0),expires_ms BIGINT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
-        if version == 1 {
+        if version < DATABASE_SCHEMA_VERSION {
             // Quiesce old hosts before upgrading. The table lock also excludes
             // old acquire/renew/commit queries during the version barrier.
             if matches!(self.0.backend, Backend::Postgres) {
@@ -275,7 +280,7 @@ impl SqlDatabase {
             .map_err(database_error)?;
             if active != 0 {
                 return Err(conflict(
-                    "schema v2 migration requires quiescent hosts and no live leases",
+                    "schema v3 migration requires quiescent hosts and no live leases",
                 ));
             }
             sqlx::query("UPDATE taskloom_meta SET version=$1 WHERE singleton=1")
@@ -284,6 +289,11 @@ impl SqlDatabase {
                 .await
                 .map_err(database_error)?;
         }
+        sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_jobs (namespace TEXT NOT NULL,job_id TEXT NOT NULL,resource TEXT NOT NULL,state TEXT NOT NULL,is_open BIGINT NOT NULL CHECK(is_open IN (0,1)),created_ms BIGINT NOT NULL,revision BIGINT NOT NULL,PRIMARY KEY(namespace,job_id))").execute(&mut *tx).await.map_err(database_error)?;
+        sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS taskloom_jobs_open_resource ON taskloom_jobs(namespace,resource) WHERE is_open=1").execute(&mut *tx).await.map_err(database_error)?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS taskloom_jobs_claim ON taskloom_jobs(namespace,state,created_ms,job_id)").execute(&mut *tx).await.map_err(database_error)?;
+        sqlx::query("CREATE TABLE IF NOT EXISTS taskloom_job_bindings (namespace TEXT NOT NULL,family TEXT NOT NULL,object_id TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(namespace,family,object_id))").execute(&mut *tx).await.map_err(database_error)?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS taskloom_job_bindings_job ON taskloom_job_bindings(namespace,job_id)").execute(&mut *tx).await.map_err(database_error)?;
         let identity_key = dataset_key()?;
         let value = uuid::Uuid::new_v4().to_string();
         let body = self.serialize(&identity_key, &value)?;
@@ -311,18 +321,21 @@ impl SqlDatabase {
         SqlRunStore {
             db: self.clone(),
             namespace,
+            queue: None,
         }
     }
     pub fn workflows(&self, namespace: DatabaseNamespace) -> SqlWorkflowStore {
         SqlWorkflowStore {
             db: self.clone(),
             namespace,
+            queue: None,
         }
     }
     pub fn sessions(&self, namespace: DatabaseNamespace) -> SqlSessionStore {
         SqlSessionStore {
             db: self.clone(),
             namespace,
+            queue: None,
         }
     }
     pub fn corpus(&self, namespace: DatabaseNamespace) -> SqlCorpusStore {
@@ -348,6 +361,9 @@ impl SqlDatabase {
     /// writer participates, including stores created without app configuration.
     pub fn generation_quota(&self, namespace: DatabaseNamespace) -> SqlGenerationQuotaStore {
         SqlGenerationQuotaStore::new(self.clone(), namespace)
+    }
+    pub fn queue(&self, namespace: DatabaseNamespace) -> SqlQueueStore {
+        SqlQueueStore::new(self.clone(), namespace)
     }
     async fn schema(&self) -> Result<(), RuntimeError> {
         let value: Option<i64> =
@@ -491,6 +507,17 @@ impl SqlDatabase {
         // retries an invocation or steals a live/foreign process's lease.
         self.drain_releases().await?;
         self.schema().await?;
+        let mut tx = self.write_transaction().await?;
+        let lease = self.acquire_tx(&mut tx, key).await?;
+        lease.commit(tx).await?;
+        self.start_heartbeat(&lease)?;
+        Ok(lease)
+    }
+    async fn acquire_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        key: RecordKey,
+    ) -> Result<Arc<Lease>, RuntimeError> {
         let owner = uuid::Uuid::new_v4().to_string();
         let now = self.0.backend.now();
         let sql=format!("INSERT INTO taskloom_leases(namespace,family,object_id,owner,epoch,expires_ms) SELECT $1,$2,$3,$4,1,{now}+$5 WHERE EXISTS(SELECT 1 FROM taskloom_meta WHERE singleton=1 AND version={DATABASE_SCHEMA_VERSION}) ON CONFLICT(namespace,family,object_id) DO UPDATE SET owner=excluded.owner,epoch=taskloom_leases.epoch+1,expires_ms=excluded.expires_ms WHERE taskloom_leases.expires_ms<={now} AND taskloom_leases.epoch<9223372036854775807 RETURNING epoch");
@@ -500,19 +527,21 @@ impl SqlDatabase {
             .bind(&key.id)
             .bind(&owner)
             .bind(self.0.options.lease_duration.as_millis() as i64)
-            .fetch_optional(&self.0.pool)
+            .fetch_optional(&mut **tx)
             .await
             .map_err(database_error)?;
         let epoch = epoch.ok_or_else(|| conflict("database record is owned by another worker"))?;
-        let lease = Arc::new(Lease {
+        Ok(Arc::new(Lease {
             db: self.clone(),
             key,
             owner,
             epoch,
             lost: AtomicBool::new(false),
             heartbeat: Mutex::new(None),
-        });
-        let weak = Arc::downgrade(&lease);
+        }))
+    }
+    fn start_heartbeat(&self, lease: &Arc<Lease>) -> Result<(), RuntimeError> {
+        let weak = Arc::downgrade(lease);
         let period = self.0.options.lease_duration / 3;
         let task = tokio::spawn(async move {
             let mut timer = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
@@ -544,7 +573,7 @@ impl SqlDatabase {
             .heartbeat
             .lock()
             .map_err(|_| storage("database heartbeat lock poisoned"))? = Some(task);
-        Ok(lease)
+        Ok(())
     }
 }
 
@@ -682,6 +711,17 @@ impl Lease {
         self.lock(&mut tx).await?;
         tx.commit().await.map_err(database_error)
     }
+    async fn commit_with_queue(
+        &self,
+        mut tx: Transaction<'static, Any>,
+        queue: Option<&SqlQueueLease>,
+    ) -> Result<(), RuntimeError> {
+        self.lock(&mut tx).await?;
+        if let Some(queue) = queue {
+            queue.lock_runtime(&mut tx, &self.key).await?;
+        }
+        self.commit(tx).await
+    }
     async fn renew_owned(
         db: SqlDatabase,
         key: RecordKey,
@@ -746,8 +786,14 @@ fn renewal_query(db: &SqlDatabase) -> String {
 pub struct SqlRunStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
+    queue: Option<SqlQueueLease>,
 }
 impl SqlRunStore {
+    pub fn with_queue_lease(mut self, lease: &SqlQueueLease) -> Result<Self, RuntimeError> {
+        lease.matches(&self.db, &self.namespace)?;
+        self.queue = Some(lease.clone());
+        Ok(self)
+    }
     /// At most 1000 validated records / 64MiB, ordered by ID.
     pub async fn list(&self) -> Result<Vec<RunState>, RuntimeError> {
         self.db
@@ -773,11 +819,12 @@ impl RunStore for SqlRunStore {
         id: &'a str,
     ) -> BoxFuture<'a, Result<Arc<dyn RunLease>, RuntimeError>> {
         Box::pin(async move {
-            Ok(Arc::new(RunDatabaseLease(
-                self.db
-                    .acquire(RecordKey::new(self.namespace.clone(), "run", id)?)
-                    .await?,
-            )) as Arc<dyn RunLease>)
+            let lease = self
+                .db
+                .acquire(RecordKey::new(self.namespace.clone(), "run", id)?)
+                .await?;
+            bind_queue_owner(&lease, self.queue.as_ref()).await?;
+            Ok(Arc::new(RunDatabaseLease(lease, self.queue.clone())) as Arc<dyn RunLease>)
         })
     }
     fn inspect<'a>(&'a self, id: &'a str) -> BoxFuture<'a, Result<Option<RunState>, RuntimeError>> {
@@ -791,13 +838,13 @@ impl RunStore for SqlRunStore {
         })
     }
 }
-struct RunDatabaseLease(Arc<Lease>);
+struct RunDatabaseLease(Arc<Lease>, Option<SqlQueueLease>);
 impl RunLease for RunDatabaseLease {
     fn requires_cost_ceiling(&self) -> bool {
         true
     }
     fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
-        Box::pin(self.0.check())
+        Box::pin(async { queue::dispatch_guard(&self.0, self.1.as_ref()).await })
     }
     fn max_bytes(&self) -> Option<u64> {
         Some(self.0.db.0.options.max_record_bytes)
@@ -822,6 +869,9 @@ impl RunLease for RunDatabaseLease {
             let body = self.0.db.serialize(&self.0.key, state)?;
             let mut tx = self.0.db.write_transaction().await?;
             self.0.lock(&mut tx).await?;
+            if let Some(queue) = &self.1 {
+                queue.lock_runtime(&mut tx, &self.0.key).await?;
+            }
             self.0
                 .db
                 .generation_quota(self.0.key.namespace.clone())
@@ -841,7 +891,7 @@ impl RunLease for RunDatabaseLease {
                     return if serde_json::to_value(previous).map_err(storage)?
                         == serde_json::to_value(state).map_err(storage)?
                     {
-                        self.0.commit(tx).await
+                        self.0.commit_with_queue(tx, self.1.as_ref()).await
                     } else {
                         Err(storage(
                             "conflicting checkpoint with equal database revision",
@@ -853,7 +903,7 @@ impl RunLease for RunDatabaseLease {
                 .db
                 .replace(&mut tx, &self.0.key, state.revision, &body)
                 .await?;
-            self.0.commit(tx).await
+            self.0.commit_with_queue(tx, self.1.as_ref()).await
         })
     }
     fn load_budget(&self) -> BoxFuture<'_, Result<Option<BudgetSnapshot>, RuntimeError>> {
@@ -876,6 +926,11 @@ impl RunLease for RunDatabaseLease {
             let body = self.0.db.serialize(&key, value)?;
             let mut tx = self.0.db.write_transaction().await?;
             self.0.lock(&mut tx).await?;
+            if let Some(queue) = &self.1 {
+                queue.lock_runtime(&mut tx, &self.0.key).await?;
+            } else {
+                queue::refuse_unowned_admission(&mut tx, &self.0.key).await?;
+            }
             self.0
                 .db
                 .generation_quota(self.0.key.namespace.clone())
@@ -884,11 +939,11 @@ impl RunLease for RunDatabaseLease {
             if let Some(old) = self.0.db.read_tx(&mut tx, &key).await? {
                 let old = parse_budget(old)?;
                 if old.generation > value.generation {
-                    return self.0.commit(tx).await;
+                    return self.0.commit_with_queue(tx, self.1.as_ref()).await;
                 }
                 if old.generation == value.generation {
                     return if &old == value {
-                        self.0.commit(tx).await
+                        self.0.commit_with_queue(tx, self.1.as_ref()).await
                     } else {
                         Err(storage("conflicting database budget generation"))
                     };
@@ -898,7 +953,7 @@ impl RunLease for RunDatabaseLease {
                 .db
                 .replace(&mut tx, &key, value.generation, &body)
                 .await?;
-            self.0.commit(tx).await
+            self.0.commit_with_queue(tx, self.1.as_ref()).await
         })
     }
 }
@@ -922,8 +977,14 @@ fn parse_budget(row: Record) -> Result<BudgetSnapshot, RuntimeError> {
 pub struct SqlWorkflowStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
+    queue: Option<SqlQueueLease>,
 }
 impl SqlWorkflowStore {
+    pub fn with_queue_lease(mut self, lease: &SqlQueueLease) -> Result<Self, RuntimeError> {
+        lease.matches(&self.db, &self.namespace)?;
+        self.queue = Some(lease.clone());
+        Ok(self)
+    }
     pub async fn list(&self) -> Result<Vec<WorkflowState>, RuntimeError> {
         self.db
             .list(&self.namespace, "workflow", |row| {
@@ -939,11 +1000,13 @@ impl WorkflowStore for SqlWorkflowStore {
         id: &'a str,
     ) -> BoxFuture<'a, Result<Arc<dyn WorkflowLease>, RuntimeError>> {
         Box::pin(async move {
-            Ok(Arc::new(WorkflowDatabaseLease(
-                self.db
-                    .acquire(RecordKey::new(self.namespace.clone(), "workflow", id)?)
-                    .await?,
-            )) as Arc<dyn WorkflowLease>)
+            let lease = self
+                .db
+                .acquire(RecordKey::new(self.namespace.clone(), "workflow", id)?)
+                .await?;
+            bind_queue_owner(&lease, self.queue.as_ref()).await?;
+            Ok(Arc::new(WorkflowDatabaseLease(lease, self.queue.clone()))
+                as Arc<dyn WorkflowLease>)
         })
     }
     fn inspect<'a>(
@@ -959,10 +1022,10 @@ impl WorkflowStore for SqlWorkflowStore {
         })
     }
 }
-struct WorkflowDatabaseLease(Arc<Lease>);
+struct WorkflowDatabaseLease(Arc<Lease>, Option<SqlQueueLease>);
 impl WorkflowLease for WorkflowDatabaseLease {
     fn verify_ownership(&self) -> BoxFuture<'_, Result<(), RuntimeError>> {
-        Box::pin(self.0.check())
+        Box::pin(async { queue::dispatch_guard(&self.0, self.1.as_ref()).await })
     }
     fn load(&self) -> BoxFuture<'_, Result<Option<WorkflowState>, RuntimeError>> {
         Box::pin(async move {
@@ -984,6 +1047,9 @@ impl WorkflowLease for WorkflowDatabaseLease {
             let body = self.0.db.serialize(&self.0.key, state)?;
             let mut tx = self.0.db.write_transaction().await?;
             self.0.lock(&mut tx).await?;
+            if let Some(queue) = &self.1 {
+                queue.lock_runtime(&mut tx, &self.0.key).await?;
+            }
             if let Some(old) = self.0.db.read_tx(&mut tx, &self.0.key).await? {
                 let previous = parse_workflow(old, &self.0.key.id)?;
                 if previous.revision > state.revision {
@@ -993,7 +1059,7 @@ impl WorkflowLease for WorkflowDatabaseLease {
                     return if serde_json::to_value(previous).map_err(storage)?
                         == serde_json::to_value(state).map_err(storage)?
                     {
-                        self.0.commit(tx).await
+                        self.0.commit_with_queue(tx, self.1.as_ref()).await
                     } else {
                         Err(storage("conflicting database workflow revision"))
                     };
@@ -1003,7 +1069,7 @@ impl WorkflowLease for WorkflowDatabaseLease {
                 .db
                 .replace(&mut tx, &self.0.key, state.revision, &body)
                 .await?;
-            self.0.commit(tx).await
+            self.0.commit_with_queue(tx, self.1.as_ref()).await
         })
     }
 }
@@ -1022,8 +1088,14 @@ fn parse_workflow(row: Record, id: &str) -> Result<WorkflowState, RuntimeError> 
 pub struct SqlSessionStore {
     db: SqlDatabase,
     namespace: DatabaseNamespace,
+    queue: Option<SqlQueueLease>,
 }
 impl SqlSessionStore {
+    pub fn with_queue_lease(mut self, lease: &SqlQueueLease) -> Result<Self, RuntimeError> {
+        lease.matches(&self.db, &self.namespace)?;
+        self.queue = Some(lease.clone());
+        Ok(self)
+    }
     pub async fn list(&self) -> Result<Vec<Session>, RuntimeError> {
         self.db
             .list(&self.namespace, "session", |row| {
@@ -1063,6 +1135,9 @@ impl SessionStore for SqlSessionStore {
             // successor changes the expected revision and cannot be overwritten.
             self.db.schema().await?;
             let mut tx = self.db.write_transaction().await?;
+            if let Some(queue) = &self.queue {
+                queue.lock_runtime(&mut tx, &key).await?;
+            }
             let old = self.db.read_tx(&mut tx, &key).await?;
             if old.as_ref().map(|r| r.revision) != expected_revision {
                 return Err(conflict("database session revision changed"));
@@ -1086,6 +1161,9 @@ impl SessionStore for SqlSessionStore {
             if changed != 1 {
                 return Err(conflict("database session compare-and-swap failed"));
             }
+            if let Some(queue) = &self.queue {
+                queue.lock_runtime(&mut tx, &key).await?;
+            }
             tx.commit().await.map_err(database_error)
         })
     }
@@ -1101,6 +1179,18 @@ fn parse_session(row: Record, id: &str) -> Result<Session, RuntimeError> {
 
 fn sequence(value: u64) -> Result<i64, RuntimeError> {
     i64::try_from(value).map_err(|_| storage("database sequence exceeds signed BIGINT"))
+}
+async fn bind_queue_owner(
+    lease: &Arc<Lease>,
+    queue: Option<&SqlQueueLease>,
+) -> Result<(), RuntimeError> {
+    if let Some(queue) = queue {
+        let mut tx = lease.db.write_transaction().await?;
+        lease.lock(&mut tx).await?;
+        queue.lock_runtime(&mut tx, &lease.key).await?;
+        lease.commit(tx).await?;
+    }
+    Ok(())
 }
 fn sqlite_file_url(path: &Path, query: &str) -> Result<String, RuntimeError> {
     let path = std::path::absolute(path).map_err(storage)?;

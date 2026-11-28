@@ -9,7 +9,9 @@ policy. File journals do not gain distributed quotas.
 
 This is generation accounting. Embedding has its separate ledger; generic tool
 service charges remain separately unknown. A generation quota is not a durable
-task queue, a rate limit, per-user billing or load acceptance. P2 remains open.
+task queue, a rate limit or per-user billing. Separate
+[queue/worker and bounded load evidence](durable-queue.md) covers those service
+operations; broad native quality remains in P0.
 
 ## Configure explicitly
 
@@ -101,8 +103,9 @@ renewable rate window in this increment.
 
 ## Schema-v2 migration
 
-`SqlDatabase::migrate` / `taskloom database-migrate` explicitly create schema v2
-or upgrade v1 in one transaction. Stop all old hosts and workers first. Upgrade
+Schema v2 introduced the generation-quota barrier. The current
+`SqlDatabase::migrate` / `taskloom database-migrate` creates schema v3 or upgrades
+v1/v2 in one transaction, including queue indexes/ownership. Stop all old hosts and workers first. Upgrade
 refuses while any database-clock lease is live; PostgreSQL also locks the lease
 table during the version barrier. Dataset UUID and existing version-1 JSON
 envelopes/runtime checkpoints are preserved. Unknown versions and downgrades are
@@ -110,8 +113,9 @@ refused. Back up the complete database before upgrading and restore the complete
 backup with its matching binary if rollback is required.
 
 Old v1 binaries do not participate in quota enforcement. Their schema/ownership
-checks fail after the barrier and must not be used with v2. New SQL acquisition,
-renewal, ownership and commit checks require `DATABASE_SCHEMA_VERSION` (2).
+checks fail after the barrier; old v2 binaries also lack queue enforcement.
+New SQL acquisition, renewal, ownership and commit checks require
+`DATABASE_SCHEMA_VERSION` (3). Historical v2 acceptance below remains v2 evidence.
 Opening an Application does not run migrations. Re-run the explicit migration
 on the intended database; do not create an empty replacement and call it migrated.
 

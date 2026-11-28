@@ -25,10 +25,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out',type=Path);parser.add_argument('--native',type=Path,required=True)
     parser.add_argument('--postgres-fixture',type=Path,required=True);parser.add_argument('--example',type=Path,required=True)
-    parser.add_argument('--kind',choices=['core','knowledge','quota'],default='core')
+    parser.add_argument('--kind',choices=['core','knowledge','quota','queue'],default='core')
     parser.add_argument('--taskloom',type=Path,help='cold CLI inspection of native quota Application runs')
     args=parser.parse_args();native=args.native.resolve();campaign=json.loads((native/'report.json').read_text(encoding='utf-8'))
-    if args.kind=='quota' and args.taskloom is None:raise ValueError('--taskloom is required for quota Application inspection')
+    if args.kind in {'quota','queue'} and args.taskloom is None:raise ValueError('--taskloom is required for quota/queue Application inspection')
     if not campaign['completed'] or campaign['status']!='passed':raise ValueError('completed passing native SDK campaign required')
     root=args.out.resolve();root.mkdir(parents=True,exist_ok=False)
     cases={c['backend']:c for c in campaign['cases']};creds=json.loads((args.postgres_fixture/'credentials.json').read_text())
@@ -39,6 +39,16 @@ def main():
         raise ValueError('fixture ownership/image changed')
     def inspect(url,backend):
         env=dict(os.environ,TASKLOOM_DATABASE_URL=url);env.pop(campaign['fees'].get('model_credential_environment',campaign['fees'].get('credential_environment')),None)
+        if args.kind=='queue':
+            env.pop(campaign['fees']['connector_credential_environment'],None)
+            def cli(parts):
+                result=subprocess.run([str(args.taskloom.resolve()),'--config',str(native/backend/'app.json'),*map(str,parts)],env=env,capture_output=True,timeout=30)
+                if result.returncode:raise RuntimeError('cold queue/runtime inspection failed; credential values omitted')
+                return json.loads(result.stdout)
+            queue=cli(['queue']);listing=cli(['list']);case=cases[backend]
+            result=subprocess.run([str(args.example.resolve()),'quota-get',case['tenant'],case['project']],env=env,capture_output=True,timeout=30)
+            if result.returncode:raise RuntimeError('cold queue generation-quota inspection failed')
+            return {'queue':queue,'queue_bindings':{job['id']:cli(['queue-inspect',job['id']]) for job in queue['jobs']},'runs':{entry['id']:cli(['inspect',entry['id']]) for entry in listing},'quota':json.loads(result.stdout)}
         if args.kind=='quota':
             case=cases[backend]
             result=subprocess.run([str(args.example.resolve()),'quota-get',case['tenant'],case['project']],env=env,capture_output=True,timeout=30)
@@ -54,12 +64,12 @@ def main():
         if result.returncode:raise RuntimeError('cold SQL inspection failed; credential value omitted')
         return json.loads(result.stdout)
     report={'version':1,'completed':False,'checks':{},'failures':[],
-        'scope':{'core':'quiescent core SQL run/workflow/session/budget state','knowledge':'quiescent SQL corpus/memory/source-session state','quota':'quiescent project quota policy/audit/aggregate and native Application run accounting'}[args.kind]+'; no whole-app/files/skill/embedding-ledger backup or worker-service completion',
+        'scope':{'core':'quiescent core SQL run/workflow/session/budget state','knowledge':'quiescent SQL corpus/memory/source-session state','quota':'quiescent project quota policy/audit/aggregate and native Application run accounting','queue':'quiescent actual native queue policy/jobs/audit/runtime bindings and run/child/generation-quota records'}[args.kind]+'; separate host files/secrets/weights/external effects are excluded',
         'native_reference':str(native),'binary_sha256':hashlib.sha256(args.example.read_bytes()).hexdigest(),
         'model_requests_performed':False,'credential_values':'private fixture environment only; never included in output',
         'artifacts_private':'all database/dump files contain runtime data; excluded from source publication'}
     try:
-        source=native/{'core':'runtime ü space.sqlite','knowledge':'knowledge ü.sqlite','quota':'quota.sqlite'}[args.kind];target=root/'restored ü space.sqlite'
+        source=native/{'core':'runtime ü space.sqlite','knowledge':'knowledge ü.sqlite','quota':'quota.sqlite','queue':'queue.sqlite'}[args.kind];target=root/'restored ü space.sqlite'
         with sqlite3.connect(source.as_uri()+'?mode=ro',uri=True) as original:
             live=original.execute("SELECT count(*) FROM taskloom_leases WHERE expires_ms>CAST((julianday('now')-2440587.5)*86400000 AS BIGINT)").fetchone()[0]
             if live:raise ValueError('stop all SQLite owners before backup acceptance')
@@ -95,8 +105,10 @@ def main():
             report['checks']['unknown_model_attempts_retained_after_restore']=all(v['long_run']['report']['budget']['uncertain_attempts']==1 for v in restored)
         elif args.kind=='knowledge':
             report['checks']['corpus_source_and_erasure_tombstones_retained']=all(v['corpus']['documents'] and v['source_run']['report']['stop_reason']=='completed' and not v['memory']['records'] and v['memory']['forgotten_sources'] for v in restored)
-        else:
+        elif args.kind=='quota':
             report['checks']['quota_cap_audit_and_unknown_native_attempt_retained']=all(v['quota']['usage']['uncertain_attempts']==1 and v['quota']['usage']['in_flight_attempts']==0 and v['quota']['policy']['max_outstanding_attempts']==2 and len(v['quota']['events'])==2 and v['runs']['interrupted']['report']['budget']['uncertain_attempts']==1 for v in restored)
+        else:
+            report['checks']['queue_audit_bindings_and_unknown_cancelled_attempt_retained']=all(v['quota']['usage']['uncertain_attempts']==1 and len(v['queue']['jobs'])==6 and len(v['runs'])==7 and sum(len(binding['runtime_bindings']) for binding in v['queue_bindings'].values())>=12 and all(job['state'] in {'completed','stopped'} for job in v['queue']['jobs']) for v in restored)
         report['completed']=True
     except Exception as error:report['failures'].append(str(error))
     report['failures'].extend('check failed: '+name for name,passed in report['checks'].items() if not passed)

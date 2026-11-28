@@ -1,7 +1,7 @@
 //! Optional JSON service boundary for host-registered project Applications.
 //! Identities live in SQL; project Applications explicitly choose file or SQL.
-//! SQL run writers share project quotas. Durable queues and user-specific
-//! memory routes remain open.
+//! SQL run writers share project quotas and explicit queue admission. Workers
+//! run separately; user-specific memory routes remain unavailable.
 use super::Application;
 use crate::runtime::{database::*, RuntimeError};
 use axum::{
@@ -30,6 +30,7 @@ struct ProjectBoundary {
     internal: HeaderValue,
     tenant: String,
     project: String,
+    queue: Option<SqlQueueStore>,
 }
 
 /// Mount `/tenants/T/projects/P/api/...` for each explicit project. No root
@@ -126,6 +127,12 @@ pub fn router(
             internal: HeaderValue::from_str(&format!("Bearer {internal}")).map_err(storage)?,
             tenant: project.tenant.clone(),
             project: project.project.clone(),
+            queue: project
+                .application
+                .stores
+                .sql
+                .as_ref()
+                .map(|(db, ns)| db.queue(ns.clone())),
         };
         let prefix = format!("/tenants/{}/projects/{}", project.tenant, project.project);
         let scope_router = super::router(project.application, internal)?
@@ -198,6 +205,15 @@ async fn authorize(
             )
         }
     };
+    if direct_execution(request.method(), request.uri().path()) {
+        if let Some(queue) = &boundary.queue {
+            match queue.policy().await {
+                Ok(policy) if policy.host_binding.is_some()=>return failure(StatusCode::CONFLICT,"project uses durable queue admission; submit/resume/control the queue job instead"),
+                Ok(_)=>(),
+                Err(_)=>return failure(StatusCode::SERVICE_UNAVAILABLE,"queue policy unavailable"),
+            }
+        }
+    }
     // The project's single-operator adapter is private to this boundary. An
     // external request can never supply its internal credential or actor.
     request
@@ -255,6 +271,7 @@ fn required(method: &Method, path: &str) -> Option<(ProjectPermission, bool)> {
             | ["workflows", _, "events"]
             | ["diagnostics", _, _]
             | ["research", "capabilities"] => Some((Read, false)),
+            ["queue"] | ["queue", "jobs"] | ["queue", "jobs", _] => Some((Read, false)),
             _ => None,
         };
     }
@@ -265,6 +282,8 @@ fn required(method: &Method, path: &str) -> Option<(ProjectPermission, bool)> {
         return None;
     }
     match segments {
+        ["queue", "jobs"] | ["queue", "jobs", _, "resume"] => Some((Submit, true)),
+        ["queue", "jobs", _, "control"] => Some((Control, true)),
         ["setup" | "retrieval", "validate"]
         | ["workflow-design", "preview"]
         | ["templates", _, _, "preview"] => Some((Read, false)),
@@ -290,6 +309,27 @@ fn required(method: &Method, path: &str) -> Option<(ProjectPermission, bool)> {
         ["diagnostics", _, _, "export"] => Some((ExportTelemetry, false)),
         _ => None,
     }
+}
+fn direct_execution(method: &Method, path: &str) -> bool {
+    if *method != Method::POST {
+        return false;
+    }
+    let Some(path) = path.strip_prefix("/api/") else {
+        return false;
+    };
+    let parts = path.split('/').collect::<Vec<_>>();
+    matches!(
+        parts.as_slice(),
+        ["runs" | "workflows"]
+            | ["workflow-design", "launch"]
+            | ["templates", _, _, "runs"]
+            | ["sessions", _, "turns" | "memory-turns"]
+            | [
+                "runs" | "workflows" | "sessions",
+                _,
+                "resume" | "pause" | "cancel"
+            ]
+    )
 }
 fn failure(status: StatusCode, message: &str) -> Response {
     let mut result = (status, Json(json!({"error":message}))).into_response();

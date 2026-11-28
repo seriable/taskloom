@@ -11,9 +11,17 @@ This is a bounded identity/service increment. Project Applications use file
 journals by default or explicitly configured [SQL persistence](sql-application.md).
 SQL-backed Applications also enforce explicitly configured
 [project generation quotas](generation-quota.md) across all run writers. The
-durable queue, distributed workers and operational/load acceptance remain unfinished. P2.2
-remains open. The existing single-operator `router`/CLI/UI is unchanged; selecting
+explicit [durable queue and independent workers](durable-queue.md) add
+cross-process admission/control/recovery and bounded local load evidence.
+The existing single-operator `router`/CLI/UI remains available; selecting
 it does not enable the new multi-user boundary.
+
+Queue submission and resume require runner authority; queue control requires
+operator authority, with actor identity supplied by authentication. Approvers
+retain exact-ticket routes, and reconciliation still requires operator authority.
+Once a project has a queue policy, direct execution/control endpoints are refused
+in this service, including while queue admission is disabled. See the queue
+document for immutable inputs, cross-process state and explicit continuation.
 
 ## Roles and identity
 

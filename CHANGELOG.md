@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Explicit SQLite/PostgreSQL durable project queues persist exact input before
+  independent worker processes execute existing run/workflow/PEER/session
+  controllers. Queue/runtime fences, approval/recovery occupancy, authenticated
+  submit/control actors, cooperative cross-process cancellation and strict
+  capability bindings prevent stale dispatch and uncertain-write replay.
+  Schema v3 explicitly upgrades quiescent v1/v2 datasets and refuses old binaries.
+  CLI/API, real native worker-death/reconciliation, finite four-process load and
+  full queue backup/migration evidence are documented in `durable-queue.md`.
+  Source-only delivery and broader P0 quality gates remain separate.
+
 - SQL project generation quotas atomically admit conservative monetary ceilings
   and outstanding attempts across pools/processes; unknown zero-priced attempts
   retain capacity through crashes. Explicit CAS administration imports prior

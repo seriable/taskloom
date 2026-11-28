@@ -213,6 +213,22 @@ class Handler(BaseHTTPRequestHandler):
             response = {'content': [{'type': 'text', 'text': type(error).__name__ + ': ' + str(error)}], 'isError': True}
         self.respond(200, {'jsonrpc': '2.0', 'id': identity, 'result': response})
 
+    def do_DELETE(self):
+        service = self.server.service
+        supplied = self.headers.get('Authorization', '')
+        if self.path != '/mcp' or not hmac.compare_digest(supplied, 'Bearer ' + service.token):
+            self.respond(403)
+            self.close_connection = True
+            return
+        session = self.headers.get('Mcp-Session-Id')
+        with service.mutex:
+            if session not in service.sessions or self.headers.get('MCP-Protocol-Version') != '2025-06-18':
+                self.respond(404)
+                return
+            service.sessions.remove(session)
+        # Termination affects future requests, not a past uncertain append.
+        self.respond(204)
+
 
 class ExampleServer(ThreadingHTTPServer):
     def handle_error(self, request, client_address):

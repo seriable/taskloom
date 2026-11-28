@@ -106,6 +106,7 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .route("/knowledge/pdf", post(import_pdf))
         .route("/research/search", post(web_search))
         .route("/research/capabilities", get(research_capabilities))
+        .merge(queue_routes())
         .route_layer(middleware::from_fn_with_state(
             Arc::new(token),
             authenticate,
@@ -161,6 +162,16 @@ pub fn router(app: Arc<Application>, token: String) -> Result<Router, RuntimeErr
         .layer(DefaultBodyLimit::max(1024 * 1024))
         .layer(middleware::from_fn(security_headers))
         .with_state(app))
+}
+fn queue_routes() -> Router<Arc<Application>> {
+    #[cfg(feature = "database")]
+    {
+        super::queue::routes()
+    }
+    #[cfg(not(feature = "database"))]
+    {
+        Router::new()
+    }
 }
 pub async fn serve(
     listener: tokio::net::TcpListener,
