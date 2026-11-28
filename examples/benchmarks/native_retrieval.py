@@ -157,6 +157,7 @@ def main():
     parser.add_argument("--profile", type=Path, help="explicit retrieval JSON: lexical settings, semantic cutoff and fusion; services supplied separately")
     parser.add_argument("--protocol", type=Path, help="fixed dataset/profile hashes and split quality gates; failure remains visible")
     parser.add_argument("--database",type=Path,help="explicit AppDatabase JSON; migrate first and set only its named URL environment")
+    parser.add_argument('--include-default-lexical',action='store_true',help='also measure the unchanged default lexical settings before the explicit profile, without embedding calls')
     args = parser.parse_args()
     protocol = None
     if args.protocol:
@@ -168,9 +169,17 @@ def main():
         raise ValueError("this zero-fee example permits only a loopback embedding service")
     if not os.environ.get(args.key_env):
         raise ValueError("configure the local service's key environment first")
+    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
+    source_root=Path(__file__).resolve().parents[2]
+    for pin in dataset.get('source_pins',[]):
+        source=(source_root/pin['path']).resolve()
+        if not source.is_relative_to(source_root):raise ValueError('retrieval source pin escapes repository')
+        text=source.read_text(encoding='utf-8')
+        matches=[d for d in dataset['documents'] if d['id']==pin['document_id'] and d['text']==text]
+        if hashlib.sha256(text.encode()).hexdigest()!=pin['sha256_utf8_lf'] or len(matches)!=1:
+            raise ValueError('repository retrieval source changed before dispatch: '+pin['path'])
     root = args.out.resolve()
     root.mkdir(parents=True, exist_ok=False)
-    dataset = json.loads(args.dataset.read_text(encoding="utf-8"))
     manifest = json.loads((args.model_root / "models.lock.json").read_text(encoding="utf-8"))
     identity = hashlib.sha256(json.dumps(manifest["models"]["Qwen/Qwen3-Embedding-0.6B"], sort_keys=True).encode()).hexdigest()
     config = {"state_dir": str(root / "state"), "provider": {"type": "offline"}, "retrieval": {
@@ -181,7 +190,7 @@ def main():
         "max_request_cost_micros": 0, "max_total_cost_micros": 0, "max_input_bytes": 131072, "timeout_ms": 60000}}}
     if args.profile:
         profile = json.loads(args.profile.read_text(encoding="utf-8"))
-        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers"}
+        allowed = {"lexical", "semantic_min_score", "lexical_weight", "semantic_weight", "rank_constant", "candidate_k", "exact_identifiers", "require_semantic_match", "query_prefix"}
         if not isinstance(profile, dict) or set(profile) - allowed:
             raise ValueError("profile may only set lexical/fusion/relevance settings; no authority or service changes")
         config["retrieval"].update(profile)
@@ -197,13 +206,27 @@ def main():
         "limitations": ["small visible synthetic relevance set, not held out", "no semantic claim-support or factual-accuracy scoring",
                         "no competitor evaluation", "no query instruction/prefix", "API fee USD 0; hardware/electricity unmetered"]}
     report["dataset_sha256"] = hashlib.sha256(args.dataset.read_bytes()).hexdigest()
+    if config['retrieval'].get('query_prefix'):
+        report['limitations'][3]='Explicit host-configured query-only embedding prefix, retained in phase configurations; document vectors are unprefixed.'
+    if dataset.get('source_pins'):
+        report['source_pins']=dataset['source_pins']
+        report['limitations'][0]=dataset.get('provenance','Visible repository-document corpus, not blind/external testing')
     report["protocol"] = protocol
     report["phase_configurations"] = {"lexical": json.loads(json.dumps(config))}
     started = time.perf_counter()
     try:
+        if args.include_default_lexical:
+            default_config=dict(config,retrieval={'mode':'lexical'})
+            report['phase_configurations']['default_lexical']=default_config
+            save(root/'default-lexical.json',default_config)
+            with host(args.taskloom.resolve(),root/'default-lexical.json',root) as api:
+                for i,document in enumerate(dataset['documents']):api('/knowledge',{'document':document,'expected_revision':i})
+                report['default_lexical']=evaluate(api,dataset)
+            save(root/'report.json',report)
         with host(args.taskloom.resolve(), config_path, root) as api:
-            for i, document in enumerate(dataset["documents"]):
-                api("/knowledge", {"document": document, "expected_revision": i})
+            if not args.include_default_lexical:
+                for i, document in enumerate(dataset["documents"]):
+                    api("/knowledge", {"document": document, "expected_revision": i})
             report["lexical"] = evaluate(api, dataset)
             status = api("/retrieval")
             report["build"] = api("/retrieval/index", {"expected_revision": status["corpus_revision"],
@@ -215,15 +238,19 @@ def main():
             report["hybrid"] = evaluate(api, dataset)
             report["index_status"] = api("/retrieval")
         if protocol:
-            gates = protocol["gates"]
-            measured = report["hybrid"]["splits"][gates["split"]]
-            report["quality_checks"] = {
+            groups=[protocol['gates']]+protocol.get('additional_gates',[])
+            report['quality_checks']={}
+            for gates in groups:
+                measured = report["hybrid"]["splits"][gates["split"]]
+                checks = {
                 "fixed_positive_count": measured["positive_queries"] == gates["positive_queries"],
                 "fixed_negative_count": measured["negative_queries"] == gates["negative_queries"],
                 "recall_at_5": measured["recall_at_5"] >= gates["min_recall_at_5"],
                 "mrr_at_5": measured["mrr_at_5"] >= gates["min_mrr_at_5"],
                 "negative_accuracy": measured["negative_correct"] / measured["negative_queries"] >= gates["required_negative_accuracy"],
-                "errors": measured["errors"] <= gates["max_errors"]}
+                    "errors": measured["errors"] <= gates["max_errors"]}
+                prefix=gates['split']+'.' if len(groups)>1 else ''
+                report['quality_checks'].update({prefix+key:value for key,value in checks.items()})
             report["quality_status"] = "passed" if all(report["quality_checks"].values()) else "failed"
     except Exception as error:
         report["campaign_error"] = str(error)

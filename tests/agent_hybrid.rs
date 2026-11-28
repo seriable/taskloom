@@ -66,6 +66,197 @@ fn model() -> Arc<FixtureEmbeddings> {
     })
 }
 
+struct RankedFixture {
+    id: Option<&'static str>,
+    ranking: Vec<ScoredChunk>,
+}
+impl Retriever for RankedFixture {
+    fn identity(&self) -> Option<String> {
+        self.id.map(str::to_owned)
+    }
+    fn retrieve<'a>(
+        &'a self,
+        _: &'a CorpusSnapshot,
+        _: &'a RetrievalQuery,
+    ) -> BoxFuture<'a, Result<Vec<ScoredChunk>, RuntimeError>> {
+        Box::pin(async move { Ok(self.ranking.clone()) })
+    }
+}
+
+#[tokio::test]
+async fn semantic_admission_prevents_lexical_resurrection_without_changing_sources() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let embeddings = model();
+    let mut index = EmbeddingIndex::build(&snapshot, embeddings.as_ref())
+        .await
+        .unwrap();
+    let fruit = snapshot
+        .chunks
+        .iter()
+        .find(|c| c.document_id == "fruit")
+        .unwrap();
+    index.vectors.insert(fruit.id.clone(), vec![0.2, 1.0]);
+    let vector = Arc::new(
+        VectorRetriever::new(index, embeddings, &snapshot)
+            .unwrap()
+            .with_min_score(0.7)
+            .unwrap(),
+    );
+    let baseline = HybridRetriever::new(Arc::new(LexicalRetriever), vector.clone());
+    let legacy_id = baseline.identity();
+    let explicit_false = HybridRetriever::new(Arc::new(LexicalRetriever), vector.clone())
+        .with_semantic_gate(false)
+        .unwrap();
+    assert_eq!(legacy_id, explicit_false.identity());
+    let query = RetrievalQuery::new("fruit automobile");
+    assert_eq!(
+        search(&store, &baseline, &query).await.unwrap().hits.len(),
+        2
+    );
+    let gated = HybridRetriever::new(Arc::new(LexicalRetriever), vector)
+        .with_semantic_gate(true)
+        .unwrap();
+    assert_ne!(legacy_id, gated.identity());
+    let result = search(&store, &gated, &query).await.unwrap();
+    assert_eq!(result.hits.len(), 1);
+    assert_eq!(result.hits[0].chunk.document_id, "vehicle");
+    let chunk = &result.hits[0].chunk;
+    SearchResult::verify_all(
+        std::slice::from_ref(&result),
+        CitedReport {
+            text: format!("A car transports passengers [[{}]].", chunk.id),
+            citations: vec![Citation {
+                chunk_id: chunk.id.clone(),
+                quote: chunk.text.clone(),
+            }],
+        },
+    )
+    .unwrap();
+    let empty = Arc::new(RankedFixture {
+        id: Some("empty-semantic-v1"),
+        ranking: vec![],
+    });
+    let abstain = HybridRetriever::new(Arc::new(LexicalRetriever), empty)
+        .with_semantic_gate(true)
+        .unwrap();
+    assert!(search(&store, &abstain, &query)
+        .await
+        .unwrap()
+        .hits
+        .is_empty());
+    let invalid = Arc::new(RankedFixture {
+        id: Some("bad-lexical-v1"),
+        ranking: vec![ScoredChunk {
+            chunk_id: "not-a-source".into(),
+            score: 1.0,
+        }],
+    });
+    let empty = Arc::new(RankedFixture {
+        id: Some("empty-v1"),
+        ranking: vec![],
+    });
+    let invalid = HybridRetriever::new(invalid, empty)
+        .with_semantic_gate(true)
+        .unwrap();
+    assert!(
+        search(&store, &invalid, &query).await.is_err(),
+        "filtering must not hide corrupt backend rankings"
+    );
+}
+
+#[test]
+fn semantic_admission_needs_a_live_lane_and_cannot_invent_backend_identity() {
+    let make = || {
+        Arc::new(RankedFixture {
+            id: None,
+            ranking: vec![],
+        }) as Arc<dyn Retriever>
+    };
+    assert!(HybridRetriever::new(make(), make()).identity().is_none());
+    assert!(HybridRetriever::new(make(), make())
+        .with_semantic_gate(true)
+        .unwrap()
+        .identity()
+        .is_none());
+    assert!(HybridRetriever::new(make(), make())
+        .with_fusion(1.0, 0.0, 60.0, 20)
+        .unwrap()
+        .with_semantic_gate(true)
+        .is_err());
+    assert!(HybridRetriever::new(make(), make())
+        .with_semantic_gate(true)
+        .unwrap()
+        .with_fusion(1.0, 0.0, 60.0, 20)
+        .is_err());
+}
+
+#[tokio::test]
+async fn explicit_query_prefix_is_versioned_without_touching_document_vectors() {
+    struct RecordingModel(std::sync::Mutex<Vec<Vec<String>>>);
+    impl EmbeddingModel for RecordingModel {
+        fn identity(&self) -> String {
+            "recording-fixture-v1".into()
+        }
+        fn embed<'a>(
+            &'a self,
+            texts: &'a [String],
+        ) -> BoxFuture<'a, Result<EmbeddingBatch, RuntimeError>> {
+            Box::pin(async move {
+                self.0.lock().unwrap().push(texts.to_vec());
+                Ok(EmbeddingBatch {
+                    identity: self.identity(),
+                    vectors: vec![vec![1.0, 0.0]; texts.len()],
+                })
+            })
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let store = corpus(dir.path()).await;
+    let snapshot = store.snapshot().await.unwrap();
+    let model = Arc::new(RecordingModel(std::sync::Mutex::new(vec![])));
+    let index = EmbeddingIndex::build(&snapshot, model.as_ref())
+        .await
+        .unwrap();
+    let before = serde_json::to_value(&index).unwrap();
+    let baseline = VectorRetriever::new(index.clone(), model.clone(), &snapshot).unwrap();
+    let empty = VectorRetriever::new(index.clone(), model.clone(), &snapshot)
+        .unwrap()
+        .with_query_prefix("")
+        .unwrap();
+    assert_eq!(baseline.identity(), empty.identity());
+    let prefix = "Instruct: Retrieve supporting passages.\nQuery: ";
+    let instructed = VectorRetriever::new(index.clone(), model.clone(), &snapshot)
+        .unwrap()
+        .with_query_prefix(prefix)
+        .unwrap();
+    assert_ne!(baseline.identity(), instructed.identity());
+    search(&store, &instructed, &RetrievalQuery::new("automobile"))
+        .await
+        .unwrap();
+    let calls = model.0.lock().unwrap();
+    assert_eq!(
+        calls[0],
+        snapshot
+            .chunks
+            .iter()
+            .map(|c| c.text.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(calls.last().unwrap(), &vec![format!("{prefix}automobile")]);
+    assert_eq!(serde_json::to_value(&index).unwrap(), before);
+    drop(calls);
+    for bad in ["x".repeat(4097), "bad\0prefix".into()] {
+        assert!(
+            VectorRetriever::new(index.clone(), model.clone(), &snapshot)
+                .unwrap()
+                .with_query_prefix(bad)
+                .is_err()
+        );
+    }
+}
+
 #[tokio::test]
 async fn vector_cutoff_is_explicit_bound_and_does_not_turn_similarity_into_citation_support() {
     let dir = tempfile::tempdir().unwrap();

@@ -140,3 +140,72 @@ general default settings across models, realistic external corpora, semantic
 claim support or factual correctness. Broader P0 quality work remains open.
 See `acceptance/p0-retrieval-relevance-20261128.json` for raw results, frozen
 protocols, failures, source hashes and final checks.
+
+## Complete repository documents and explicit semantic admission
+
+A later transfer corpus contains twelve complete public operational documents
+(139 chunks, about 143k characters), not twelve synthetic sentences. The first
+48 visible development queries include 36 positive and 12 negative labels. On
+that corpus, unchanged default lexical retrieval recalled 33/36 primary
+documents but returned evidence on all twelve negatives. The old configured
+hybrid profile recalled 35/36 and still returned four negative results. Those
+failures remain acceptance failures.
+
+`require_semantic_match: true` is an explicit optional fusion policy: a chunk
+must be admitted by the semantic backend's calibrated cutoff before either
+ranking contributes. A lexical match can no longer resurrect a semantic-rejected
+chunk. Each complete backend ranking is still validated before filtering, so a
+gate cannot hide corrupt/unknown/duplicate entries or service errors. A zero
+semantic weight cannot enable this policy. Vector-only matches can still rank;
+admission is limited to the configured candidate window, not a scan of arbitrary
+backends. This does not establish that a chunk supports an answer.
+
+At the original raw-query cutoff 0.60 this gate emptied all twelve negatives,
+but recall fell to 26/36. An actual captured-index score diagnostic found no
+raw-query cutoff with both 90% positive admission and all twelve negatives empty.
+An explicitly recorded publisher-style query instruction separated the observed
+scores better; its development negative maximum was about 0.41194. The next
+profile uses 0.43 (a 0.01 margin rounded up), an explicit instruction and the
+semantic gate. New fixed queries and the original observed calibration group
+are tested separately without changing their labels or gates.
+
+```json
+{
+  "retrieval": {
+    "require_semantic_match": true,
+    "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ",
+    "semantic_min_score": 0.43
+  }
+}
+```
+
+These are opt-in profile values for the measured Qwen model/corpus, not universal
+defaults. `query_prefix` is bounded to 4096 UTF-8 bytes without NUL. Only actual
+query embedding input receives it; document bodies, citations and stored index
+vectors remain unchanged. Metered service admission sees the entire prefixed
+input and may reject its byte/token/cost bound. No hidden query/model rewrite,
+credential or index rebuild is introduced. An empty prefix and false gate are
+omitted from configuration and preserve old bindings. Enabled settings change
+the retriever/tool/config identity and cannot resume an old frozen run.
+
+SDK uses `VectorRetriever::with_query_prefix` and
+`HybridRetriever::with_semantic_gate`. Enabled custom backends without an
+identity no longer receive a fabricated hybrid identity. CLI/API/UI JSON
+configuration shares the same fields and validation; `/api/retrieval/explain`
+shows the exact embedding input separately from lexical expansion and the gate.
+No new browser acceptance is claimed for these fields.
+
+The actual instructed-query application run passed all six calibration checks:
+35/36 primary-document recall, MRR 0.8889 and 12/12 negatives empty. The 36 newly
+fixed queries failed recall/MRR: 20/24 primary-document recall and MRR 0.7917,
+with 12/12 negatives empty. There were no service errors. These fixed queries
+are now observed development evidence; do not relabel them as blind or drop the
+misses. This accepts the implementation's explicit gate/prefix behavior, **not**
+general retrieval quality. Lowering a threshold to pass observed queries would
+need separate recorded development and further evaluation.
+
+All three application campaigns built explicit real indexes over the 139 chunks.
+Together with the six-request raw/instruct score diagnostic, the owned local
+embedding service made 190 actual requests at configured USD0 API fees; no
+remote generation subscription was used for embedding. The former union run,
+over-strict raw gate and instructed fixed-query failures are retained separately.

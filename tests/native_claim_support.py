@@ -11,6 +11,18 @@ spec.loader.exec_module(module)
 
 
 class ScoringControls(unittest.TestCase):
+    def test_generated_assessment_cannot_hide_failed_final_or_missing_answers(self):
+        gates={'expected_cases':2,'minimum_cited_support':.5,'minimum_corpus_factuality':.5,'max_errors':0}
+        rows=[{'native':{'cited_support':'supported','corpus_factuality':'supported'}},
+              {'is_final':True,'native':{'cited_support':'insufficient','corpus_factuality':'supported'}}]
+        measures,checks=module.score_generated(rows,gates)
+        self.assertEqual(measures['cited_support_supported'],.5)
+        self.assertFalse(checks['final_answer_supported'])
+        rows[1]['error']='invalid final contract'
+        measures,checks=module.score_generated(rows,gates)
+        self.assertEqual(measures['corpus_factuality_supported'],.5)
+        self.assertFalse(checks['errors'])
+        self.assertFalse(module.score_generated(rows[:1],gates)[1]['fixed_case_count'])
     def test_citation_role_context_cannot_read_corpus_or_expected_labels(self):
         attached=[{'chunk_id':'a'*64,'quote':'The switch is off.'}]
         corpus=[{'document_id':'private-to-corpus-judge','body':'A separate source says the car is blue.'}]

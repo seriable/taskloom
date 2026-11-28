@@ -91,13 +91,13 @@ def make_handler(ledger, directory, model, remote_key, local_token):
             pass
 
         def reply(self, status, body):
-            self.send_response(status)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
             try:
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
                 self.wfile.write(body)
-            except (BrokenPipeError, ConnectionResetError):
+            except ConnectionError:
                 # A caller closing its socket does not undo known upstream
                 # usage. Runtime-side uncertainty is recorded independently.
                 pass
@@ -160,7 +160,7 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--max-requests', type=int, required=True)
     parser.add_argument('--monthly-calls', type=int, required=True)
-    parser.add_argument('--campaign', choices=['collaboration', 'claim-support', 'long-session'], required=True)
+    parser.add_argument('--campaign', choices=['collaboration', 'claim-support', 'long-session','long-recovery'], required=True)
     parser.add_argument('--taskloom', type=Path, required=True)
     parser.add_argument('--verifier', type=Path)
     parser.add_argument('--suite', type=Path)
@@ -168,19 +168,28 @@ def main():
     parser.add_argument('--separate-evidence', action='store_true')
     parser.add_argument('--strict-length', action='store_true')
     parser.add_argument('--controls', type=Path)
+    parser.add_argument('--grounded', action='store_true')
+    parser.add_argument('--rubric', choices=['v1','v2','v3'], default='v1')
+    parser.add_argument('--assessment', action='store_true')
+    parser.add_argument('--recover-from',type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding='utf-8'))
     provider = config['provider']
     if (provider.get('type') != 'openai' or provider.get('base_url') != ALLOWED_BASE
             or not config['model'] or not provider.get('key_env')
             or not 1 <= args.max_requests <= min(1000, args.monthly_calls)
-            or args.campaign != 'long-session' and args.verifier is None
+            or args.campaign not in ['long-session','long-recovery'] and args.verifier is None
             or args.selected_sources and args.campaign != 'long-session'
             or args.strict_length and args.campaign != 'long-session'
+            or args.grounded and args.campaign != 'long-session'
+            or args.rubric != 'v1' and args.campaign != 'claim-support'
+            or args.assessment and (args.campaign != 'claim-support' or not args.separate_evidence)
             or args.controls is not None and args.campaign != 'claim-support'
             or args.separate_evidence and args.campaign != 'claim-support'
             or args.suite is not None and args.campaign == 'claim-support'):
         raise ValueError('explicit selected token-plan route/model/credential and finite allocation required')
+    if (args.recover_from is None)!=(args.campaign!='long-recovery'):
+        raise ValueError('long-recovery requires an explicit previous failed campaign')
     key = os.environ[provider['key_env']]
     if not key:
         raise ValueError('empty remote credential')
@@ -189,7 +198,8 @@ def main():
     identities = []
     for source in [Path(__file__), Path(__file__).with_name('native_retrieval.py'),
                    Path(__file__).with_name({'collaboration':'native_collaboration.py',
-                       'claim-support':'native_claim_support.py','long-session':'native_long_session.py'}[args.campaign])]:
+                       'claim-support':'native_claim_support.py','long-session':'native_long_session.py',
+                       'long-recovery':'native_long_session_recover.py'}[args.campaign])]:
         shutil.copy2(source, source_directory/source.name)
         identities.append({'path':str(source.resolve()),'sha256':hashlib.sha256(source.read_bytes()).hexdigest()})
     write_json(root/'source-identities.json', identities)
@@ -212,7 +222,7 @@ def main():
     env=dict(os.environ)
     env.pop(provider['key_env'],None)
     env.update(TASKLOOM_NATIVE_PROXY_TOKEN=token, **{METADATA_ENV:str(root/'subscription.json')})
-    name = {'collaboration':'native_collaboration.py','claim-support':'native_claim_support.py','long-session':'native_long_session.py'}[args.campaign]
+    name = {'collaboration':'native_collaboration.py','claim-support':'native_claim_support.py','long-session':'native_long_session.py','long-recovery':'native_long_session_recover.py'}[args.campaign]
     command=[sys.executable,str(Path(__file__).with_name(name)),str(root/'campaign'),
              '--config',str(root/'model.json'),'--taskloom',str(args.taskloom.resolve())]
     if args.verifier: command += ['--verifier',str(args.verifier.resolve())]
@@ -220,6 +230,10 @@ def main():
     if args.selected_sources: command.append('--selected-sources')
     if args.separate_evidence: command.append('--separate-evidence')
     if args.strict_length: command.append('--strict-length')
+    if args.grounded: command.append('--grounded')
+    if args.campaign=='claim-support':command += ['--rubric',args.rubric]
+    if args.assessment:command.append('--assessment')
+    if args.recover_from:command += ['--recover-from',str(args.recover_from.resolve())]
     if args.controls:
         command += ['--controls',str(args.controls.resolve())]
     thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()

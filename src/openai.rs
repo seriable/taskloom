@@ -26,6 +26,7 @@ pub struct OpenAiCompatible {
     client: reqwest::Client,
     json_mode: bool,
     image_detail: Option<String>,
+    enable_thinking: Option<bool>,
 }
 
 impl std::fmt::Debug for OpenAiCompatible {
@@ -34,6 +35,7 @@ impl std::fmt::Debug for OpenAiCompatible {
             .debug_struct("OpenAiCompatible")
             .field("base_url", &self.base_url)
             .field("json_mode", &self.json_mode)
+            .field("enable_thinking", &self.enable_thinking)
             .finish_non_exhaustive()
     }
 }
@@ -50,6 +52,7 @@ impl OpenAiCompatible {
                 .unwrap_or_default(),
             json_mode: true,
             image_detail: None,
+            enable_thinking: None,
         }
     }
 
@@ -71,6 +74,18 @@ impl OpenAiCompatible {
     pub fn with_image_detail(mut self, detail: impl Into<String>) -> Self {
         self.image_detail = Some(detail.into());
         self
+    }
+    /// Explicit opt-in for endpoints supporting `enable_thinking`. None sends
+    /// no extension and preserves legacy cache identity. Unsupported gateways
+    /// may reject it; the provider never drops it or changes model silently.
+    pub fn with_enable_thinking(mut self, enabled: Option<bool>) -> Self {
+        self.enable_thinking = enabled;
+        self
+    }
+    fn generation_options(&self, body: &mut Value) {
+        if let Some(enabled) = self.enable_thinking {
+            body["enable_thinking"] = json!(enabled);
+        }
     }
 
     fn body(&self, request: &ChatRequest) -> Result<Value, ModelError> {
@@ -98,6 +113,7 @@ impl OpenAiCompatible {
         if let Some(max) = request.max_output_tokens {
             body["max_tokens"] = json!(max);
         }
+        self.generation_options(&mut body);
         match &request.schema {
             Some(schema) if request.json => {
                 body["response_format"] = json!({
@@ -284,10 +300,14 @@ impl Provider for OpenAiCompatible {
         Box::pin(runtime::converse(self, request))
     }
     fn cache_namespace(&self) -> String {
-        format!(
+        let legacy = format!(
             "openai-v2|{}|{}|{:?}",
             self.base_url, self.json_mode, self.image_detail
-        )
+        );
+        match self.enable_thinking {
+            Some(enabled) => format!("{legacy}|enable_thinking={enabled}"),
+            None => legacy,
+        }
     }
 
     fn id(&self) -> &str {
@@ -451,6 +471,29 @@ mod tests {
         };
         let provider = OpenAiCompatible::new("https://x.test/v1/", "key");
         let body = provider.body(&request).unwrap();
+        assert!(body.get("enable_thinking").is_none());
+        assert_eq!(
+            provider.cache_namespace(),
+            provider
+                .clone()
+                .with_enable_thinking(None)
+                .cache_namespace()
+        );
+        for enabled in [true, false] {
+            let explicit = provider.clone().with_enable_thinking(Some(enabled));
+            assert_eq!(explicit.body(&request).unwrap()["enable_thinking"], enabled);
+            assert_ne!(provider.cache_namespace(), explicit.cache_namespace());
+        }
+        assert_ne!(
+            provider
+                .clone()
+                .with_enable_thinking(Some(true))
+                .cache_namespace(),
+            provider
+                .clone()
+                .with_enable_thinking(Some(false))
+                .cache_namespace()
+        );
         assert_eq!(body["response_format"]["type"], "json_object");
         assert_eq!(body["max_tokens"], 50);
         assert_eq!(body["seed"], 7);

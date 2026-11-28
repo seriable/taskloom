@@ -280,6 +280,8 @@ async fn validation_explanation_and_index_auth_do_not_load_credentials_or_dispat
         .insert("restart".into(), vec!["reconciliation".into()]);
     cfg.retrieval.lexical.stop_words.insert("the".into());
     cfg.retrieval.exact_identifiers = true;
+    cfg.retrieval.query_prefix = "Instruct: Retrieve supporting evidence.\nQuery: ".into();
+    cfg.retrieval.require_semantic_match = true;
     let (_app, url, server) = host(cfg.clone()).await;
     let client = reqwest::Client::new();
     assert_eq!(
@@ -312,6 +314,11 @@ async fn validation_explanation_and_index_auth_do_not_load_credentials_or_dispat
         .await
         .unwrap();
     assert_eq!(response["lexical_query"], "restart reconciliation");
+    assert_eq!(
+        response["embedding_query"],
+        "Instruct: Retrieve supporting evidence.\nQuery: restart"
+    );
+    assert_eq!(response["require_semantic_match"], true);
     assert_eq!(
         response["lexical_terms"],
         json!(["reconciliation", "restart"])

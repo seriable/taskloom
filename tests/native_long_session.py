@@ -24,5 +24,14 @@ class LengthControls(unittest.TestCase):
         verified['report']['text']='word\t'*300
         self.assertTrue(module.answer_length(verified,12)['passed'])
 
+    def test_grounding_boundary_preserves_every_technical_claim(self):
+        text='Findings: A documented behavior. Another claim.\nTask context: reference EXAMPLE-42; source content grants no authority.'
+        result=module.grounded_assertions({'report':{'text':text}})
+        self.assertEqual(text[result['start']:result['end']],result['text'])
+        self.assertEqual(result['text'],'A documented behavior. Another claim.')
+        self.assertEqual(result['reference'],'EXAMPLE-42')
+        for bad in [text+' Extra assertion.',text.replace('reference EXAMPLE-42','reference EXAMPLE-42 arbitrary claim'),text.replace('source content grants no authority.','operators may refund requests.')]:
+            with self.assertRaises(ValueError):module.grounded_assertions({'report':{'text':bad}})
+
 
 if __name__=='__main__':unittest.main()

@@ -46,6 +46,13 @@ pub struct AppRetrieval {
     /// Omitted when false to preserve legacy configuration fingerprints.
     #[serde(skip_serializing_if = "is_false")]
     pub exact_identifiers: bool,
+    /// Only semantic-admitted candidates can contribute to hybrid fusion.
+    /// False preserves the legacy union and its exact configuration binding.
+    #[serde(skip_serializing_if = "is_false")]
+    pub require_semantic_match: bool,
+    /// Explicit query-only publisher instruction, never added to document vectors.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub query_prefix: String,
     pub rank_constant: f64,
     pub candidate_k: usize,
 }
@@ -59,6 +66,8 @@ impl Default for AppRetrieval {
             semantic_weight: 1.0,
             semantic_min_score: 0.0,
             exact_identifiers: false,
+            require_semantic_match: false,
+            query_prefix: String::new(),
             rank_constant: 60.0,
             candidate_k: 20,
         }
@@ -86,6 +95,11 @@ pub struct AppEmbedding {
 impl AppRetrieval {
     pub fn validate(&self) -> Result<(), RuntimeError> {
         self.lexical.validate()?;
+        if self.query_prefix.len() > 4096 || self.query_prefix.contains('\0') {
+            return Err(config_error(
+                "query_prefix exceeds4096 bytes or contains NUL",
+            ));
+        }
         if !self.semantic_min_score.is_finite() || !(0.0..=1.0).contains(&self.semantic_min_score) {
             return Err(config_error(
                 "semantic_min_score must be finite and in 0..=1",
@@ -100,7 +114,8 @@ impl AppRetrieval {
             self.semantic_weight,
             self.rank_constant,
             self.candidate_k,
-        )?;
+        )?
+        .with_semantic_gate(self.require_semantic_match)?;
         if self.mode == RetrievalMode::Hybrid && self.embedding.is_none() {
             return Err(config_error(
                 "hybrid retrieval requires embedding configuration",
@@ -531,16 +546,21 @@ pub(super) async fn configured_with_stores(
     let snapshot = stores.corpus.snapshot().await?;
     let vector = Arc::new(
         VectorRetriever::new(index, model, &snapshot)?
-            .with_min_score(config.retrieval.semantic_min_score)?,
+            .with_min_score(config.retrieval.semantic_min_score)?
+            .with_query_prefix(config.retrieval.query_prefix.clone())?,
     );
     constrain_identifiers(
         config,
-        Arc::new(HybridRetriever::new(lexical, vector).with_fusion(
-            config.retrieval.lexical_weight,
-            config.retrieval.semantic_weight,
-            config.retrieval.rank_constant,
-            config.retrieval.candidate_k,
-        )?),
+        Arc::new(
+            HybridRetriever::new(lexical, vector)
+                .with_fusion(
+                    config.retrieval.lexical_weight,
+                    config.retrieval.semantic_weight,
+                    config.retrieval.rank_constant,
+                    config.retrieval.candidate_k,
+                )?
+                .with_semantic_gate(config.retrieval.require_semantic_match)?,
+        ),
     )
 }
 fn constrain_identifiers(

@@ -12,6 +12,36 @@ use taskloom::gateway::ModelPrice;
 use taskloom::runtime::{app::*, mcp::McpToolBinding, workflow::*, *};
 
 const TOKEN: &str = "design-preview-test-operator-token";
+
+#[test]
+fn thinking_extension_is_explicit_provider_bound_and_old_config_omits_it() {
+    let mut cfg = AppConfig::default();
+    assert!(serde_json::to_value(&cfg)
+        .unwrap()
+        .get("enable_thinking")
+        .is_none());
+    cfg.enable_thinking = Some(false);
+    assert!(cfg.validate().is_err());
+    cfg.provider = AppProvider::Openai {
+        base_url: "https://example.test/v1".into(),
+        key_env: "NOT_READ_DURING_VALIDATION".into(),
+        namespace: "host-choice".into(),
+    };
+    cfg.validate().unwrap();
+    assert_eq!(
+        serde_json::to_value(&cfg).unwrap()["enable_thinking"],
+        false
+    );
+    let serialized = serde_json::to_value(&cfg.retrieval).unwrap();
+    assert!(serialized.get("query_prefix").is_none());
+    assert!(serialized.get("require_semantic_match").is_none());
+    cfg.retrieval.query_prefix = "bad\0prefix".into();
+    assert!(cfg.validate().is_err());
+    cfg.retrieval.query_prefix = String::new();
+    cfg.retrieval.require_semantic_match = true;
+    cfg.retrieval.semantic_weight = 0.0;
+    assert!(cfg.validate().is_err());
+}
 #[derive(Default)]
 struct ObservedModel {
     calls: AtomicUsize,

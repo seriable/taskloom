@@ -193,6 +193,19 @@ development campaigns together used 177 HTTP attempts under the 200-attempt
 allocation, plus the separate five-request connection smoke. Structural passes
 therefore do not close the semantic-quality requirement or the Goal.
 
+Later grounded-research increment: fresh default application instructions now
+distinguish source findings, task context, modal guarantees and documented
+operator procedures. The native history example can freeze exact Findings/task
+context boundaries while preserving every technical assertion for assessment.
+An expanded 28-case native semantic control set scored 27/28 attached labels,
+28/28 corpus labels and all known contradictions. This is visible development
+calibration, not independent truth. The new history run completed eleven turns
+then failed its final indivisible retrieval block at the32KiB context bound.
+An explicit distinct-turn recovery retained all old runs and acknowledged the
+known failure, but its larger-context answer failed the deadline. The original
+failures and unknown timeout usage remain visible; no complete long-task
+quality gate is closed. See `grounded-research.md` for migration and scope.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,
@@ -245,6 +258,20 @@ prices/cap, no generation calls, and two retained calibration misses.
 This accepts that bounded configured profile; the general default/realistic
 corpus quality gate above stays open. See `retrieval-relevance.md` and
 `acceptance/p0-retrieval-relevance-20261128.json` for failures and limitations.
+
+Later complete-document transfer: twelve full repository operational documents
+produce139 chunks. Default lexical returned unrelated hits on12/12 negatives;
+the former configured hybrid retained four. An explicit semantic-admission
+fusion gate prevents lexical resurrection but at the old cutoff recalled only
+26/36 positives. A six-request actual raw/instruct score diagnostic motivated
+an explicit query-only publisher prefix and0.43 development cutoff. The next
+real application run passed observed calibration (35/36 recall, MRR0.8889,
+12/12 negatives empty), but new fixed queries failed (20/24, MRR0.7917,
+12/12 negatives empty). Both gates and all misses remain unchanged. There were
+190 actual local embedding requests across three builds/campaigns and the
+diagnostic, with no remote embedding charges. Optional empty/false settings
+retain old configuration identities; enabled fields are frozen and metered.
+The broad retrieval-quality box stays open. See `retrieval-relevance.md`.
 
 ## P1.1 — Cross-session memory
 

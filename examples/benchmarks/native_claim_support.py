@@ -64,6 +64,22 @@ def separate_judge_request(index, claim, attached, corpus):
                       'max_cost_micros':0,'max_duration':{'secs':300,'nanos':0},'shutdown_grace':{'secs':5,'nanos':0}}}
 
 
+def score_generated(cases, gates):
+    """Source-relative model judgments, never agreement with invented gold labels."""
+    if not cases:raise ValueError('no generated-answer judgments')
+    def supported(case,field):
+        return 'error' not in case and case.get('native',{}).get(field)=='supported'
+    measurements={field+'_supported':sum(supported(c,field) for c in cases)/len(cases)
+                  for field in ['cited_support','corpus_factuality']}
+    finals=[c for c in cases if c.get('is_final')]
+    checks={'fixed_case_count':len(cases)==gates['expected_cases'],
+            'cited_support':measurements['cited_support_supported']>=gates['minimum_cited_support'],
+            'corpus_factuality':measurements['corpus_factuality_supported']>=gates['minimum_corpus_factuality'],
+            'final_answer_supported':len(finals)==1 and all(supported(finals[0],f) for f in ['cited_support','corpus_factuality']),
+            'errors':sum('error' in c or not isinstance(c.get('native'),dict) for c in cases)<=gates['max_errors']}
+    return measurements,checks
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out', type=Path)
@@ -71,10 +87,11 @@ def main():
     parser.add_argument('--taskloom', type=Path, required=True)
     parser.add_argument('--verifier', type=Path, required=True)
     parser.add_argument('--controls', type=Path, default=Path('examples/benchmarks/claim-support-controls-v1.json'))
-    parser.add_argument('--rubric', choices=['v1', 'v2'], default='v1', help='v2 clarifies union-of-corpus and supplies unrelated examples; retain v1 failures')
+    parser.add_argument('--rubric', choices=['v1', 'v2', 'v3'], default='v1', help='explicit rubric version; v3 distinguishes finite excerpt scope, modal guarantees and task context')
     parser.add_argument('--output-tokens',type=int,default=1024,help='explicit 256..4096 native output allowance; changed conditions remain visible')
     parser.add_argument('--max-repairs',type=int,default=0,help='explicit 0..1 bounded tool-less JSON repair; original failures remain retained')
     parser.add_argument('--separate-evidence',action='store_true',help='two tool-less native roles; citation judge cannot see full corpus, no sibling dependency')
+    parser.add_argument('--assessment',action='store_true',help='assess actual answer findings without expected gold labels; final answer must be supported in both isolated contexts')
     args = parser.parse_args()
     if not 256<=args.output_tokens<=4096 or args.max_repairs not in [0,1]:
         raise ValueError('invalid bounded judge output/repair settings')
@@ -90,6 +107,11 @@ def main():
     cases = controls['cases']
     if controls['version'] != 1 or not 1 <= len(cases) <= 64 or len({c['id'] for c in cases}) != len(cases):
         raise ValueError('invalid bounded control set')
+    if args.assessment:
+        if not args.separate_evidence or any('expected_cited_support' in c or 'expected_corpus_factuality' in c for c in cases):
+            raise ValueError('generated assessment requires isolated roles and no claimed gold labels')
+    elif any(c.get('expected_cited_support') not in ['supported','contradicted','insufficient'] or c.get('expected_corpus_factuality') not in ['supported','contradicted','insufficient'] for c in cases):
+        raise ValueError('control cases require explicit reference labels before dispatch')
     documents = {d['id']: d for d in controls['documents']}
     for case in cases:
         if not set(case['citation_documents']) <= set(documents):
@@ -154,10 +176,26 @@ def main():
         config['roles']=[{'name':mode+'-judge','tools':[],'system':judge_system,
             'output':{'type':'validated','policy':{'type':'json_schema','schema':label_schema,'max_repairs':args.max_repairs}}}
             for mode in ['cited','corpus']]
+    if args.rubric == 'v3':
+        scope_rules=(' Evaluate the exact words, including modal qualifiers and scope. "No guarantee of P" '
+            'does not assert "not P" or "guaranteed not P"; absence of one delivery guarantee does not '
+            'establish another delivery guarantee. A directly described absence of a guarantee is itself '
+            'a supported limitation. A statement explicitly about what THIS finite supplied excerpt '
+            'contains or establishes may be assessed against the whole supplied excerpt; do not require '
+            'a sentence literally announcing every omitted command. This does not establish that a '
+            'feature is absent from the whole product or world. A statement about an unsupported global '
+            'operation, API or remedy remains insufficient. Distinguish an action recommendation from '
+            'a documented interface and require evidence for claimed availability/preconditions. '
+            'Do not import host/user requirements as if cited evidence established them. Before returning '
+            'a label, check the actual claim still says what your reason attributes to it.')
+        if args.separate_evidence:
+            for role in config['roles']:role['system']+=scope_rules
+        else:config['system']+=scope_rules
     save(root / 'app.json', config)
     save(root / 'controls.json', controls)
     report = {'version': 1, 'completed': False, 'scope': __doc__, 'cases': [], 'failures': [],
-              'rubric': 'single-evidence-v1' if args.separate_evidence else args.rubric,
+              'rubric': ('single-evidence-v3' if args.rubric=='v3' else 'single-evidence-v1') if args.separate_evidence else args.rubric,
+              'measurement_kind':'actual generated-answer source-relative judgments; not reference-label agreement or objective truth' if args.assessment else 'agreement with visible reference labels',
               'evidence_isolation':'two independent tool-less native role contexts; no corpus in citation input' if args.separate_evidence else 'joint verdict prompt with attached and full corpus visible',
               'controls_sha256': digest(args.controls), 'taskloom_sha256': digest(executable),
               'verifier_sha256': digest(verifier), 'configuration': config,
@@ -195,8 +233,9 @@ def main():
             retrieved[identity] = {'result': result, 'chunks': [h['chunk'] for h in match]}
     with host(executable, root / 'app.json', root) as api:
         for case_index,case in enumerate(cases):
-            observed = {'id': case['id'], 'claim': case['claim'], 'expected_cited_support': case['expected_cited_support'],
-                        'expected_corpus_factuality': case['expected_corpus_factuality']}
+            observed = {'id': case['id'], 'claim': case['claim']}
+            for field in ['expected_cited_support','expected_corpus_factuality','is_final','origin']:
+                if field in case:observed[field]=case[field]
             attached = [chunk for identity in case['citation_documents'] for chunk in retrieved[identity]['chunks']]
             if 'selected_chunk_ids' in case:
                 selected = set(case['selected_chunk_ids'])
@@ -253,15 +292,19 @@ def main():
                     observed['native'] = json.loads(state['state']['report']['messages'][-1]['turn']['content'])
                     if state['state']['report']['stop_reason'] != 'completed':
                         raise ValueError('native judge did not complete its JSON contract')
-                observed['cited_agrees'] = observed['native']['cited_support'] == case['expected_cited_support']
-                observed['corpus_agrees'] = observed['native']['corpus_factuality'] == case['expected_corpus_factuality']
+                if not args.assessment:
+                    observed['cited_agrees'] = observed['native']['cited_support'] == case['expected_cited_support']
+                    observed['corpus_agrees'] = observed['native']['corpus_factuality'] == case['expected_corpus_factuality']
             except Exception as error:
                 observed['error'] = str(error)
             observed['wall_ms'] = round((time.monotonic() - start) * 1000)
             report['cases'].append(observed)
             save(root / 'report.json', report)
             print(case['id'], observed.get('native', observed.get('error')), flush=True)
-    report['measurements'], report['checks'], report['confusion'] = score_controls(report['cases'], controls['predeclared_gates'])
+    if args.assessment:
+        report['measurements'],report['checks']=score_generated(report['cases'],controls['assessment_gates'])
+    else:
+        report['measurements'], report['checks'], report['confusion'] = score_controls(report['cases'], controls['predeclared_gates'])
     report['failures'] = [key for key, passed in report['checks'].items() if not passed]
     report.update(completed=True, status='passed' if all(report['checks'].values()) else 'failed')
     save(root / 'report.json', report)

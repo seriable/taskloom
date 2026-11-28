@@ -224,6 +224,7 @@ pub struct VectorRetriever {
     model: Arc<dyn EmbeddingModel>,
     binding: String,
     min_score: f64,
+    query_prefix: String,
 }
 impl VectorRetriever {
     pub fn new(
@@ -238,6 +239,7 @@ impl VectorRetriever {
             model,
             binding,
             min_score: 0.0,
+            query_prefix: String::new(),
         })
     }
     /// Host-calibrated minimum cosine similarity, in 0..=1. Positive
@@ -252,18 +254,38 @@ impl VectorRetriever {
         self.min_score = minimum;
         Ok(self)
     }
+    /// Explicit host/publisher query formatting; document vectors are unchanged.
+    /// The prefix is embedding input data and cannot grant tools or authority.
+    pub fn with_query_prefix(mut self, prefix: impl Into<String>) -> Result<Self, RuntimeError> {
+        let prefix = prefix.into();
+        if prefix.len() > 4096 || prefix.contains('\0') {
+            return Err(invalid(
+                "embedding query prefix exceeds4096 bytes or contains NUL",
+            ));
+        }
+        self.query_prefix = prefix;
+        Ok(self)
+    }
 }
 impl Retriever for VectorRetriever {
     fn identity(&self) -> Option<String> {
-        if self.min_score == 0.0 {
-            Some(format!("vector-v1:{}", self.binding))
+        let legacy = if self.min_score == 0.0 {
+            format!("vector-v1:{}", self.binding)
         } else {
-            Some(format!(
+            format!(
                 "vector-v2:{}",
                 fingerprint(&(&self.binding, self.min_score))
                     .expect("validated vector configuration")
-            ))
-        }
+            )
+        };
+        Some(if self.query_prefix.is_empty() {
+            legacy
+        } else {
+            format!(
+                "vector-query-prefix-v1:{}",
+                fingerprint(&(&legacy, &self.query_prefix)).expect("bounded query prefix")
+            )
+        })
     }
     fn retrieve<'a>(
         &'a self,
@@ -273,7 +295,8 @@ impl Retriever for VectorRetriever {
         Box::pin(async move {
             query.validate()?;
             self.index.validate(snapshot, &self.model.identity())?;
-            let batch = self.model.embed(std::slice::from_ref(&query.text)).await?;
+            let text = format!("{}{}", self.query_prefix, query.text);
+            let batch = self.model.embed(std::slice::from_ref(&text)).await?;
             if batch.identity != self.index.model_identity
                 || self.model.identity() != self.index.model_identity
                 || batch.vectors.len() != 1
@@ -317,6 +340,7 @@ pub struct HybridRetriever {
     semantic_weight: f64,
     rank_constant: f64,
     candidate_k: usize,
+    require_semantic_match: bool,
 }
 impl HybridRetriever {
     pub fn new(lexical: Arc<dyn Retriever>, semantic: Arc<dyn Retriever>) -> Self {
@@ -327,6 +351,7 @@ impl HybridRetriever {
             semantic_weight: 1.0,
             rank_constant: 60.0,
             candidate_k: 20,
+            require_semantic_match: false,
         }
     }
     pub fn with_fusion(
@@ -344,6 +369,7 @@ impl HybridRetriever {
             || lexical_weight + semantic_weight <= 0.0
             || !(1.0..=1000.0).contains(&rank_constant)
             || !(1..=20).contains(&candidate_k)
+            || (self.require_semantic_match && semantic_weight == 0.0)
         {
             return Err(invalid("invalid hybrid fusion limits/weights"));
         }
@@ -353,21 +379,45 @@ impl HybridRetriever {
         self.candidate_k = candidate_k;
         Ok(self)
     }
+    /// Require admission by the semantic lane before either lane contributes
+    /// to fusion. The semantic backend owns its explicit cutoff. This is
+    /// bounded candidate admission, not source entailment verification.
+    pub fn with_semantic_gate(mut self, required: bool) -> Result<Self, RuntimeError> {
+        if required && self.semantic_weight == 0.0 {
+            return Err(invalid(
+                "semantic admission requires an enabled semantic lane",
+            ));
+        }
+        self.require_semantic_match = required;
+        Ok(self)
+    }
 }
 impl Retriever for HybridRetriever {
     fn identity(&self) -> Option<String> {
-        Some(format!(
+        let lexical_identity = self.lexical.identity();
+        let semantic_identity = self.semantic.identity();
+        if (self.lexical_weight > 0.0 && lexical_identity.is_none())
+            || (self.semantic_weight > 0.0 && semantic_identity.is_none())
+        {
+            return None;
+        }
+        let legacy = format!(
             "hybrid-v1:{}",
             fingerprint(&(
-                self.lexical.identity(),
-                self.semantic.identity(),
+                lexical_identity,
+                semantic_identity,
                 self.lexical_weight,
                 self.semantic_weight,
                 self.rank_constant,
                 self.candidate_k
             ))
             .expect("finite fusion configuration")
-        ))
+        );
+        Some(if self.require_semantic_match {
+            format!("hybrid-semantic-gate-v1:{legacy}")
+        } else {
+            legacy
+        })
     }
     fn retrieve<'a>(
         &'a self,
@@ -394,6 +444,10 @@ impl Retriever for HybridRetriever {
                 ),
             )
             .await?;
+            let admitted = semantic
+                .iter()
+                .map(|item| item.chunk_id.clone())
+                .collect::<BTreeSet<_>>();
             let known = snapshot
                 .chunks
                 .iter()
@@ -417,6 +471,9 @@ impl Retriever for HybridRetriever {
                 }
                 rank(&mut ranking);
                 for (index, item) in ranking.into_iter().enumerate() {
+                    if self.require_semantic_match && !admitted.contains(&item.chunk_id) {
+                        continue;
+                    }
                     *fused.entry(item.chunk_id).or_default() +=
                         weight / (self.rank_constant + (index + 1) as f64);
                 }

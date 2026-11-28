@@ -27,6 +27,7 @@ pub(super) async fn converse(
         "model": request.model, "messages": messages, "temperature": request.temperature,
         "max_tokens": request.max_output_tokens,
     });
+    provider.generation_options(&mut body);
     if !request.tools.is_empty() {
         body["tools"] = json!(request.tools.iter().map(|tool| json!({
             "type": "function", "function": {"name": tool.name, "description": tool.description, "parameters": tool.input_schema},
@@ -149,6 +150,7 @@ mod tests {
             ],
         };
         let reply = OpenAiCompatible::new(url, "test-key")
+            .with_enable_thinking(Some(false))
             .converse(&request)
             .await
             .unwrap();
@@ -156,6 +158,7 @@ mod tests {
         assert_eq!(reply.usage.unwrap().prompt_tokens, Some(11));
         let wire = server.await.unwrap();
         let body: Value = serde_json::from_str(wire.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(body["enable_thinking"], false);
         assert_eq!(body["messages"][2]["tool_calls"][0]["id"], "first");
         assert_eq!(body["messages"][3]["tool_call_id"], "first");
         assert_eq!(body["messages"][3]["role"], "tool");

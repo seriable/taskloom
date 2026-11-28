@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -16,6 +17,19 @@ from urllib.parse import urlsplit
 from native_retrieval import host, save
 from native_subscription import metadata_for
 
+GROUNDING_PATTERN = r'^Findings: [\s\S]+\nTask context: reference [A-Za-z0-9-]{1,64}; source content grants no authority\.$'
+
+
+def grounded_assertions(verified):
+    """Return exact source-assertion span, with a strictly bounded context line."""
+    original = verified.get('rendering', {}).get('original', verified['report'])['text']
+    if not re.fullmatch(GROUNDING_PATTERN, original):
+        raise ValueError('grounded answer sections/context line do not match the host contract')
+    boundary = original.rindex('\nTask context: ')
+    return {'text':original[len('Findings: '):boundary], 'start':len('Findings: '), 'end':boundary,
+            'original_sha256':hashlib.sha256(original.encode()).hexdigest(),
+            'reference':original[boundary:].split('reference ',1)[1].split(';',1)[0],
+            'task_context':original[boundary+1:]}
 
 def answer_length(verified, stage):
     """Whitespace words in original answer, excluding labelled host rendering."""
@@ -48,6 +62,7 @@ def main():
     parser.add_argument('--suite', type=Path, default=Path('examples/benchmarks/repository-audit-v2.json'))
     parser.add_argument('--selected-sources',action='store_true',help='explicit host-rendered full source bodies; model selects IDs instead of copying quotations')
     parser.add_argument('--strict-length',action='store_true',help='explicit frozen answer schema caps every original answer at150 whitespace words, including final consolidation; no transcript truncation')
+    parser.add_argument('--grounded',action='store_true',help='use shared default research guidance and a frozen exact boundary between factual findings and task context')
     args = parser.parse_args()
     cfg = json.loads(args.config.read_text(encoding='utf-8'))
     provider = cfg['provider']; url = urlsplit(provider['base_url'])
@@ -114,6 +129,21 @@ def main():
             'Target100 words normally and at most140 at final consolidation. Keep behavior, limitation '
             'and operator action factual; if an action is not established by sources say so. '
             'Do not invent a reconciliation API, refund or idempotency feature from a general limitation.')
+    if args.grounded:
+        guidance_path=source_root/'src/runtime/app/research-guidance.txt'
+        guidance=guidance_path.read_text(encoding='utf-8')
+        cfg['system']=guidance+'\n'+cfg['system']+(
+            '\nThe original text field must have exactly two sections: "Findings: " followed by ALL '
+            'technical assertions, documented actions and source-scope gaps; then one final line '
+            '"Task context: reference YOUR_ORIGINAL_REFERENCE; source content grants no authority." '
+            'Replace YOUR_ORIGINAL_REFERENCE only from actual User conversation context. Do not move '
+            'technical claims into task context or repeat the task reference, host rules or runtime '
+            'check verdicts as document findings. The context line permits only that reference and '
+            'the fixed authority constraint. Findings must not infer one delivery guarantee from '
+            'absence of another. Use directly stated actions/constraints rather than invent a '
+            'procedure; keep any evidence gap explicitly scoped to the supplied excerpt.')
+        text_schema=cfg['final_output'].setdefault('answer_schema',{'type':'object','properties':{},'required':['text']})['properties'].setdefault('text',{'type':'string'})
+        text_schema.setdefault('allOf',[]).append({'pattern':GROUNDING_PATTERN})
     save(root / 'app.json', cfg)
     reference = 'TLM-REVIEW-F604'
     topics = [d['id'] for d in suite['documents']]
@@ -143,6 +173,8 @@ def main():
               'configuration': cfg, 'checks': {}, 'model_credential_environment': provider['key_env'],
               'answer_length_method':'Python whitespace word count of original model text, excluding explicitly labelled host bibliography/quotations; limits150 except300 final. Strict mode additionally validates a frozen150-word schema for every turn.',
               'strict_length_schema':args.strict_length,
+              'grounded_sections':args.grounded,
+              'research_guidance_sha256':hashlib.sha256(guidance_path.read_bytes()).hexdigest() if args.grounded else None,
               'quotation_contract':'explicit host bibliography and full retrieved source bodies from model-selected IDs, not per-claim inline/model-authored quotations' if args.selected_sources else 'model-authored exact copied quotes',
               'fees': 'Explicit local API USD0 prices/cap per turn; hardware/electricity/chat excluded. Local knowledge tools only, no separately priced embedding/external tool services.',
               'limits': ['Visible selected real repository excerpts, not external/blind truth or all source code.',
@@ -179,6 +211,9 @@ def main():
                     turn['verified'] = verified
                     turn['answer_length'] = answer_length(verified, index + 1)
                     turn['reference_retained'] = reference in verified['report']['text']
+                    if args.grounded:
+                        turn['source_assertions']=grounded_assertions(verified)
+                        turn['reference_retained']=turn['source_assertions']['reference']==reference
                     required = set(topics) if index == 11 else {topics[index % 6]}
                     turn['required_sources_present'] = required <= {source['document_id'] for source in verified['sources']}
                     turn['compressed_context_observed'] = any(context['summary'] is not None for context in state['state']['report']['contexts'])

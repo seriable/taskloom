@@ -57,6 +57,14 @@ class SubscriptionControls(unittest.TestCase):
     def test_redirects_do_not_forward_credentials(self):
         self.assertIsNone(module.NoRedirect().redirect_request(None,None,302,None,None,None))
 
+    def test_client_aborts_do_not_turn_known_upstream_usage_into_unknown(self):
+        handler=module.make_handler(None,None,'chosen','secret-fixture','local-fixture')
+        from unittest.mock import Mock
+        for error in [BrokenPipeError,ConnectionResetError,ConnectionAbortedError]:
+            response=Mock();response.wfile.write.side_effect=error()
+            handler.reply(response,200,b'known upstream result')
+            self.assertEqual(response.wfile.write.call_count,1)
+
     def test_http_auth_model_and_exhaustion_prevent_upstream_dispatch(self):
         # Explicit offline HTTP fixture; no remote inference or network route.
         with tempfile.TemporaryDirectory() as folder:
