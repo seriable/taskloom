@@ -128,6 +128,50 @@ It checks exact JSON and the schema, not application semantics. Its schema is
 limited to 128 KiB; external schema retrieval is unavailable in the runtime's
 dependency configuration.
 
+Citation contracts can additionally declare `answer_schema` for the original
+model JSON. Both that schema and exact source/quote/marker/coverage checks must
+pass before success. For example, a checklist template can require an explicit
+reservation-timing section instead of relying on a model reviewer to notice an
+omission:
+
+```json
+{
+  "type": "cited_report",
+  "max_repairs": 2,
+  "required_documents": ["approval", "recovery", "budget"],
+  "answer_schema": {
+    "type": "object",
+    "required": ["text", "citations"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "allOf": [
+          {"pattern": "[Aa]pproval:"},
+          {"pattern": "[Rr]ecovery:"},
+          {"pattern": "[Rr]eservation timing:"},
+          {"pattern": "[Bb]illing:"}
+        ]
+      }
+    }
+  }
+}
+```
+
+The schema must be at most 128 KiB and compile before model dispatch, using the
+same offline schema validator as `JsonSchema`. This is host-selected structure,
+not a model grant or entailment test: an empty/misleading section can still
+match a pattern. Review its factual content and completeness separately. Extra
+top-level output fields are not enabled by a permissive schema; the ordinary
+strict `CitedReport`/`LocatedReport` parser still applies. Schema failure uses
+the same bounded, metered, durable repair loop and narrowed read-only tools.
+
+`located_cited_report` checks this schema on the original locator JSON before
+rendering canonical chunk references. For SDK use,
+`FinalOutputPolicy::cited_report(2).with_answer_schema(schema)?` validates the
+configuration eagerly. API/CLI/UI configuration uses the same policy JSON and
+existing validation path. The increment has SDK/API configuration regressions
+and actual native workflow evidence; no new browser interaction is claimed.
+
 ## Repairs, recovery and permissions
 
 An invalid draft emits `OutputRejected`, including policy identity, step,
@@ -137,6 +181,16 @@ Every model attempt retains the ordinary durable spending reservation rules.
 `OutputValidated` is required before a contracted run can finish successfully.
 Exhausted validation repairs produce `ProtocolError`, without successful final
 text. A budget or deadline may stop the run earlier.
+
+Repair diagnostics identify missing ordinal markers, actual source-count and
+missing required document IDs (at most six shown). Missing run-local evidence
+explicitly distinguishes dependency citations from completed tool observations
+and names the configured citation readers. These are instructions to repair
+the answer using existing grants, never a fabricated search or a quotation/ID
+rewrite. Raw model drafts stay in the journal. New prompt feedback can change
+model behavior; later native campaigns are qualified separately from earlier
+conditions. Resuming an existing unfinished repair may receive the newer error
+explanation at its next validation; already saved feedback remains unchanged.
 
 After the first rejection, citation repair can use only the intersection of
 the original allowed tools and the contract's permitted read-only retrieval
@@ -167,6 +221,12 @@ than a JSON string. Rust exhaustive matches on `WorkflowOutput` and
 `RunConfig`/`AppConfig` must supply the new optional field or use an applicable
 default update. No feature is added to the
 minimal default build, and the MSRV remains Rust 1.86.
+
+Absent/null `answer_schema` remains omitted during serialization and preserves
+the prior citation-policy identity. Adding/changing a schema changes the frozen
+contract; create a new run/workflow instead of resuming old work with it. Direct
+Rust `CitedReport`/`LocatedCitedReport` enum literals need `answer_schema: None`
+or a constructor. The separate typed `AgentTask` API is unchanged.
 
 `cargo test --locked --all-features --test agent_output` exercises control,
 budget, storage, permission, coverage, checkpoint compatibility, restart and

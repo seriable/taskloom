@@ -274,3 +274,12 @@ Broader realistic/long tasks, native failure repair, independent semantic/source
 support and retrieval relevance remain open. Actual two-role Taskloom process
 death during an approved external write is documented separately in
 `workflow-recovery-acceptance.md`; it is not a competitor recovery comparison.
+
+Later Taskloom-only protocol/reasoning trials are documented in
+`claim-support-evaluation.md`. Their model settings/output contracts differ from
+this V5 comparison. V7's original mechanical 2/3 counter reduces to 1/3 when
+every original requested topic is audited; the missing reservation-timing
+requirement is now explicit in V8. V9's stronger cited answer schema still
+produced 0/3 native task passes. These results do not replace the above table
+with a Taskloom superiority claim. Two separate native semantic-judge control
+campaigns also failed; reviewer approval alone is not reliable quality evidence.

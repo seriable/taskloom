@@ -18,6 +18,7 @@ enum Mode {
     Reject,
     Escape,
     RetrieveDuringRepair,
+    SectionRepair,
 }
 struct CitationModel {
     calls: AtomicUsize,
@@ -80,10 +81,16 @@ impl Model for CitationModel {
                 }
             } else if let Some(evidence) = evidence {
                 let chunk = &evidence.hits[0].chunk;
-                let valid = repair && !matches!(self.mode, Mode::Reject);
+                let valid = (repair || matches!(self.mode, Mode::SectionRepair))
+                    && !matches!(self.mode, Mode::Reject);
                 let text = if valid {
                     format!(
-                        "Check the operation [[{}]].",
+                        "{} [[{}]].",
+                        if repair && matches!(self.mode, Mode::SectionRepair) {
+                            "Approval checklist: inspect the exact arguments"
+                        } else {
+                            "Check the operation"
+                        },
                         if self.located { "1" } else { &chunk.id }
                     )
                 } else {
@@ -104,6 +111,99 @@ impl Model for CitationModel {
             })
         })
     }
+}
+
+#[tokio::test]
+async fn cited_answer_schema_repairs_structure_in_same_run_and_binds_original_format() {
+    for located in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let writes = Arc::new(AtomicUsize::new(0));
+        let tools = tools(dir.path(), writes.clone()).await;
+        let model = if located {
+            CitationModel::located(Mode::SectionRepair)
+        } else {
+            CitationModel::new(Mode::SectionRepair)
+        };
+        let base = if located {
+            FinalOutputPolicy::located_cited_report(1)
+        } else {
+            FinalOutputPolicy::cited_report(1)
+        };
+        let legacy = serde_json::to_value(&base).unwrap();
+        assert!(legacy.get("answer_schema").is_none());
+        assert_eq!(
+            serde_json::from_value::<FinalOutputPolicy>(legacy)
+                .unwrap()
+                .identity()
+                .unwrap(),
+            base.identity().unwrap()
+        );
+        let schema = json!({"type":"object","required":["text","citations"],"properties":{
+            "text":{"type":"string","pattern":if located {"^Approval checklist:.*\\[\\[1\\]\\]"} else {"^Approval checklist:"}},
+            "citations":{"type":"array","minItems":1,"items":{"type":"object","required":if located {vec!["document_id","corpus_revision","start","quote"]} else {vec!["chunk_id","quote"]}}}
+        }});
+        let policy = base.clone().with_answer_schema(schema).unwrap();
+        assert_ne!(base.identity().unwrap(), policy.identity().unwrap());
+        let agent = agent(&model, &tools, 1).with_output_policy(policy.clone());
+        let store = FileRunStore::new(dir.path().join("runs"));
+        let durable = DurableAgent::new(&agent, &store);
+        let done = durable
+            .start(
+                "sections",
+                vec![Message::user("write an approval checklist")],
+            )
+            .await
+            .unwrap();
+        assert_eq!(done.report.stop_reason, StopReason::Completed);
+        assert_eq!(done.report.budget.committed_micros, 30);
+        let rejections = done
+            .report
+            .events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                RunEventKind::OutputRejected { detail, .. } => Some(detail),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rejections.len(), 1);
+        assert!(rejections[0].contains("cited answer schema rejected"));
+        assert_eq!(done.report.tool_calls, 1);
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert!(model.requests.lock().unwrap()[2]
+            .tools
+            .iter()
+            .all(|t| t.name == "knowledge_search"));
+        assert_eq!(
+            durable.resume("sections").await.unwrap().revision,
+            done.revision
+        );
+        let changed = agent.with_output_policy(base);
+        assert!(matches!(
+            DurableAgent::new(&changed, &store).resume("sections").await,
+            Err(RuntimeError::Configuration(_))
+        ));
+        assert_eq!(model.calls.load(Ordering::SeqCst), 3);
+    }
+}
+
+#[test]
+fn additional_citation_schema_is_validated_and_old_none_is_identity_compatible() {
+    let base = FinalOutputPolicy::cited_report(1);
+    assert!(base
+        .clone()
+        .with_answer_schema(json!({"type":"invented-type"}))
+        .is_err());
+    assert!(base
+        .clone()
+        .with_answer_schema(json!({"description":"a".repeat(128*1024)}))
+        .is_err());
+    let old: FinalOutputPolicy =
+        serde_json::from_value(json!({"type":"cited_report","max_repairs":1})).unwrap();
+    assert_eq!(base.identity().unwrap(), old.identity().unwrap());
+    let explicit: FinalOutputPolicy =
+        serde_json::from_value(json!({"type":"cited_report","max_repairs":1,"answer_schema":null}))
+            .unwrap();
+    assert_eq!(base.identity().unwrap(), explicit.identity().unwrap());
 }
 async fn tools(root: &std::path::Path, writes: Arc<AtomicUsize>) -> ToolRegistry {
     let corpus = Arc::new(FileCorpusStore::new(root.join("knowledge")));
@@ -539,19 +639,24 @@ async fn citation_contract_rejects_missing_required_documents_and_effectful_read
         min_sources: 1,
         required_documents: BTreeSet::from(["absent-document".into()]),
         max_repairs: 1,
+        answer_schema: None,
     };
     let report = agent(&model, &tools, 1)
         .with_output_policy(contract)
         .run("coverage", vec![Message::user("research")])
         .await;
     assert_eq!(report.stop_reason, StopReason::ProtocolError);
-    assert!(report.detail.unwrap().contains("citation coverage"));
+    let detail = report.detail.unwrap();
+    assert!(detail.contains("citation coverage"));
+    assert!(detail.contains("absent-document"));
+    assert!(detail.contains("1 missing documents"));
     let before = model.calls.load(Ordering::SeqCst);
     let contract = FinalOutputPolicy::CitedReport {
         retrieval_tools: BTreeSet::from(["save".into()]),
         min_sources: 1,
         required_documents: BTreeSet::new(),
         max_repairs: 1,
+        answer_schema: None,
     };
     let report = agent(&model, &tools, 1)
         .with_output_policy(contract)
@@ -757,19 +862,23 @@ async fn located_coverage_and_reader_effects_remain_host_owned() {
         min_sources: 1,
         required_documents: BTreeSet::from(["missing".into()]),
         max_repairs: 1,
+        answer_schema: None,
     };
     let report = agent(&model, &tools, 1)
         .with_output_policy(policy)
         .run("located-coverage", vec![Message::user("research")])
         .await;
     assert_eq!(report.stop_reason, StopReason::ProtocolError);
-    assert!(report.detail.unwrap().contains("citation coverage"));
+    let detail = report.detail.unwrap();
+    assert!(detail.contains("citation coverage"));
+    assert!(detail.contains("missing"));
     let before = model.calls.load(Ordering::SeqCst);
     let policy = FinalOutputPolicy::LocatedCitedReport {
         retrieval_tools: BTreeSet::from(["save".into()]),
         min_sources: 1,
         required_documents: Default::default(),
         max_repairs: 1,
+        answer_schema: None,
     };
     let report = agent(&model, &tools, 1)
         .with_output_policy(policy)

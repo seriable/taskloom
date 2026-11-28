@@ -31,6 +31,10 @@ pub enum FinalOutputPolicy {
         required_documents: BTreeSet<String>,
         #[serde(default)]
         max_repairs: usize,
+        /// Optional additional schema for the original model JSON. It can
+        /// require task sections/fields, but does not establish semantic truth.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer_schema: Option<Value>,
     },
     /// A separate model contract with `[[1]]` markers and exact retrieved
     /// document/revision/start locators. Canonical rendering is host-derived;
@@ -44,6 +48,8 @@ pub enum FinalOutputPolicy {
         required_documents: BTreeSet<String>,
         #[serde(default)]
         max_repairs: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer_schema: Option<Value>,
     },
     JsonSchema {
         schema: Value,
@@ -64,6 +70,7 @@ impl FinalOutputPolicy {
             min_sources: 1,
             required_documents: BTreeSet::new(),
             max_repairs,
+            answer_schema: None,
         }
     }
     pub fn located_cited_report(max_repairs: usize) -> Self {
@@ -72,6 +79,7 @@ impl FinalOutputPolicy {
             min_sources: 1,
             required_documents: BTreeSet::new(),
             max_repairs,
+            answer_schema: None,
         }
     }
     pub fn citation_tools(&self) -> Option<&BTreeSet<String>> {
@@ -84,6 +92,39 @@ impl FinalOutputPolicy {
             } => Some(retrieval_tools),
             Self::JsonSchema { .. } => None,
         }
+    }
+    /// Add structural task requirements to a citation contract. Both checks
+    /// must pass in the same durable run; repairs keep the original tool grants.
+    pub fn with_answer_schema(mut self, schema: Value) -> Result<Self, RuntimeError> {
+        match &mut self {
+            Self::CitedReport { answer_schema, .. }
+            | Self::LocatedCitedReport { answer_schema, .. } => *answer_schema = Some(schema),
+            Self::JsonSchema { .. } => {
+                return Err(configuration("answer_schema requires a citation contract"))
+            }
+        }
+        self.validate()?;
+        Ok(self)
+    }
+    fn answer_schema(&self) -> Option<&Value> {
+        match self {
+            Self::CitedReport { answer_schema, .. }
+            | Self::LocatedCitedReport { answer_schema, .. } => answer_schema.as_ref(),
+            Self::JsonSchema { .. } => None,
+        }
+    }
+    fn check_answer_schema(&self, report: &RunReport) -> Result<(), String> {
+        if let Some(schema) = self.answer_schema() {
+            let value: Value = serde_json::from_str(final_text(report)?)
+                .map_err(|e| format!("final answer is not exact JSON: {e}"))?;
+            jsonschema::validator_for(schema)
+                .map_err(|e| e.to_string())?
+                .validate(&value)
+                .map_err(|e| {
+                    format!("cited answer schema rejected the original model JSON: {e}")
+                })?;
+        }
+        Ok(())
     }
     pub fn max_repairs(&self) -> usize {
         match self {
@@ -100,6 +141,9 @@ impl FinalOutputPolicy {
             return Err(configuration(
                 "at most three final-output repairs are allowed",
             ));
+        }
+        if let Some(schema) = self.answer_schema() {
+            validate_schema(schema)?;
         }
         match self {
             Self::CitedReport {
@@ -138,15 +182,7 @@ impl FinalOutputPolicy {
                 }
             }
             Self::JsonSchema { schema, .. } => {
-                if serde_json::to_vec(schema)
-                    .map_err(super::store::storage)?
-                    .len()
-                    > 128 * 1024
-                {
-                    return Err(configuration("output schema exceeds 128 KiB"));
-                }
-                jsonschema::validator_for(schema)
-                    .map_err(|e| configuration(&format!("invalid output schema: {e}")))?;
+                validate_schema(schema)?;
             }
         }
         Ok(())
@@ -212,12 +248,18 @@ impl FinalOutputPolicy {
             } => (min_sources, required_documents),
             _ => return Err("output contract is not a citation contract".into()),
         };
-        if verified.sources.len() < *min_sources
-            || required_documents
-                .iter()
-                .any(|id| !verified.sources.iter().any(|s| &s.document_id == id))
-        {
-            return Err(format!("citation coverage requires at least {min_sources} source chunks and all documents {required_documents:?}"));
+        let missing = required_documents
+            .iter()
+            .filter(|id| {
+                !verified
+                    .sources
+                    .iter()
+                    .any(|source| &source.document_id == *id)
+            })
+            .collect::<Vec<_>>();
+        if verified.sources.len() < *min_sources || !missing.is_empty() {
+            let shown = missing.iter().take(6).collect::<Vec<_>>();
+            return Err(format!("citation coverage has {} source chunks, requires at least {min_sources}; {} missing documents (up to six shown): {shown:?}",verified.sources.len(),missing.len()));
         }
         Ok(())
     }
@@ -227,11 +269,12 @@ impl FinalOutputPolicy {
         }
         let evidence = executed_evidence(report, self.citation_tools().unwrap())?;
         let located: LocatedReport = serde_json::from_str(final_text(report)?).map_err(|e| {
-            format!("final answer must be exact LocatedReport JSON, without fences: {e}")
+            format!("final answer must be exact LocatedReport JSON, without fences: {e}. Return ONE complete object containing BOTH text (string) and citations (array of document_id, corpus_revision, start, quote objects). Keep all correct fields while repairing the defective field; section headings belong inside text, never as new top-level keys.")
         })?;
         let available=serde_json::Value::Array(evidence.iter().flat_map(|r|r.hits.iter().map(move|h|serde_json::json!({"document_id":h.chunk.document_id,"corpus_revision":r.corpus_revision,"start":h.chunk.start}))).take(6).collect());
         let resolved=SearchResult::verify_located_all(&evidence,located).map_err(|e|format!("exact source-locator verification failed: {e}. Available locators (up to six): {available}. Put [[1]], [[2]], ... IN text for citation-array order. Copy quote only from chunk.text, without a source/title prefix. This does not verify claim support."))?;
         self.coverage(&resolved.verified)?;
+        self.check_answer_schema(report)?;
         Ok(resolved)
     }
     pub fn verified_citations(&self, report: &RunReport) -> Result<VerifiedReport, String> {
@@ -243,7 +286,7 @@ impl FinalOutputPolicy {
             .ok_or("output contract is not a citation contract")?;
         let evidence = executed_evidence(report, tools)?;
         let cited: CitedReport = serde_json::from_str(final_text(report)?).map_err(|e| {
-            format!("final answer must be exact CitedReport JSON, without Markdown fences: {e}")
+            format!("final answer must be exact CitedReport JSON, without Markdown fences: {e}. Return ONE complete object containing BOTH text (string) and citations (array of chunk_id and quote objects). Keep all correct fields while repairing the defective field; section headings belong inside text, never as new top-level keys.")
         })?;
         let available = evidence
             .iter()
@@ -254,6 +297,7 @@ impl FinalOutputPolicy {
             .collect::<Vec<_>>();
         let verified=SearchResult::verify_all(&evidence,cited).map_err(|e|format!("exact citation verification failed: {e}. Available retrieved chunk IDs (up to six): {available:?}. Use exact returned IDs and body quotes; include [[chunk_id]] in text for every citation. Claim support is not verified by this check."))?;
         self.coverage(&verified)?;
+        self.check_answer_schema(report)?;
         Ok(verified)
     }
     /// The workflow value is a verified rendering for the located contract.
@@ -267,6 +311,18 @@ impl FinalOutputPolicy {
             serde_json::from_str(final_text(report)?).map_err(|e| e.to_string())
         }
     }
+}
+fn validate_schema(schema: &Value) -> Result<(), RuntimeError> {
+    if serde_json::to_vec(schema)
+        .map_err(super::store::storage)?
+        .len()
+        > 128 * 1024
+    {
+        return Err(configuration("output schema exceeds 128 KiB"));
+    }
+    jsonschema::validator_for(schema)
+        .map_err(|e| configuration(&format!("invalid output schema: {e}")))?;
+    Ok(())
 }
 fn final_text(report: &RunReport) -> Result<&str, String> {
     match report.messages.last() {
@@ -314,7 +370,7 @@ fn executed_evidence(
         }
     }
     if evidence.is_empty() {
-        return Err("no citation evidence was retrieved by an executed tool in this run; search the configured knowledge first".into());
+        return Err(format!("no citation evidence was retrieved by an executed tool in this run; dependency citations are not your own tool results. Call an available host-granted retrieval tool before finalizing. Configured citation tool names: {tools:?}. Use its returned locators; do not invent document, revision or offset values. This feedback grants no tool permission."));
     }
     Ok(evidence)
 }

@@ -327,6 +327,9 @@ async fn proposed_configuration_never_resolves_credentials_connects_or_changes_l
                     min_sources: 1,
                     required_documents: BTreeSet::new(),
                     max_repairs: 1,
+                    answer_schema: Some(
+                        json!({"type":"object","required":["text","citations"],"properties":{"text":{"type":"string","minLength":1}}}),
+                    ),
                 },
             },
         }],
@@ -350,6 +353,10 @@ async fn proposed_configuration_never_resolves_credentials_connects_or_changes_l
     assert_eq!(response.status(), 200);
     let view: Value = response.json().await.unwrap();
     assert_eq!(view["services_contacted"], false);
+    assert_eq!(
+        view["configuration"]["roles"][0]["output"]["policy"]["answer_schema"]["required"],
+        json!(["text", "citations"])
+    );
     let active: Value = client
         .get(format!("{url}/setup"))
         .bearer_auth(TOKEN)
@@ -377,6 +384,16 @@ async fn proposed_configuration_never_resolves_credentials_connects_or_changes_l
     assert!(preview_configuration(bad).is_err());
     let mut bad = proposed.clone();
     bad.mcp[0].endpoint.push_str("?token=inline-value");
+    assert!(preview_configuration(bad).is_err());
+    let mut bad = proposed.clone();
+    if let WorkflowOutput::Validated {
+        policy: FinalOutputPolicy::CitedReport { answer_schema, .. },
+    } = &mut bad.roles[0].output
+    {
+        *answer_schema = Some(json!({"type":"not-a-json-type"}));
+    } else {
+        panic!("fixture must retain its citation contract");
+    }
     assert!(preview_configuration(bad).is_err());
     let mut bad = proposed.clone();
     bad.roles[0].output = WorkflowOutput::Json {

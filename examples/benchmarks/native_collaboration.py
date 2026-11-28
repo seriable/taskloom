@@ -22,12 +22,13 @@ def node(name, task, dependencies=(), params=None, select=None):
 
 def run_case(case, api, root, verifier):
     started = time.perf_counter()
+    writer_role = case.get("writer_role", "writer")
     request = {"id": case["id"], "input": {"goal": case["goal"]}, "definition": None, "peer": None,
-        "limits": {"max_nodes": 32, "max_parallel": case.get("max_parallel", 2), "max_dispatches": 64, "max_duration": {"secs": 300, "nanos": 0},
+        "limits": {"max_nodes": 32, "max_parallel": case.get("max_parallel", 2), "max_dispatches": 64, "max_duration": {"secs": case.get("duration_seconds", 300), "nanos": 0},
                    "shutdown_grace": {"secs": 5, "nanos": 0}, "max_output_bytes": 131072, "max_cost_micros": 1}}
     if case["kind"] == "peer":
-        request["peer"] = {"planner": "planner", "executor": "analyst", "writer": "writer", "reviewer": "reviewer",
-                           "max_tasks": 2, "max_revisions": 1}
+        request["peer"] = {"planner": "planner", "executor": "analyst", "writer": writer_role, "reviewer": "reviewer",
+                           "max_tasks": case.get("max_tasks", 2), "max_revisions": 1}
         final_node = "result"
     else:
         branches = [node(b["id"], "analyst", params={"instructions": b["instructions"]}) for b in case["branches"]]
@@ -35,7 +36,7 @@ def run_case(case, api, root, verifier):
         if case.get("initial_draft"):
             branches.append(node("review-initial", "reviewer", params={"candidate": case["initial_draft"]}))
             dependencies.append("review-initial")
-        request["definition"] = {"nodes": branches + [node("draft", "writer", dependencies),
+        request["definition"] = {"nodes": branches + [node("draft", writer_role, dependencies),
             node("review", "reviewer", ["draft"], select={"draft": {"node": "draft", "pointer": ""}})]}
         final_node = "draft"
     result = {"id": case["id"], "request": request, "failures": [], "children": [], "model_steps": 0, "tool_attempts": 0,
@@ -46,7 +47,7 @@ def run_case(case, api, root, verifier):
     directory.mkdir()
     try:
         api("/workflows", request)
-        for _ in range(1600):
+        for _ in range(5 * (case.get("duration_seconds", 300) + 20)):
             observed = api("/workflows/" + case["id"])
             if not observed["job"]["active"]:
                 break
@@ -95,6 +96,11 @@ def run_case(case, api, root, verifier):
                     active.discard(kind["node"])
                 maximum = max(maximum, len(active))
         result["maximum_concurrent_analysts"] = maximum
+        result["completed_analyst_roles"] = sum(item["status"] == "complete" and item["id"] in work_ids for item in state["nodes"])
+        if result["completed_analyst_roles"] < case.get("min_completed_analysts", 0):
+            result["failures"].append("minimum completed analyst role count was not reached")
+        if result["native_usage"]["requests"] < case.get("min_native_requests", 0):
+            result["failures"].append("minimum completed native request count was not reached")
         result["review_rework_exercised"] = any(n["id"] == "draft-1" and n["status"] == "complete" for n in state["nodes"])
         if case.get("initial_draft"):
             initial_review = next((n.get("output") for n in state["nodes"] if n["id"] == "review-initial"), None)
@@ -169,8 +175,28 @@ def main():
     if not config.get("prices") or urlsplit(config["provider"]["base_url"]).hostname not in {"localhost", "127.0.0.1", "::1"} or any(p["input_per_million"] or p["output_per_million"] for p in config["prices"]):
         raise ValueError("this example only supports explicitly zero-fee local native APIs")
     suite = json.loads(args.suite.read_text(encoding="utf-8"))
-    if suite["version"] not in {1, 2, 3, 4, 5} or not suite["cases"]:
+    if suite["version"] not in {1, 2, 3, 4, 5, 6, 7, 8, 9} or not suite["cases"]:
         raise ValueError("unsupported suite")
+    for case in suite["cases"]:
+        for field, low, high, default in [("duration_seconds", 1, 1800, 300), ("max_tasks", 1, 8, 2), ("min_completed_analysts", 0, 8, 0), ("min_native_requests", 0, 256, 0)]:
+            value = case.get(field, default)
+            if type(value) is not int or not low <= value <= high:
+                raise ValueError("invalid bounded case setting: " + field)
+    # An optional real-repository suite pins complete sources and exact
+    # contiguous excerpts. Refuse drift before starting a host/model request.
+    for pin in suite.get("source_pins", []):
+        source_root = Path(__file__).resolve().parents[2]
+        relative = Path(pin["path"])
+        source = (source_root / relative).resolve()
+        if relative.is_absolute() or not source.is_relative_to(source_root):
+            raise ValueError("source pin must stay within the repository")
+        text = source.read_text(encoding="utf-8")
+        excerpt = text[pin["character_start"]:pin["character_end"]]
+        documents = [doc for doc in suite["documents"] if doc["id"] == pin["document_id"]]
+        if (hashlib.sha256(text.encode()).hexdigest() != pin["sha256_utf8_lf"]
+                or hashlib.sha256(excerpt.encode()).hexdigest() != pin["excerpt_sha256_utf8_lf"]
+                or len(documents) != 1 or documents[0]["text"] != excerpt):
+            raise ValueError("repository source or exact excerpt changed: " + pin["path"])
     ids = [case["id"] for case in suite["cases"]]
     if len(set(ids)) != len(ids) or any(not 1 <= len(value) <= 64 or any(c not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-" for c in value) for value in ids):
         raise ValueError("invalid or duplicate isolated case identity")

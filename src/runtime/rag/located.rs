@@ -90,7 +90,16 @@ impl SearchResult {
                 }
             }
             if candidates.len() != 1 {
-                return Err(invalid("source locator was not retrieved or is ambiguous; use exact document_id, corpus_revision and start"));
+                return Err(invalid(&format!("citation {} source locator was not retrieved or is ambiguous; use exact document_id, corpus_revision and start", i + 1)));
+            }
+            // Give the repair model the failed ordinal, not an opaque combined
+            // marker/provenance error. Never replace its quote with source text.
+            let chunk = candidates.first_key_value().unwrap().1;
+            if !chunk.text.contains(&citation.quote) {
+                return Err(invalid(&format!(
+                    "citation {} quote is not an exact substring of its retrieved chunk.text; copy the source body exactly or remove that citation and its marker",
+                    i + 1
+                )));
             }
             let id = (*candidates.first_key_value().unwrap().0).to_string();
             citations.push(Citation {
@@ -125,9 +134,14 @@ impl SearchResult {
         }
         rendered.push_str(tail);
         if seen.len() != mappings.len() {
-            return Err(invalid(
-                "every located citation needs its ordinal text marker",
-            ));
+            let missing = (1..=mappings.len())
+                .filter(|ordinal| !seen.contains(ordinal))
+                .map(|ordinal| format!("[[{ordinal}]]"))
+                .collect::<Vec<_>>();
+            return Err(invalid(&format!(
+                "every located citation needs its ordinal text marker; missing {}",
+                missing.join(", ")
+            )));
         }
         let verified = Self::verify_all(
             results,

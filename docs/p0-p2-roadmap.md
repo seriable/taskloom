@@ -132,6 +132,23 @@ injection disabled; old fault probes remain retained. See
 PEER lifecycle and semantic/retrieval gates remain open, so the full P0 package
 is still incomplete.
 
+Later 2026-11-28 contract increment: citation contracts can carry a host-selected
+JSON Schema for the original answer. The schema and exact source/quote/coverage
+checks must pass together; repairs retain only the original read-only retrieval
+grants, and changed schemas refuse old-run resume. SDK/API planning tests and a
+real Qwen single-source checklist smoke cover this bounded structural gate.
+The broader v9 three-case native campaign still failed 0/3 on malformed/missing
+fields or provenance. The smoke passed one case with six zero-priced requests;
+it is not complex-task quality. Native claim-support controls scored only
+72.2%/33.3% in the first rubric and 61.1%/61.1% after clearer instructions, with
+2/7 known contradictions identified in both. Neither judge passed its gates.
+The v7 full-topic audit found only 1/3 complete even though the original
+mechanical counter reported 2/3: the submitted-draft output omitted the
+explicit reservation-timing requirement. Exact matches do not establish truth
+or complete task coverage. Failures remain retained in the new acceptance
+receipt; see `final-output.md` and
+`acceptance/p0-output-contract-20261128.json`. P0 remains open.
+
 ## P0.2 — Default research retrieval
 
 - [x] Retrieve evidence through titles and useful metadata as well as body text,

@@ -116,6 +116,33 @@ fn wrong_locator_quote_and_duplicate_source_never_receive_fuzzy_repair() {
 }
 
 #[test]
+fn invented_quote_diagnostic_names_ordinal_without_rewriting_source() {
+    let a = evidence("first", "The source requires exact approval.", 0, 7);
+    let b = evidence(
+        "second",
+        "Unknown effects require observed reconciliation.",
+        0,
+        7,
+    );
+    let mut second = located(&b);
+    second.quote = "Automatically repeat the write.".into();
+    let error = SearchResult::verify_located_all(
+        &[a.clone(), b],
+        LocatedReport {
+            text: "First [[1]], second [[2]].".into(),
+            citations: vec![located(&a), second],
+        },
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("citation 2 quote is not an exact substring"));
+    assert!(!error
+        .to_string()
+        .contains("The source requires exact approval."));
+}
+
+#[test]
 fn ordinal_contract_rejects_missing_noncanonical_unknown_and_hash_markers() {
     let e = evidence(
         "approval",
@@ -146,6 +173,16 @@ fn ordinal_contract_rejects_missing_noncanonical_unknown_and_hash_markers() {
             "{text}"
         );
     }
+    let other = evidence("recovery", "Unknown effects require reconciliation.", 0, 7);
+    let error = SearchResult::verify_located_all(
+        &[e.clone(), other.clone()],
+        LocatedReport {
+            text: "Only one marker [[1]].".into(),
+            citations: vec![located(&e), located(&other)],
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("missing [[2]]"));
 }
 
 #[test]

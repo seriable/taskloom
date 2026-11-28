@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Citation output contracts optionally bind a JSON Schema to the original
+  model answer. Structure and exact source provenance/coverage must pass
+  together before durable success; repairs retain read-only retrieval grants.
+  Missing fields remain failures. Native checklist smoke passed, while broader
+  Qwen collaboration and semantic-judge campaigns failed their quality gates.
+  See `docs/final-output.md`; no overall model/framework quality claim is made.
+
 - Optional host lexical stop words and exact long alphanumeric identifier
   constraints prevent function-word and absent-record false recalls without
   rewriting citable source text. Empty/disabled settings preserve legacy

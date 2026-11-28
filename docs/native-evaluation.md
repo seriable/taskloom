@@ -6,6 +6,12 @@ The retained initial results include failures; none establish competitor leaders
 Model weights, virtual environments and raw campaigns stay under ignored `target/`.
 Only example source and reviewed evidence summaries belong in the open-source repo.
 
+Later [claim-support and collaboration controls](claim-support-evaluation.md)
+retain reasoning/format experiments, an actual repository audit failure and a
+narrow cited answer-schema native smoke. They explicitly separate mechanical
+topic/provenance checks from complete task coverage and corpus-relative semantic
+judge agreement. Neither of the two native judge control campaigns passed.
+
 ## Local model setup
 
 The bounded downloader fetches public `Qwen/Qwen3-1.7B` and
